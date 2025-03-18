@@ -564,7 +564,7 @@ class CrossMatch:
 def main():
     """Main function to run the cross-match."""
     # Configuration
-    primvs_file = "/path/to/PRIMVS.fits"  # Change to your PRIMVS file path
+    primvs_file = "../PRIMVS_P.fits"  # Change to your PRIMVS file path
     output_dir = "./primvs_tess_crossmatch"
     search_radius = 30  # arcseconds
     
