@@ -102,101 +102,193 @@ class CrossMatch:
                     logger.warning(f"Start index {start_idx} exceeds total rows {total_rows}")
                     return []
                 
-                # Get column names
-                col_names = hdul[data_hdu].columns.names
-                
-                # Define the columns we need
-                needed_cols = ['sourceid', 'ra', 'dec']
-                
-                # Check if optional columns exist
-                optional_cols = ['mag_avg', 'true_period']
-                for col in optional_cols:
-                    if col in col_names:
-                        needed_cols.append(col)
-                
-                # Read the chunk rows as a slice directly - this follows your pattern
-                # from your other PRIMVS scripts
+                # Read the chunk rows - we only need ra/dec for initial query
                 chunk_data = Table(hdul[data_hdu].data[start_idx:end_idx])
-                
-                # Filter to only include the columns we need
-                chunk_data = chunk_data[needed_cols]
                 
             # Log the chunk info
             logger.info(f"Processing chunk with {len(chunk_data)} sources ({start_idx} to {end_idx-1})")
             
-            # Create SkyCoord object for this chunk
-            chunk_coords = SkyCoord(
+            # Instead of doing individual queries, we'll group sources for batch querying
+            # Prepare coordinates for batch processing
+            all_coords = SkyCoord(
                 chunk_data['ra'], 
                 chunk_data['dec'], 
                 unit=(u.degree, u.degree)
             )
             
-            # Process each source in the chunk
+            # Use spatial batching - divide sources into smaller batches for MAST queries
+            spatial_batch_size = 20  # Process this many sources per MAST query
             chunk_results = []
-            for j, primvs_coord in enumerate(chunk_coords):
-                primvs_idx = j
-                primvs_id = chunk_data['sourceid'][primvs_idx]
+            
+            # Process spatial batches
+            for sb_idx in range(0, len(all_coords), spatial_batch_size):
+                sb_end = min(sb_idx + spatial_batch_size, len(all_coords))
+                spatial_batch_coords = all_coords[sb_idx:sb_end]
+                spatial_batch_data = chunk_data[sb_idx:sb_end]
                 
-                # Perform cone search around this coordinate
-                try:
-                    catalog_data = Catalogs.query_region(
-                        coordinates=primvs_coord,
-                        radius=self.search_radius,
-                        catalog="TIC"
-                    )
-                    
-                    # If no matches found, continue to next source
-                    if len(catalog_data) == 0:
-                        continue
-                    
-                    # Create SkyCoord object for TIC results
-                    catalog_coords = SkyCoord(
-                        catalog_data['ra'], 
-                        catalog_data['dec'], 
-                        unit=(u.degree, u.degree)
-                    )
-                    
-                    # Calculate separations
-                    separations = primvs_coord.separation(catalog_coords)
-                    
-                    # Record all matches within search radius
-                    for k, sep in enumerate(separations):
-                        if sep <= self.search_radius:
-                            match_info = {
-                                'primvs_id': primvs_id,
-                                'primvs_ra': primvs_coord.ra.degree,
-                                'primvs_dec': primvs_coord.dec.degree,
-                                'tess_id': catalog_data[k]['ID'],
-                                'tess_ra': catalog_data[k]['ra'],
-                                'tess_dec': catalog_data[k]['dec'],
-                                'tess_mag': catalog_data[k]['Tmag'],
-                                'separation_arcsec': sep.arcsecond,
-                                'batch_size': len(catalog_data)  # Number of TESS matches for this PRIMVS source
-                            }
-                            
-                            # Add optional columns if available
-                            if 'mag_avg' in chunk_data.colnames:
-                                match_info['primvs_mag_avg'] = chunk_data['mag_avg'][primvs_idx]
-                            else:
-                                match_info['primvs_mag_avg'] = np.nan
-                                
-                            if 'true_period' in chunk_data.colnames and chunk_data['true_period'][primvs_idx] > 0:
-                                match_info['primvs_log_period'] = np.log10(chunk_data['true_period'][primvs_idx])
-                            else:
-                                match_info['primvs_log_period'] = np.nan
-                                
-                            chunk_results.append(match_info)
-                    
-                except Exception as e:
-                    logger.warning(f"Error processing source {primvs_id}: {str(e)}")
+                # Skip if empty
+                if len(spatial_batch_coords) == 0:
                     continue
-                    
+                
+                # Get the central coordinate of this batch for the cone search
+                central_coord = spatial_batch_coords[len(spatial_batch_coords) // 2]
+                
+                # Calculate the maximum separation between any point and the central point
+                # This ensures our search radius covers all sources in the batch
+                max_separation = max([central_coord.separation(c).arcsec for c in spatial_batch_coords])
+                
+                # Add our standard search radius to ensure we find matches for all sources
+                total_search_radius = (max_separation + self.search_radius.value) * u.arcsec
+                
+                # Limit the search radius to something reasonable
+                if total_search_radius > 300 * u.arcsec:
+                    # Process this batch one by one instead
+                    for j in range(len(spatial_batch_coords)):
+                        # Individual cone search
+                        primvs_coord = spatial_batch_coords[j]
+                        primvs_idx = sb_idx + j
+                        primvs_id = chunk_data['sourceid'][primvs_idx]
+                        
+                        try:
+                            catalog_data = Catalogs.query_region(
+                                coordinates=primvs_coord,
+                                radius=self.search_radius,
+                                catalog="TIC"
+                            )
+                            
+                            # Process any matches
+                            if len(catalog_data) > 0:
+                                catalog_coords = SkyCoord(
+                                    catalog_data['ra'], 
+                                    catalog_data['dec'], 
+                                    unit=(u.degree, u.degree)
+                                )
+                                
+                                separations = primvs_coord.separation(catalog_coords)
+                                
+                                for k, sep in enumerate(separations):
+                                    if sep <= self.search_radius:
+                                        match_info = self._create_match_info(
+                                            primvs_id=primvs_id,
+                                            primvs_coord=primvs_coord,
+                                            primvs_data=chunk_data[primvs_idx],
+                                            tess_data=catalog_data[k],
+                                            separation=sep,
+                                            match_count=len(catalog_data)
+                                        )
+                                        chunk_results.append(match_info)
+                        except Exception as e:
+                            logger.warning(f"Error in individual query for source {primvs_id}: {str(e)}")
+                            continue
+                else:
+                    # Perform a single cone search for this spatial batch
+                    try:
+                        catalog_data = Catalogs.query_region(
+                            coordinates=central_coord,
+                            radius=total_search_radius,
+                            catalog="TIC"
+                        )
+                        
+                        # If we have matches, check each source in our batch
+                        if len(catalog_data) > 0:
+                            catalog_coords = SkyCoord(
+                                catalog_data['ra'], 
+                                catalog_data['dec'], 
+                                unit=(u.degree, u.degree)
+                            )
+                            
+                            # For each PRIMVS source in this spatial batch
+                            for j, primvs_coord in enumerate(spatial_batch_coords):
+                                primvs_idx = sb_idx + j
+                                primvs_id = chunk_data['sourceid'][primvs_idx]
+                                
+                                # Calculate separations from this PRIMVS source to all TIC sources
+                                separations = primvs_coord.separation(catalog_coords)
+                                
+                                # Record matches within our original search radius
+                                for k, sep in enumerate(separations):
+                                    if sep <= self.search_radius:
+                                        match_info = self._create_match_info(
+                                            primvs_id=primvs_id,
+                                            primvs_coord=primvs_coord,
+                                            primvs_data=chunk_data[primvs_idx],
+                                            tess_data=catalog_data[k],
+                                            separation=sep,
+                                            match_count=len(np.where(separations <= self.search_radius)[0])
+                                        )
+                                        chunk_results.append(match_info)
+                    except Exception as e:
+                        logger.warning(f"Error in batch query: {str(e)}")
+                        # Fall back to individual queries if batch fails
+                        for j in range(len(spatial_batch_coords)):
+                            primvs_coord = spatial_batch_coords[j]
+                            primvs_idx = sb_idx + j
+                            primvs_id = chunk_data['sourceid'][primvs_idx]
+                            
+                            try:
+                                catalog_data = Catalogs.query_region(
+                                    coordinates=primvs_coord,
+                                    radius=self.search_radius,
+                                    catalog="TIC"
+                                )
+                                
+                                if len(catalog_data) > 0:
+                                    catalog_coords = SkyCoord(
+                                        catalog_data['ra'], 
+                                        catalog_data['dec'], 
+                                        unit=(u.degree, u.degree)
+                                    )
+                                    
+                                    separations = primvs_coord.separation(catalog_coords)
+                                    
+                                    for k, sep in enumerate(separations):
+                                        if sep <= self.search_radius:
+                                            match_info = self._create_match_info(
+                                                primvs_id=primvs_id,
+                                                primvs_coord=primvs_coord,
+                                                primvs_data=chunk_data[primvs_idx],
+                                                tess_data=catalog_data[k],
+                                                separation=sep,
+                                                match_count=len(catalog_data)
+                                            )
+                                            chunk_results.append(match_info)
+                            except Exception as e2:
+                                logger.warning(f"Error in fallback query for source {primvs_id}: {str(e2)}")
+                                continue
+            
             logger.info(f"Found {len(chunk_results)} matches in chunk {start_idx} to {end_idx-1}")
             return chunk_results
             
         except Exception as e:
             logger.error(f"Error processing chunk {start_idx} to {end_idx-1}: {str(e)}")
             return []
+    
+    def _create_match_info(self, primvs_id, primvs_coord, primvs_data, tess_data, separation, match_count):
+        """Create a standardized match info dictionary"""
+        match_info = {
+            'primvs_id': primvs_id,
+            'primvs_ra': primvs_coord.ra.degree,
+            'primvs_dec': primvs_coord.dec.degree,
+            'tess_id': tess_data['ID'],
+            'tess_ra': tess_data['ra'],
+            'tess_dec': tess_data['dec'],
+            'tess_mag': tess_data['Tmag'],
+            'separation_arcsec': separation.arcsecond,
+            'batch_size': match_count  # Number of TESS matches for this PRIMVS source
+        }
+        
+        # Add optional columns if available
+        if 'mag_avg' in primvs_data.colnames:
+            match_info['primvs_mag_avg'] = primvs_data['mag_avg']
+        else:
+            match_info['primvs_mag_avg'] = np.nan
+            
+        if 'true_period' in primvs_data.colnames and primvs_data['true_period'] > 0:
+            match_info['primvs_log_period'] = np.log10(primvs_data['true_period'])
+        else:
+            match_info['primvs_log_period'] = np.nan
+            
+        return match_info
 
     def process_batch(self, batch_idx):
         """
@@ -230,44 +322,49 @@ class CrossMatch:
             return False
         
         start_time = time.time()
+        
+        # Use much larger batch size for faster processing
+        self.batch_size = min(10000, self.total_sources // 100)  # Avoid too many tiny batches
         num_batches = (self.total_sources + self.batch_size - 1) // self.batch_size
         
-        logger.info(f"Starting cross-match with {num_batches} batches")
+        logger.info(f"Starting cross-match with {num_batches} batches (batch size: {self.batch_size})")
         
         # Initialize intermediate results file to save results as we go
         interim_results_file = os.path.join(self.output_dir, "interim_results.csv")
         interim_header_written = False
         
-        # Process batches with a progress bar
-        with tqdm(total=num_batches, desc="Processing batches") as pbar:
-            for batch_idx in range(num_batches):
-                try:
-                    # Process this batch
-                    batch_results = self.process_batch(batch_idx)
+        # Process batches in parallel
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all batches for processing
+            futures = {executor.submit(self.process_batch, i): i for i in range(num_batches)}
+            
+            # Process results as they complete
+            with tqdm(total=num_batches, desc="Processing batches") as pbar:
+                for future in as_completed(futures):
+                    batch_idx = futures[future]
+                    try:
+                        batch_results = future.result()
+                        
+                        # Save batch results to the intermediate file
+                        if batch_results:
+                            batch_df = pd.DataFrame(batch_results)
+                            
+                            # Write header only once
+                            batch_df.to_csv(
+                                interim_results_file, 
+                                mode='a', 
+                                header=not interim_header_written,
+                                index=False
+                            )
+                            
+                            if not interim_header_written:
+                                interim_header_written = True
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing batch {batch_idx}: {str(e)}")
                     
-                    # Save batch results to the intermediate file
-                    if batch_results:
-                        batch_df = pd.DataFrame(batch_results)
-                        
-                        # Write header only once
-                        batch_df.to_csv(
-                            interim_results_file, 
-                            mode='a', 
-                            header=not interim_header_written,
-                            index=False
-                        )
-                        
-                        if not interim_header_written:
-                            interim_header_written = True
-                        
-                        # Also keep in memory for statistics
-                        self.results.extend(batch_results)
-                        
-                except Exception as e:
-                    logger.error(f"Error processing batch {batch_idx}: {str(e)}")
-                
-                # Update progress bar
-                pbar.update(1)
+                    # Update progress bar
+                    pbar.update(1)
         
         # Load all results from the intermediate file
         if os.path.exists(interim_results_file) and os.path.getsize(interim_results_file) > 0:
@@ -276,18 +373,19 @@ class CrossMatch:
                 logger.info(f"Loaded {len(self.matches_df)} matches from interim results file")
             except Exception as e:
                 logger.error(f"Error loading interim results: {str(e)}")
-                # Fallback to in-memory results
-                self.matches_df = pd.DataFrame(self.results)
+                # Fallback to empty DataFrame
+                self.matches_df = pd.DataFrame()
         else:
-            self.matches_df = pd.DataFrame(self.results)
+            self.matches_df = pd.DataFrame()
         
         # Calculate elapsed time
         elapsed_time = time.time() - start_time
         logger.info(f"Cross-match completed in {elapsed_time:.2f} seconds")
-        logger.info(f"Found {len(self.matches_df)} total matches")
         
         # Calculate statistics
         if not self.matches_df.empty:
+            logger.info(f"Found {len(self.matches_df)} total matches")
+            
             primvs_with_match = self.matches_df['primvs_id'].nunique()
             tess_matched = self.matches_df['tess_id'].nunique()
             logger.info(f"PRIMVS sources with at least one match: {primvs_with_match} ({100*primvs_with_match/self.total_sources:.2f}%)")
@@ -302,12 +400,12 @@ class CrossMatch:
             tess_multiple_matches = (tess_multiple_matches > 1).sum()
             logger.info(f"TESS sources matching multiple PRIMVS sources: {tess_multiple_matches}")
             
-            # Clean up interim file
-            try:
-                os.remove(interim_results_file)
-                logger.info(f"Removed interim results file")
-            except:
-                pass
+        # Clean up interim file - keep it for now as a backup
+        # try:
+        #     os.remove(interim_results_file)
+        #     logger.info(f"Removed interim results file")
+        # except:
+        #     pass
         
         return True
 
@@ -466,19 +564,21 @@ class CrossMatch:
 def main():
     """Main function to run the cross-match."""
     # Configuration
-    primvs_file = "../PRIMVS_P.fits"  # Change to your PRIMVS file path
+    primvs_file = "/path/to/PRIMVS.fits"  # Change to your PRIMVS file path
     output_dir = "./primvs_tess_crossmatch"
     search_radius = 30  # arcseconds
     
-    # Memory optimization parameters
-    batch_size = 1000  # Process 1000 sources at a time to minimize memory usage
+    # Performance optimization parameters
+    batch_size = 10000  # Process 10,000 sources at a time
+    max_workers = 8     # Use 8 parallel threads for processing
     
     # Initialize cross-match object
     crossmatch = CrossMatch(
         primvs_file=primvs_file,
         output_dir=output_dir,
         search_radius=search_radius,
-        batch_size=batch_size
+        batch_size=batch_size,
+        max_workers=max_workers
     )
     
     try:
@@ -489,10 +589,6 @@ def main():
             
             # Analyze results
             crossmatch.analyze_matches()
-            
-            # Check for available TESS observations (optional)
-            # Uncomment the next line to query TESS observations for a sample of matches
-            # crossmatch.query_tess_observations(limit=50)
             
             logger.info("Cross-match process completed successfully!")
         else:
