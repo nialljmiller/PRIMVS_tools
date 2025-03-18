@@ -71,10 +71,15 @@ class CrossMatch:
         """Get information about the PRIMVS FITS file without loading it all."""
         try:
             with fits.open(self.primvs_file, memmap=True) as hdul:
-                # Get info from the first HDU with data (usually the 1st extension)
-                data_hdu = 1 if len(hdul) > 1 else 0
+                # Get data from HDU 1, which is consistent with other PRIMVS scripts
+                data_hdu = 1  # PRIMVS files consistently use extension 1 for data
                 num_rows = hdul[data_hdu].header.get('NAXIS2', 0)
-                logger.info(f"PRIMVS file contains {num_rows} sources")
+                logger.info(f"PRIMVS file contains {num_rows} sources in HDU {data_hdu}")
+                
+                # Also log available columns for debugging
+                columns = hdul[data_hdu].columns.names
+                logger.info(f"Available columns: {', '.join(columns[:min(10, len(columns))])}{'...' if len(columns) > 10 else ''}")
+                
                 return num_rows
         except Exception as e:
             logger.error(f"Error reading PRIMVS file info: {str(e)}")
@@ -85,17 +90,38 @@ class CrossMatch:
         try:
             # Read only the specified rows from the FITS file
             with fits.open(self.primvs_file, memmap=True) as hdul:
-                data_hdu = 1 if len(hdul) > 1 else 0
-                # Get only the columns we need
-                cols = ['sourceid', 'ra', 'dec']
-                if 'mag_avg' in hdul[data_hdu].columns.names:
-                    cols.append('mag_avg')
-                if 'true_period' in hdul[data_hdu].columns.names:
-                    cols.append('true_period')
+                # Use HDU 1 for data, consistent with other PRIMVS scripts
+                data_hdu = 1
                 
-                # Read the chunk
-                chunk_data = Table(hdul[data_hdu].data[start_idx:end_idx][cols])
+                # Get the total number of rows
+                total_rows = hdul[data_hdu].header.get('NAXIS2', 0)
+                end_idx = min(end_idx, total_rows)
                 
+                # Make sure we're not asking for rows that don't exist
+                if start_idx >= total_rows:
+                    logger.warning(f"Start index {start_idx} exceeds total rows {total_rows}")
+                    return []
+                
+                # Get column names
+                col_names = hdul[data_hdu].columns.names
+                
+                # Define the columns we need
+                needed_cols = ['sourceid', 'ra', 'dec']
+                
+                # Check if optional columns exist
+                optional_cols = ['mag_avg', 'true_period']
+                for col in optional_cols:
+                    if col in col_names:
+                        needed_cols.append(col)
+                
+                # Read the chunk rows as a slice directly - this follows your pattern
+                # from your other PRIMVS scripts
+                chunk_data = Table(hdul[data_hdu].data[start_idx:end_idx])
+                
+                # Filter to only include the columns we need
+                chunk_data = chunk_data[needed_cols]
+                
+            # Log the chunk info
             logger.info(f"Processing chunk with {len(chunk_data)} sources ({start_idx} to {end_idx-1})")
             
             # Create SkyCoord object for this chunk
@@ -440,7 +466,7 @@ class CrossMatch:
 def main():
     """Main function to run the cross-match."""
     # Configuration
-    primvs_file = "PRIMVS_P.fits"  # Change to your PRIMVS file path
+    primvs_file = "/path/to/PRIMVS.fits"  # Change to your PRIMVS file path
     output_dir = "./primvs_tess_crossmatch"
     search_radius = 30  # arcseconds
     
