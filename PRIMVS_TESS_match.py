@@ -249,22 +249,41 @@ class PrimvsTessCrossMatch:
                 dec_min = bounds['dec_min'] + j * dec_step
                 dec_max = bounds['dec_min'] + (j + 1) * dec_step
                 
-                # Prepare polygon constraint for this chunk
-                constraints = {
-                    'coordinates': f'{ra_min},{dec_min},{ra_max},{dec_max}',
-                    'coordformat': 'box',
-                    'objType': 'STAR'
-                }
+                # Create a central coordinate and radius for this chunk (preferred MAST format)
+                # This works better than the box format which was causing errors
+                ra_center = (ra_min + ra_max) / 2.0
+                dec_center = (dec_min + dec_max) / 2.0
+                
+                # Use Euclidean distance for radius calculation - conservative estimate
+                radius_deg = np.sqrt(((ra_max - ra_min) / 2.0)**2 + ((dec_max - dec_min) / 2.0)**2)
+                
+                # Convert to arcminutes (MAST uses arcmin for radius)
+                radius_arcmin = radius_deg * 60.0
+                
+                # Add some buffer
+                radius_arcmin *= 1.2
+                
+                # Prepare center coordinate for the cone search
+                center_coord = SkyCoord(ra_center, dec_center, unit='deg')
                 
                 # Add retries for robustness
                 max_retries = 3
                 for retry in range(max_retries):
                     try:
-                        chunk_catalog = Catalogs.query_criteria(catalog="TIC", **constraints)
+                        # Use cone search instead of box search
+                        logger.info(f"Querying TIC around RA={ra_center:.3f}, Dec={dec_center:.3f} with radius={radius_arcmin:.1f} arcmin")
+                        chunk_catalog = Catalogs.query_region(
+                            coordinates=center_coord,
+                            radius=radius_arcmin * u.arcmin,
+                            catalog="TIC"
+                        )
+                        
                         if len(chunk_catalog) > 0:
                             tic_chunks.append(chunk_catalog)
                             total_rows += len(chunk_catalog)
                             logger.info(f"Downloaded chunk {i*dec_chunks+j+1}/{ra_chunks*dec_chunks}: {len(chunk_catalog)} sources")
+                        else:
+                            logger.warning(f"No sources found in chunk {i*dec_chunks+j+1}")
                         break
                     except Exception as e:
                         if retry < max_retries - 1:
@@ -276,6 +295,10 @@ class PrimvsTessCrossMatch:
                 
                 # Update progress
                 chunk_iter.update(1)
+                
+                # Sleep between chunks to avoid overloading the server
+                if i*dec_chunks+j+1 < ra_chunks*dec_chunks:
+                    time.sleep(2)
         
         chunk_iter.close()
         
