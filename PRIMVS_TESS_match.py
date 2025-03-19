@@ -205,13 +205,13 @@ class PrimvsTessCrossMatch:
         except Exception as e:
             logger.error(f"Error reading PRIMVS file: {str(e)}")
             raise
-    
+
     def download_tic_catalog(self):
         """
-        Pre-download relevant portions of the TIC catalog to avoid excessive 
-        individual queries during cross-matching.
+        Pre-download relevant portions of the TIC catalog using parallel processing
+        for improved efficiency.
         """
-        # Check if we already have a cached catalog
+        # Check cache first (existing implementation)
         if self.tic_cache_file and os.path.exists(self.tic_cache_file):
             try:
                 logger.info(f"Loading TIC catalog from cache: {self.tic_cache_file}")
@@ -220,27 +220,19 @@ class PrimvsTessCrossMatch:
                 return True
             except Exception as e:
                 logger.warning(f"Error loading cached TIC catalog: {str(e)}")
-                logger.warning("Will download fresh catalog")
         
         # Use data bounds or vvv bounds
         bounds = getattr(self, 'data_bounds', self.vvv_bounds)
         
-        # Split the area into manageable chunks to avoid timeouts
-        # MAST has query limits, so we'll divide the sky into smaller regions
-        ra_chunks = 100
-        dec_chunks = 50
+        # Split the area into manageable chunks
+        ra_chunks = 10  # Reduced number of chunks for better parallelization
+        dec_chunks = 5
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
         dec_step = (bounds['dec_max'] - bounds['dec_min']) / dec_chunks
         
-        tic_chunks = []
-        total_rows = 0
-        
-        logger.info(f"Downloading TIC catalog in {ra_chunks}x{dec_chunks} chunks")
-        
-        # Create a progress bar for the chunks
-        chunk_iter = tqdm(total=ra_chunks * dec_chunks, desc="Downloading TIC chunks")
-        
+        # Create all chunk specifications first
+        chunk_specs = []
         for i in range(ra_chunks):
             ra_min = bounds['ra_min'] + i * ra_step
             ra_max = bounds['ra_min'] + (i + 1) * ra_step
@@ -249,59 +241,75 @@ class PrimvsTessCrossMatch:
                 dec_min = bounds['dec_min'] + j * dec_step
                 dec_max = bounds['dec_min'] + (j + 1) * dec_step
                 
-                # Create a central coordinate and radius for this chunk (preferred MAST format)
-                # This works better than the box format which was causing errors
+                # Calculate center and radius
                 ra_center = (ra_min + ra_max) / 2.0
                 dec_center = (dec_min + dec_max) / 2.0
-                
-                # Use Euclidean distance for radius calculation - conservative estimate
                 radius_deg = np.sqrt(((ra_max - ra_min) / 2.0)**2 + ((dec_max - dec_min) / 2.0)**2)
+                radius_arcmin = radius_deg * 60.0 * 1.2  # Add 20% buffer
                 
-                # Convert to arcminutes (MAST uses arcmin for radius)
-                radius_arcmin = radius_deg * 60.0
-                
-                # Add some buffer
-                radius_arcmin *= 1.2
-                
-                # Prepare center coordinate for the cone search
-                center_coord = SkyCoord(ra_center, dec_center, unit='deg')
-                
-                # Add retries for robustness
-                max_retries = 3
-                for retry in range(max_retries):
+                chunk_specs.append({
+                    'ra_center': ra_center,
+                    'dec_center': dec_center,
+                    'radius_arcmin': radius_arcmin,
+                    'chunk_id': f"{i}_{j}"
+                })
+        
+        # Define worker function for parallel processing
+        def download_chunk(spec):
+            chunk_id = spec['chunk_id']
+            ra_center = spec['ra_center']
+            dec_center = spec['dec_center']
+            radius_arcmin = spec['radius_arcmin']
+            
+            center_coord = SkyCoord(ra_center, dec_center, unit='deg')
+            
+            # Add retries for robustness
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    logger.info(f"Querying TIC around RA={ra_center:.3f}, Dec={dec_center:.3f} with radius={radius_arcmin:.1f} arcmin")
+                    chunk_catalog = Catalogs.query_region(
+                        coordinates=center_coord,
+                        radius=radius_arcmin * u.arcmin,
+                        catalog="TIC"
+                    )
+                    
+                    logger.info(f"Downloaded chunk {chunk_id}: {len(chunk_catalog)} sources")
+                    return chunk_catalog
+                except Exception as e:
+                    if retry < max_retries - 1:
+                        wait_time = 5 * (retry + 1)
+                        logger.warning(f"Error downloading chunk {chunk_id}: {str(e)}. Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Failed to download chunk {chunk_id} after {max_retries} retries: {str(e)}")
+                        return None
+        
+        # Execute downloads in parallel with controlled concurrency
+        parallel_downloads = min(8, os.cpu_count())  # Limit concurrency to 8 or CPU count, whichever is smaller
+        logger.info(f"Downloading TIC catalog in {len(chunk_specs)} chunks using {parallel_downloads} parallel workers")
+        
+        tic_chunks = []
+        total_rows = 0
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_downloads) as executor:
+            future_to_chunk = {executor.submit(download_chunk, spec): spec for spec in chunk_specs}
+            
+            # Create progress bar
+            with tqdm(total=len(chunk_specs), desc="Downloading TIC chunks") as pbar:
+                for future in concurrent.futures.as_completed(future_to_chunk):
+                    spec = future_to_chunk[future]
                     try:
-                        # Use cone search instead of box search
-                        logger.info(f"Querying TIC around RA={ra_center:.3f}, Dec={dec_center:.3f} with radius={radius_arcmin:.1f} arcmin")
-                        chunk_catalog = Catalogs.query_region(
-                            coordinates=center_coord,
-                            radius=radius_arcmin * u.arcmin,
-                            catalog="TIC"
-                        )
-                        
-                        if len(chunk_catalog) > 0:
+                        chunk_catalog = future.result()
+                        if chunk_catalog is not None and len(chunk_catalog) > 0:
                             tic_chunks.append(chunk_catalog)
                             total_rows += len(chunk_catalog)
-                            logger.info(f"Downloaded chunk {i*dec_chunks+j+1}/{ra_chunks*dec_chunks}: {len(chunk_catalog)} sources")
-                        else:
-                            logger.warning(f"No sources found in chunk {i*dec_chunks+j+1}")
-                        break
                     except Exception as e:
-                        if retry < max_retries - 1:
-                            wait_time = 5 * (retry + 1)
-                            logger.warning(f"Error downloading chunk {i*dec_chunks+j+1}: {str(e)}. Retrying in {wait_time}s...")
-                            time.sleep(wait_time)
-                        else:
-                            logger.error(f"Failed to download chunk after {max_retries} retries: {str(e)}")
-                
-                # Update progress
-                chunk_iter.update(1)
-                
-                # Sleep between chunks to avoid overloading the server
-                if i*dec_chunks+j+1 < ra_chunks*dec_chunks:
-                    time.sleep(2)
+                        logger.error(f"Error processing chunk {spec['chunk_id']}: {str(e)}")
+                    
+                    pbar.update(1)
         
-        chunk_iter.close()
-        
+        # Process results as before
         if not tic_chunks:
             logger.error("Failed to download any TIC data")
             return False
@@ -320,6 +328,8 @@ class PrimvsTessCrossMatch:
         except Exception as e:
             logger.error(f"Error combining TIC chunks: {str(e)}")
             return False
+
+
 
     def process_batch(self, batch_idx, primvs_data):
         """

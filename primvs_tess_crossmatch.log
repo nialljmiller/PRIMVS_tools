@@ -1,0 +1,12 @@
+2025-03-19 14:15:08,700 - INFO - Using 16 CPU cores for parallel processing
+2025-03-19 14:15:08,700 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 14:15:08,700 - INFO - Output directory: tess_crossmatch
+2025-03-19 14:15:08,700 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 14:15:08,700 - INFO - Max download workers: 4
+2025-03-19 14:15:08,705 - WARNING - File may have been truncated: actual file length (2559672320) is smaller than the expected size (8123109120)
+2025-03-19 14:15:08,717 - INFO - Available columns in PRIMVS file: uniqueid, sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error...
+2025-03-19 14:15:08,717 - WARNING - Error converting RA/Dec values: buffer is too small for requested array
+2025-03-19 14:15:08,718 - WARNING - Trying alternate approach to read coordinates...
+2025-03-19 14:15:08,718 - ERROR - Error reading PRIMVS file: buffer is too small for requested array
+2025-03-19 14:15:08,718 - ERROR - Error getting PRIMVS file info: buffer is too small for requested array
+2025-03-19 14:15:08,718 - ERROR - Cross-match process failed!
