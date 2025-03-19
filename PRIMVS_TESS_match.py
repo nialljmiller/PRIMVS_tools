@@ -5,9 +5,8 @@ import pickle
 import logging
 import warnings
 import argparse
-import concurrent.futures
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -209,8 +208,8 @@ class PrimvsTessCrossMatch:
     
     def download_tic_catalog(self):
         """
-        Pre-download relevant portions of the TIC catalog in small, manageable chunks
-        using parallel processing for speed.
+        Pre-download relevant portions of the TIC catalog to avoid excessive 
+        individual queries during cross-matching.
         """
         # Check if we already have a cached catalog
         if self.tic_cache_file and os.path.exists(self.tic_cache_file):
@@ -226,15 +225,22 @@ class PrimvsTessCrossMatch:
         # Use data bounds or vvv bounds
         bounds = getattr(self, 'data_bounds', self.vvv_bounds)
         
-        # Use many small chunks as requested (100x50)
+        # Split the area into manageable chunks to avoid timeouts
+        # MAST has query limits, so we'll divide the sky into smaller regions
         ra_chunks = 100
         dec_chunks = 50
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
         dec_step = (bounds['dec_max'] - bounds['dec_min']) / dec_chunks
         
-        # Create a list of all coordinates to download
-        chunks_info = []
+        tic_chunks = []
+        total_rows = 0
+        
+        logger.info(f"Downloading TIC catalog in {ra_chunks}x{dec_chunks} chunks")
+        
+        # Create a progress bar for the chunks
+        chunk_iter = tqdm(total=ra_chunks * dec_chunks, desc="Downloading TIC chunks")
+        
         for i in range(ra_chunks):
             ra_min = bounds['ra_min'] + i * ra_step
             ra_max = bounds['ra_min'] + (i + 1) * ra_step
@@ -243,217 +249,77 @@ class PrimvsTessCrossMatch:
                 dec_min = bounds['dec_min'] + j * dec_step
                 dec_max = bounds['dec_min'] + (j + 1) * dec_step
                 
-                # Create a central coordinate and radius for this chunk
+                # Create a central coordinate and radius for this chunk (preferred MAST format)
+                # This works better than the box format which was causing errors
                 ra_center = (ra_min + ra_max) / 2.0
                 dec_center = (dec_min + dec_max) / 2.0
                 
-                # Use a small radius that won't time out (30 arcmin max)
-                # For 100x50 chunks, the radius needs to be much smaller
-                radius_deg = min(0.5, np.sqrt(((ra_max - ra_min) / 2.0)**2 + ((dec_max - dec_min) / 2.0)**2))
-                radius_arcmin = min(30.0, radius_deg * 60.0)
+                # Use Euclidean distance for radius calculation - conservative estimate
+                radius_deg = np.sqrt(((ra_max - ra_min) / 2.0)**2 + ((dec_max - dec_min) / 2.0)**2)
                 
-                # Store chunk info
-                chunks_info.append({
-                    'idx': i*dec_chunks+j+1,
-                    'ra_center': ra_center,
-                    'dec_center': dec_center,
-                    'radius_arcmin': radius_arcmin,
-                    'total_chunks': ra_chunks * dec_chunks
-                })
-        
-        logger.info(f"Downloading TIC catalog in {ra_chunks}x{dec_chunks} chunks using parallel processing")
-        
-        # Create a temporary directory for storing chunk results
-        temp_dir = os.path.join(self.output_dir, "tic_chunks_temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        # Function to download a single chunk in parallel
-        def download_chunk(chunk_info):
-            chunk_idx = chunk_info['idx']
-            ra_center = chunk_info['ra_center']
-            dec_center = chunk_info['dec_center']
-            radius_arcmin = chunk_info['radius_arcmin']
-            total_chunks = chunk_info['total_chunks']
-            
-            # Temporary file path for this chunk
-            chunk_file = os.path.join(temp_dir, f"tic_chunk_{chunk_idx}.fits")
-            
-            # Skip if already downloaded
-            if os.path.exists(chunk_file):
-                try:
-                    chunk_data = Table.read(chunk_file)
-                    return {
-                        'idx': chunk_idx,
-                        'success': True,
-                        'count': len(chunk_data),
-                        'file': chunk_file,
-                        'message': f"Loaded from cache: {len(chunk_data)} sources"
-                    }
-                except Exception:
-                    # If reading fails, continue with download
-                    pass
-            
-            # Prepare center coordinate for the cone search
-            center_coord = SkyCoord(ra_center, dec_center, unit='deg')
-            
-            # Add retries for robustness
-            max_retries = 3
-            for retry in range(max_retries):
-                try:
-                    # Query the TIC catalog
-                    chunk_catalog = Catalogs.query_region(
-                        coordinates=center_coord,
-                        radius=radius_arcmin * u.arcmin,
-                        catalog="TIC"
-                    )
-                    
-                    if len(chunk_catalog) > 0:
-                        # Save to temporary file
-                        chunk_catalog.write(chunk_file, overwrite=True)
-                        
-                        return {
-                            'idx': chunk_idx,
-                            'success': True,
-                            'count': len(chunk_catalog),
-                            'file': chunk_file,
-                            'message': f"Downloaded {len(chunk_catalog)} sources"
-                        }
-                    else:
-                        return {
-                            'idx': chunk_idx,
-                            'success': True,
-                            'count': 0,
-                            'file': None,
-                            'message': "No sources found"
-                        }
-                except Exception as e:
-                    if retry < max_retries - 1:
-                        time.sleep(2 * (retry + 1))
-                    else:
-                        return {
-                            'idx': chunk_idx,
-                            'success': False,
-                            'count': 0,
-                            'file': None,
-                            'message': f"Failed after {max_retries} retries: {str(e)}"
-                        }
-        
-        # Process chunks in parallel
-        chunk_results = []
-        successful_chunks = 0
-        total_sources = 0
-        
-        # Use more workers for downloading since we have many small chunks
-        download_workers = min(24, self.max_workers)
-        logger.info(f"Using {download_workers} parallel workers for TIC catalog download")
-        
-        # Create a fixed chunk log file to avoid too much console output
-        chunk_log_file = os.path.join(self.output_dir, "tic_download_progress.log")
-        with open(chunk_log_file, 'w') as f:
-            f.write(f"Starting TIC download with {ra_chunks}x{dec_chunks} chunks\n")
-        
-        def log_chunk_progress(message):
-            with open(chunk_log_file, 'a') as f:
-                f.write(f"{message}\n")
-        
-        with ThreadPoolExecutor(max_workers=download_workers) as executor:
-            # Submit all chunks
-            future_to_chunk = {executor.submit(download_chunk, chunk_info): chunk_info['idx'] 
-                              for chunk_info in chunks_info}
-            
-            # Process results with a progress bar
-            total_chunks = len(chunks_info)
-            completed = 0
-            
-            with tqdm(total=total_chunks, desc="Downloading TIC chunks") as pbar:
-                for future in as_completed(future_to_chunk):
-                    chunk_idx = future_to_chunk[future]
+                # Convert to arcminutes (MAST uses arcmin for radius)
+                radius_arcmin = radius_deg * 60.0
+                
+                # Add some buffer
+                radius_arcmin *= 1.2
+                
+                # Prepare center coordinate for the cone search
+                center_coord = SkyCoord(ra_center, dec_center, unit='deg')
+                
+                # Add retries for robustness
+                max_retries = 3
+                for retry in range(max_retries):
                     try:
-                        result = future.result()
-                        chunk_results.append(result)
+                        # Use cone search instead of box search
+                        logger.info(f"Querying TIC around RA={ra_center:.3f}, Dec={dec_center:.3f} with radius={radius_arcmin:.1f} arcmin")
+                        chunk_catalog = Catalogs.query_region(
+                            coordinates=center_coord,
+                            radius=radius_arcmin * u.arcmin,
+                            catalog="TIC"
+                        )
                         
-                        if result['success']:
-                            successful_chunks += 1
-                            total_sources += result['count']
-                            log_message = f"Chunk {result['idx']}/{total_chunks}: {result['message']}"
-                            log_chunk_progress(log_message)
-                            
-                            # Only log to console occasionally to avoid flooding
-                            if result['idx'] % 20 == 0 or result['count'] > 1000:
-                                logger.info(log_message)
+                        if len(chunk_catalog) > 0:
+                            tic_chunks.append(chunk_catalog)
+                            total_rows += len(chunk_catalog)
+                            logger.info(f"Downloaded chunk {i*dec_chunks+j+1}/{ra_chunks*dec_chunks}: {len(chunk_catalog)} sources")
                         else:
-                            log_message = f"Chunk {result['idx']}/{total_chunks} failed: {result['message']}"
-                            log_chunk_progress(log_message)
-                            logger.warning(log_message)
-                    
+                            logger.warning(f"No sources found in chunk {i*dec_chunks+j+1}")
+                        break
                     except Exception as e:
-                        error_msg = f"Error processing chunk {chunk_idx}: {str(e)}"
-                        log_chunk_progress(error_msg)
-                        logger.error(error_msg)
-                    
-                    completed += 1
-                    if completed % 10 == 0:
-                        logger.info(f"Progress: {completed}/{total_chunks} chunks, {successful_chunks} successful, {total_sources} sources")
-                    
-                    pbar.update(1)
+                        if retry < max_retries - 1:
+                            wait_time = 5 * (retry + 1)
+                            logger.warning(f"Error downloading chunk {i*dec_chunks+j+1}: {str(e)}. Retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(f"Failed to download chunk after {max_retries} retries: {str(e)}")
+                
+                # Update progress
+                chunk_iter.update(1)
+                
+                # Sleep between chunks to avoid overloading the server
+                if i*dec_chunks+j+1 < ra_chunks*dec_chunks:
+                    time.sleep(2)
         
-        logger.info(f"Downloaded {successful_chunks}/{len(chunks_info)} chunks with {total_sources} total sources")
+        chunk_iter.close()
         
-        # Combine all successful chunks
-        if successful_chunks > 0:
-            try:
-                # Get paths to all successful chunk files
-                chunk_files = [result['file'] for result in chunk_results 
-                              if result['success'] and result['file'] is not None]
-                
-                if not chunk_files:
-                    logger.warning("No valid chunk files found.")
-                    return False
-                
-                # Read and combine all chunks
-                all_chunks = []
-                for chunk_file in tqdm(chunk_files, desc="Reading chunk files"):
-                    try:
-                        chunk_data = Table.read(chunk_file)
-                        if len(chunk_data) > 0:
-                            all_chunks.append(chunk_data)
-                    except Exception as e:
-                        logger.warning(f"Error reading chunk file {chunk_file}: {str(e)}")
-                
-                if not all_chunks:
-                    logger.warning("No valid chunks could be read.")
-                    return False
-                
-                # Combine all chunks
-                logger.info(f"Combining {len(all_chunks)} chunk files...")
-                self.tic_catalog = Table.vstack(all_chunks)
-                logger.info(f"Combined {len(self.tic_catalog)} TIC sources from {len(all_chunks)} chunks")
-                
-                # Save to cache if specified
-                if self.tic_cache_file:
-                    logger.info(f"Saving TIC catalog to cache: {self.tic_cache_file}")
-                    self.tic_catalog.write(self.tic_cache_file, overwrite=True)
-                
-                # Clean up temporary directory if requested
-                keep_temp = os.environ.get('KEEP_TIC_TEMP', 'False').lower() == 'true'
-                if not keep_temp:
-                    logger.info(f"Cleaning up {len(chunk_files)} temporary files...")
-                    for chunk_file in chunk_files:
-                        try:
-                            os.remove(chunk_file)
-                        except Exception:
-                            pass
-                else:
-                    logger.info(f"Keeping temporary files in {temp_dir}")
-                
-                return True
-            except Exception as e:
-                logger.error(f"Error combining TIC chunks: {str(e)}")
-                
-        # If we get here with no chunks, try a different approach - individual cross-matching
-        logger.warning("Bulk download failed. Will fall back to individual source cross-matching.")
-        self.tic_catalog = None
-        return False
+        if not tic_chunks:
+            logger.error("Failed to download any TIC data")
+            return False
+        
+        # Combine all chunks
+        try:
+            self.tic_catalog = Table.vstack(tic_chunks)
+            logger.info(f"Downloaded total of {len(self.tic_catalog)} TIC sources")
+            
+            # Save to cache if specified
+            if self.tic_cache_file:
+                logger.info(f"Saving TIC catalog to cache: {self.tic_cache_file}")
+                self.tic_catalog.write(self.tic_cache_file, overwrite=True)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error combining TIC chunks: {str(e)}")
+            return False
 
     def process_batch(self, batch_idx, primvs_data):
         """
@@ -685,14 +551,12 @@ class PrimvsTessCrossMatch:
         
         start_time = time.time()
         
-        # Try to pre-download TIC catalog, but this may fail with timeouts
-        tic_predownload = self.download_tic_catalog()
-        if not tic_predownload:
-            logger.warning("Pre-download of TIC catalog failed or was skipped.")
-            logger.warning("Will use direct one-by-one query approach (slower but more robust).")
+        # Pre-download TIC catalog if possible
+        if not self.download_tic_catalog():
+            logger.warning("Failed to pre-download TIC catalog. Will use remote queries (slower).")
         
-        # Calculate number of batches - use smaller batches for better checkpointing
-        self.batch_size = min(5000, max(1000, self.total_sources // 1000))
+        # Calculate number of batches
+        self.batch_size = min(10000, max(1000, self.total_sources // 100))  # Adaptive batch size
         num_batches = (self.total_sources + self.batch_size - 1) // self.batch_size
         
         logger.info(f"Starting cross-match with {num_batches} batches (batch size: {self.batch_size})")
@@ -714,12 +578,8 @@ class PrimvsTessCrossMatch:
                 logger.warning(f"Error loading completed batches: {str(e)}")
         
         try:
-            # Limit the number of workers to avoid memory issues
-            effective_workers = min(self.max_workers, 24)  # Limit to 24 workers max for stability
-            logger.info(f"Using {effective_workers} workers for parallel processing")
-            
             # Create a ProcessPoolExecutor for parallel processing
-            with ProcessPoolExecutor(max_workers=effective_workers) as executor:
+            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
                 # Initialize batch futures dictionary
                 futures = {}
                 
@@ -743,68 +603,41 @@ class PrimvsTessCrossMatch:
                         start_idx = batch_idx * self.batch_size
                         end_idx = min((batch_idx + 1) * self.batch_size, self.total_sources)
                         
-                        # Check if there's room for more futures
-                        while len(futures) >= effective_workers * 2:
-                            # Wait for some futures to complete
-                            done, _ = concurrent.futures.wait(
-                                futures.keys(), 
-                                return_when=concurrent.futures.FIRST_COMPLETED,
-                                timeout=10
-                            )
-                            
-                            # Process completed futures
-                            for future in done:
-                                batch_idx_done = futures.pop(future)
-                                try:
-                                    batch_results = future.result()
-                                    process_batch_results(batch_idx_done, batch_results)
-                                except Exception as e:
-                                    logger.error(f"Error processing batch {batch_idx_done}: {str(e)}")
-                        
                         # Read batch data
-                        try:
-                            batch_data = Table(hdul[data_hdu].data[start_idx:end_idx])
-                            
-                            # Submit batch for processing
-                            futures[executor.submit(self.process_batch, batch_idx, batch_data)] = batch_idx
-                            logger.info(f"Submitted batch {batch_idx} for processing")
-                        except Exception as e:
-                            logger.error(f"Error reading batch {batch_idx} data: {str(e)}")
-                            continue
+                        batch_data = Table(hdul[data_hdu].data[start_idx:end_idx])
+                        
+                        # Submit batch for processing
+                        futures[executor.submit(self.process_batch, batch_idx, batch_data)] = batch_idx
                 
-                    # Helper function to process batch results
-                    def process_batch_results(batch_idx, batch_results):
-                        nonlocal interim_header_written
-                        
-                        # Save batch results to the intermediate file
-                        if batch_results:
-                            batch_df = pd.DataFrame(batch_results)
-                            
-                            # Write header only once
-                            batch_df.to_csv(
-                                interim_results_file, 
-                                mode='a', 
-                                header=not interim_header_written and not os.path.exists(interim_results_file),
-                                index=False
-                            )
-                            
-                            if not interim_header_written and os.path.exists(interim_results_file):
-                                interim_header_written = True
-                        
-                        # Mark batch as completed
-                        completed_batches.add(batch_idx)
-                        
-                        # Save completed batches periodically
-                        if len(completed_batches) % 10 == 0:
-                            save_completed_batches()
-                    
-                    # Process remaining futures with a progress bar
+                    # Process results as they complete with a progress bar
                     with tqdm(total=len(futures), desc="Processing batches") as pbar:
                         for future in as_completed(futures):
-                            batch_idx = futures.pop(future)
+                            batch_idx = futures[future]
                             try:
                                 batch_results = future.result()
-                                process_batch_results(batch_idx, batch_results)
+                                
+                                # Save batch results to the intermediate file
+                                if batch_results:
+                                    batch_df = pd.DataFrame(batch_results)
+                                    
+                                    # Write header only once
+                                    batch_df.to_csv(
+                                        interim_results_file, 
+                                        mode='a', 
+                                        header=not interim_header_written and not os.path.exists(interim_results_file),
+                                        index=False
+                                    )
+                                    
+                                    if not interim_header_written and os.path.exists(interim_results_file):
+                                        interim_header_written = True
+                                
+                                # Mark batch as completed
+                                completed_batches.add(batch_idx)
+                                
+                                # Save completed batches periodically
+                                if len(completed_batches) % 10 == 0:
+                                    save_completed_batches()
+                                
                             except Exception as e:
                                 logger.error(f"Error processing batch {batch_idx}: {str(e)}")
                             
