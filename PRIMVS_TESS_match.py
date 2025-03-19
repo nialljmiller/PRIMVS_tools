@@ -286,7 +286,7 @@ class PrimvsTessCrossMatch:
                         return None
         
         # Execute downloads in parallel with controlled concurrency
-        parallel_downloads = min(8, os.cpu_count())  # Limit concurrency to 8 or CPU count, whichever is smaller
+        parallel_downloads = min(20, os.cpu_count())  # Limit concurrency to 8 or CPU count, whichever is smaller
         logger.info(f"Downloading TIC catalog in {len(chunk_specs)} chunks using {parallel_downloads} parallel workers")
         
         tic_chunks = []
