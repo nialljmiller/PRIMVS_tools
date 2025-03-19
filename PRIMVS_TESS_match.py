@@ -142,13 +142,40 @@ class PrimvsTessCrossMatch:
                     step = max(1, num_rows // sample_size)
                     sample_indices = np.arange(0, num_rows, step)
                     
-                    ra_sample = np.array(hdul[data_hdu].data['ra'][sample_indices])
-                    dec_sample = np.array(hdul[data_hdu].data['dec'][sample_indices])
-                    
-                    # Filter out invalid values
-                    valid_mask = np.isfinite(ra_sample) & np.isfinite(dec_sample)
-                    ra_sample = ra_sample[valid_mask]
-                    dec_sample = dec_sample[valid_mask]
+                    # Safely extract and convert RA/Dec to float values
+                    try:
+                        ra_sample = hdul[data_hdu].data['ra'][sample_indices]
+                        dec_sample = hdul[data_hdu].data['dec'][sample_indices]
+                        
+                        # Convert to numeric values, replacing non-numeric with NaN
+                        ra_sample = np.array([float(val) if isinstance(val, (int, float, np.number)) 
+                                            else np.nan for val in ra_sample])
+                        dec_sample = np.array([float(val) if isinstance(val, (int, float, np.number)) 
+                                             else np.nan for val in dec_sample])
+                        
+                        # Filter out invalid values
+                        valid_mask = ~np.isnan(ra_sample) & ~np.isnan(dec_sample)
+                        ra_sample = ra_sample[valid_mask]
+                        dec_sample = dec_sample[valid_mask]
+                        
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error converting RA/Dec values: {str(e)}")
+                        logger.warning("Trying alternate approach to read coordinates...")
+                        
+                        # Alternative approach: read data as a Table first
+                        sample_table = Table(hdul[data_hdu].data[sample_indices])
+                        
+                        # Convert columns to numeric, forcing errors to become NaN
+                        for colname in ['ra', 'dec']:
+                            sample_table[colname] = sample_table[colname].astype(np.float64, copy=True)
+                        
+                        ra_sample = sample_table['ra'].data
+                        dec_sample = sample_table['dec'].data
+                        
+                        # Filter out invalid values
+                        valid_mask = np.isfinite(ra_sample) & np.isfinite(dec_sample)
+                        ra_sample = ra_sample[valid_mask]
+                        dec_sample = dec_sample[valid_mask]
                     
                     if len(ra_sample) > 0:
                         self.data_bounds = {
@@ -294,23 +321,42 @@ class PrimvsTessCrossMatch:
         
         # Create SkyCoord objects for the PRIMVS sources
         try:
-            primvs_coords = SkyCoord(primvs_data['ra'], primvs_data['dec'], unit='deg')
+            # First, ensure the RA/Dec values are numeric
+            for col in ['ra', 'dec']:
+                if col in primvs_data.colnames:
+                    # Try to convert to float64 - will set invalid values to NaN
+                    try:
+                        primvs_data[col] = primvs_data[col].astype(np.float64)
+                    except Exception as e:
+                        logger.warning(f"Error converting {col} to float: {str(e)}")
+                        # Alternative approach for problematic data
+                        temp_col = []
+                        for val in primvs_data[col]:
+                            try:
+                                temp_col.append(float(val))
+                            except (ValueError, TypeError):
+                                temp_col.append(np.nan)
+                        primvs_data[col] = temp_col
+            
+            # Filter out rows with invalid coordinates
+            valid_mask = np.isfinite(primvs_data['ra']) & np.isfinite(primvs_data['dec'])
+            valid_data = primvs_data[valid_mask]
+            
+            if len(valid_data) == 0:
+                logger.warning(f"No valid coordinates in batch {batch_idx}. Skipping.")
+                return []
+                
+            primvs_coords = SkyCoord(valid_data['ra'], valid_data['dec'], unit='deg')
+            
         except Exception as e:
             logger.error(f"Error creating SkyCoord for PRIMVS batch {batch_idx}: {str(e)}")
-            # Try to salvage valid coordinates
-            valid_mask = np.isfinite(primvs_data['ra']) & np.isfinite(primvs_data['dec'])
-            if not np.any(valid_mask):
-                logger.error(f"No valid coordinates in batch {batch_idx}. Skipping.")
-                return []
-            
-            primvs_data = primvs_data[valid_mask]
-            primvs_coords = SkyCoord(primvs_data['ra'], primvs_data['dec'], unit='deg')
+            return []
         
         # If we have a pre-downloaded TIC catalog, use it
         if self.tic_catalog is not None:
-            return self._process_with_local_tic(batch_idx, primvs_data, primvs_coords)
+            return self._process_with_local_tic(batch_idx, valid_data, primvs_coords)
         else:
-            return self._process_with_remote_tic(batch_idx, primvs_data, primvs_coords)
+            return self._process_with_remote_tic(batch_idx, valid_data, primvs_coords)
     
     def _process_with_local_tic(self, batch_idx, primvs_data, primvs_coords):
         """Process using the pre-downloaded TIC catalog"""
@@ -970,6 +1016,9 @@ def main():
         logger.error(f"PRIMVS file not found: {primvs_file}")
         return 1
     
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
     # Initialize cross-match object
     crossmatch = PrimvsTessCrossMatch(
         primvs_file=primvs_file,
@@ -1006,4 +1055,12 @@ def main():
         return 1
 
 if __name__ == "__main__":
-    main()
+    import sys
+    exit_code = main()
+    if 'sys' in globals():
+        sys.exit(exit_code)
+    else:
+        exit(exit_code)
+
+if __name__ == "__main__":
+    sys.exit(main())
