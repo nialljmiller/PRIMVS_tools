@@ -5,8 +5,9 @@ import pickle
 import logging
 import warnings
 import argparse
+import concurrent.futures
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -225,9 +226,9 @@ class PrimvsTessCrossMatch:
         # Use data bounds or vvv bounds
         bounds = getattr(self, 'data_bounds', self.vvv_bounds)
         
-        # Use manageable chunks that won't time out (based on previous test)
-        ra_chunks = 15
-        dec_chunks = 10
+        # Use many small chunks as requested (100x50)
+        ra_chunks = 100
+        dec_chunks = 50
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
         dec_step = (bounds['dec_max'] - bounds['dec_min']) / dec_chunks
@@ -246,9 +247,10 @@ class PrimvsTessCrossMatch:
                 ra_center = (ra_min + ra_max) / 2.0
                 dec_center = (dec_min + dec_max) / 2.0
                 
-                # Use a radius that won't time out (120 arcmin max)
-                radius_deg = min(2.0, np.sqrt(((ra_max - ra_min) / 2.0)**2 + ((dec_max - dec_min) / 2.0)**2))
-                radius_arcmin = min(120.0, radius_deg * 60.0)
+                # Use a small radius that won't time out (30 arcmin max)
+                # For 100x50 chunks, the radius needs to be much smaller
+                radius_deg = min(0.5, np.sqrt(((ra_max - ra_min) / 2.0)**2 + ((dec_max - dec_min) / 2.0)**2))
+                radius_arcmin = min(30.0, radius_deg * 60.0)
                 
                 # Store chunk info
                 chunks_info.append({
@@ -298,9 +300,6 @@ class PrimvsTessCrossMatch:
             max_retries = 3
             for retry in range(max_retries):
                 try:
-                    # Log which chunk is being processed
-                    logger.info(f"Querying TIC chunk {chunk_idx}/{total_chunks}: RA={ra_center:.3f}, Dec={dec_center:.3f}, r={radius_arcmin:.1f} arcmin")
-                    
                     # Query the TIC catalog
                     chunk_catalog = Catalogs.query_region(
                         coordinates=center_coord,
@@ -329,7 +328,7 @@ class PrimvsTessCrossMatch:
                         }
                 except Exception as e:
                     if retry < max_retries - 1:
-                        time.sleep(5 * (retry + 1))
+                        time.sleep(2 * (retry + 1))
                     else:
                         return {
                             'idx': chunk_idx,
@@ -344,16 +343,31 @@ class PrimvsTessCrossMatch:
         successful_chunks = 0
         total_sources = 0
         
-        # Use at most 12 workers for downloading to avoid overloading MAST
-        download_workers = min(12, self.max_workers)
+        # Use more workers for downloading since we have many small chunks
+        download_workers = min(24, self.max_workers)
         logger.info(f"Using {download_workers} parallel workers for TIC catalog download")
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=download_workers) as executor:
-            futures = [executor.submit(download_chunk, chunk_info) for chunk_info in chunks_info]
+        # Create a fixed chunk log file to avoid too much console output
+        chunk_log_file = os.path.join(self.output_dir, "tic_download_progress.log")
+        with open(chunk_log_file, 'w') as f:
+            f.write(f"Starting TIC download with {ra_chunks}x{dec_chunks} chunks\n")
+        
+        def log_chunk_progress(message):
+            with open(chunk_log_file, 'a') as f:
+                f.write(f"{message}\n")
+        
+        with ThreadPoolExecutor(max_workers=download_workers) as executor:
+            # Submit all chunks
+            future_to_chunk = {executor.submit(download_chunk, chunk_info): chunk_info['idx'] 
+                              for chunk_info in chunks_info}
             
             # Process results with a progress bar
-            with tqdm(total=len(futures), desc="Downloading TIC chunks") as pbar:
-                for future in concurrent.futures.as_completed(futures):
+            total_chunks = len(chunks_info)
+            completed = 0
+            
+            with tqdm(total=total_chunks, desc="Downloading TIC chunks") as pbar:
+                for future in as_completed(future_to_chunk):
+                    chunk_idx = future_to_chunk[future]
                     try:
                         result = future.result()
                         chunk_results.append(result)
@@ -361,12 +375,25 @@ class PrimvsTessCrossMatch:
                         if result['success']:
                             successful_chunks += 1
                             total_sources += result['count']
-                            logger.info(f"Chunk {result['idx']}: {result['message']}")
+                            log_message = f"Chunk {result['idx']}/{total_chunks}: {result['message']}"
+                            log_chunk_progress(log_message)
+                            
+                            # Only log to console occasionally to avoid flooding
+                            if result['idx'] % 20 == 0 or result['count'] > 1000:
+                                logger.info(log_message)
                         else:
-                            logger.warning(f"Chunk {result['idx']} failed: {result['message']}")
+                            log_message = f"Chunk {result['idx']}/{total_chunks} failed: {result['message']}"
+                            log_chunk_progress(log_message)
+                            logger.warning(log_message)
                     
                     except Exception as e:
-                        logger.error(f"Error processing chunk result: {str(e)}")
+                        error_msg = f"Error processing chunk {chunk_idx}: {str(e)}"
+                        log_chunk_progress(error_msg)
+                        logger.error(error_msg)
+                    
+                    completed += 1
+                    if completed % 10 == 0:
+                        logger.info(f"Progress: {completed}/{total_chunks} chunks, {successful_chunks} successful, {total_sources} sources")
                     
                     pbar.update(1)
         
@@ -385,7 +412,7 @@ class PrimvsTessCrossMatch:
                 
                 # Read and combine all chunks
                 all_chunks = []
-                for chunk_file in chunk_files:
+                for chunk_file in tqdm(chunk_files, desc="Reading chunk files"):
                     try:
                         chunk_data = Table.read(chunk_file)
                         if len(chunk_data) > 0:
@@ -398,6 +425,7 @@ class PrimvsTessCrossMatch:
                     return False
                 
                 # Combine all chunks
+                logger.info(f"Combining {len(all_chunks)} chunk files...")
                 self.tic_catalog = Table.vstack(all_chunks)
                 logger.info(f"Combined {len(self.tic_catalog)} TIC sources from {len(all_chunks)} chunks")
                 
@@ -406,12 +434,17 @@ class PrimvsTessCrossMatch:
                     logger.info(f"Saving TIC catalog to cache: {self.tic_cache_file}")
                     self.tic_catalog.write(self.tic_cache_file, overwrite=True)
                 
-                # Clean up temporary directory
-                for chunk_file in chunk_files:
-                    try:
-                        os.remove(chunk_file)
-                    except Exception:
-                        pass
+                # Clean up temporary directory if requested
+                keep_temp = os.environ.get('KEEP_TIC_TEMP', 'False').lower() == 'true'
+                if not keep_temp:
+                    logger.info(f"Cleaning up {len(chunk_files)} temporary files...")
+                    for chunk_file in chunk_files:
+                        try:
+                            os.remove(chunk_file)
+                        except Exception:
+                            pass
+                else:
+                    logger.info(f"Keeping temporary files in {temp_dir}")
                 
                 return True
             except Exception as e:
