@@ -225,8 +225,8 @@ class PrimvsTessCrossMatch:
         bounds = getattr(self, 'data_bounds', self.vvv_bounds)
         
         # Split the area into manageable chunks
-        ra_chunks = 10  # Reduced number of chunks for better parallelization
-        dec_chunks = 5
+        ra_chunks = 100
+        dec_chunks = 50
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
         dec_step = (bounds['dec_max'] - bounds['dec_min']) / dec_chunks
