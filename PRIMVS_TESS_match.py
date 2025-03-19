@@ -225,7 +225,7 @@ class PrimvsTessCrossMatch:
         bounds = getattr(self, 'data_bounds', self.vvv_bounds)
         
         # Split the area into manageable chunks
-        ra_chunks = 100
+        ra_chunks = 1000
         dec_chunks = 500
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
