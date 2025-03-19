@@ -226,7 +226,7 @@ class PrimvsTessCrossMatch:
         
         # Split the area into manageable chunks
         ra_chunks = 100
-        dec_chunks = 50
+        dec_chunks = 500
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
         dec_step = (bounds['dec_max'] - bounds['dec_min']) / dec_chunks
@@ -286,7 +286,7 @@ class PrimvsTessCrossMatch:
                         return None
         
         # Execute downloads in parallel with controlled concurrency
-        parallel_downloads = min(20, os.cpu_count())  # Limit concurrency to 8 or CPU count, whichever is smaller
+        parallel_downloads = min(10, os.cpu_count())  # Limit concurrency to 8 or CPU count, whichever is smaller
         logger.info(f"Downloading TIC catalog in {len(chunk_specs)} chunks using {parallel_downloads} parallel workers")
         
         tic_chunks = []
