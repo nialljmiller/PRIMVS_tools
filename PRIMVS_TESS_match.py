@@ -1035,7 +1035,7 @@ def main():
     import multiprocessing
     
     # Hardcoded parameters
-    primvs_file = "/beegfs/car/njm/OUTPUT/PRIMVS.fits"  # Path to the PRIMVS FITS file
+    primvs_file = "/beegfs/car/njm/OUTPUT/PRIMVS_P.fits"  # Path to the PRIMVS FITS file
     output_dir = "/beegfs/car/njm/PRIMVS/tess_crossmatch"  # Output directory
     search_radius = 30.0  # Search radius in arcseconds
     tic_cache = "/beegfs/car/njm/PRIMVS/tic_cache.fits"  # Path to cache TIC catalog
