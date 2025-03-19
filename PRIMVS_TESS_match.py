@@ -34,7 +34,7 @@ class CrossMatch:
         output_dir='./output', 
         search_radius=30, 
         batch_size=100,
-        max_workers=10
+        max_workers=None
     ):
         """
         Initialize the cross-match object.
@@ -51,12 +51,19 @@ class CrossMatch:
             Number of sources to process in each batch
         max_workers : int
             Maximum number of threads for parallel processing
+            If None, uses all available cores
         """
         self.primvs_file = primvs_file
         self.output_dir = output_dir
         self.search_radius = search_radius * u.arcsec
         self.batch_size = batch_size
-        self.max_workers = max_workers
+        
+        # If max_workers is None, use all available CPUs
+        if max_workers is None:
+            import multiprocessing
+            self.max_workers = multiprocessing.cpu_count()
+        else:
+            self.max_workers = max_workers
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -66,6 +73,7 @@ class CrossMatch:
         
         logger.info(f"Initialized cross-match with search radius: {search_radius} arcsec")
         logger.info(f"Output directory: {output_dir}")
+        logger.info(f"Using {self.max_workers} CPU cores for processing")
 
     def get_primvs_file_info(self):
         """Get information about the PRIMVS FITS file without loading it all."""
@@ -564,13 +572,13 @@ class CrossMatch:
 def main():
     """Main function to run the cross-match."""
     # Configuration
-    primvs_file = "../PRIMVS_P.fits"  # Change to your PRIMVS file path
+    primvs_file = "/beegfs/car/njm/OUTPUT/PRIMVS_P.fits"
     output_dir = "./primvs_tess_crossmatch"
     search_radius = 30  # arcseconds
     
     # Performance optimization parameters
     batch_size = 10000  # Process 10,000 sources at a time
-    max_workers = 8     # Use 8 parallel threads for processing
+    max_workers = None  # Use all available CPU cores
     
     # Initialize cross-match object
     crossmatch = CrossMatch(
