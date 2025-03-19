@@ -6,7 +6,7 @@ from multiprocessing import Pool, cpu_count
 
 # Path to the FITS files
 data_path = "/beegfs/car/njm/OUTPUT/"
-master_fits = data_path + "PRIMVS_P.fits"  # Master file
+master_fits = data_path + "PRIMVS_01.fits"  # Master file
 fits_files = glob.glob(data_path + "PRIMVS_*.fits")  # All FITS files
 fits_files.remove(master_fits)  # Remove master file from the list
 
