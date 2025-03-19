@@ -227,8 +227,8 @@ class PrimvsTessCrossMatch:
         
         # Split the area into manageable chunks to avoid timeouts
         # MAST has query limits, so we'll divide the sky into smaller regions
-        ra_chunks = 5
-        dec_chunks = 3
+        ra_chunks = 10
+        dec_chunks = 5
         
         ra_step = (bounds['ra_max'] - bounds['ra_min']) / ra_chunks
         dec_step = (bounds['dec_max'] - bounds['dec_min']) / dec_chunks
