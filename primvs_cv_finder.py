@@ -705,10 +705,12 @@ class PrimvsCVFinder:
         plt.close()
         
         return True
-        
+            
+
+
     def load_known_cvs(self):
         """
-        Load known CVs for classifier training with enhanced diagnostic information.
+        Load known CVs for classifier training with enhanced ID matching capability.
         """
         if self.known_cv_file is None:
             print("No known CV file provided. Skipping.")
@@ -720,15 +722,8 @@ class PrimvsCVFinder:
             # Determine file type and load accordingly
             if self.known_cv_file.endswith('.fits'):
                 with fits.open(self.known_cv_file) as hdul:
-                    # Examine structure before conversion
-                    header = hdul[1].header
-                    cv_data_raw = hdul[1].data
-                    
-                    # Report column information
-                    print(f"Known CV catalog columns: {cv_data_raw.names}")
-                    
                     # Convert to pandas DataFrame
-                    cv_data = Table(cv_data_raw).to_pandas()
+                    cv_data = Table(hdul[1].data).to_pandas()
             elif self.known_cv_file.endswith('.csv'):
                 cv_data = pd.read_csv(self.known_cv_file)
             else:
@@ -752,21 +747,9 @@ class PrimvsCVFinder:
                 print("Available columns:", cv_data.columns.tolist())
                 return None
             
-            # Extract IDs with data type preservation
-            known_ids = set(cv_data[id_col])
+            # Extract IDs as strings to ensure consistent matching
+            known_ids = set(cv_data[id_col].astype(str))
             print(f"Extracted {len(known_ids)} unique CV IDs")
-            
-            # Analyze ID characteristics
-            if len(known_ids) > 0:
-                sample_id = next(iter(known_ids))
-                print(f"Sample ID format: '{sample_id}' (type: {type(sample_id)})")
-                
-                # Check for potential numeric vs string discrepancies
-                numeric_ids = sum(1 for id in known_ids if isinstance(id, (int, float)) or 
-                                 (isinstance(id, str) and id.replace('.','',1).isdigit()))
-                string_ids = len(known_ids) - numeric_ids
-                
-                print(f"ID composition: {numeric_ids} numeric, {string_ids} non-numeric")
             
             return known_ids
                 
@@ -1206,16 +1189,20 @@ class PrimvsCVFinder:
 
 
 
+
+
+
+
     def train_classifier(self):
         """
-        Train an XGBoost classifier exclusively using verified CVs as positive examples,
-        with enhanced source matching procedure to resolve identifier discrepancies.
+        Train an XGBoost classifier using known CVs as positive examples,
+        with enhanced source matching to handle ID type mismatches.
         """
         if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
             print("No features available. Call extract_features() first.")
             return False
         
-        print("Training CV classifier with contrastive curves embeddings...")
+        print("Training CV classifier...")
         
         # Retrieve known CV identifiers
         known_ids = self.load_known_cvs()
@@ -1237,83 +1224,25 @@ class PrimvsCVFinder:
             print("Error: No suitable identifier column found in candidate data.")
             return False
         
-        # Enhanced source matching procedure with diagnostic output
         print(f"Using identifier column '{id_col}' for matching")
-        print(f"Known CV identifiers type: {type(list(known_ids)[0])}")
-        print(f"Candidate identifiers type: {self.filtered_data[id_col].dtype}")
         
-        # Sample values for diagnostic purposes
-        print(f"Sample known CVs (first 3): {list(known_ids)[:3]}")
-        print(f"Sample candidates (first 3): {self.filtered_data[id_col].head(3).tolist()}")
+        # Convert both known IDs and candidate IDs to strings for consistent matching
+        candidate_ids = self.filtered_data[id_col].astype(str)
         
-        # Try different matching strategies
-        match_strategies = [
-            ("Direct matching", lambda x, y: set(x) & set(y)),
-            ("String conversion", lambda x, y: set(str(i) for i in x) & set(str(j) for j in y)),
-            ("Numeric conversion", lambda x, y: set(float(i) if isinstance(i, str) and i.replace('.','',1).isdigit() else i for i in x) & 
-                                               set(float(j) if isinstance(j, str) and j.replace('.','',1).isdigit() else j for j in y))
-        ]
-        
-        max_matches = 0
-        best_strategy = None
-        matched_set = set()
-        
-        for strategy_name, match_func in match_strategies:
-            try:
-                # Convert filtered_data index to list for matching
-                candidate_ids = self.filtered_data[id_col].tolist()
-                matches = match_func(candidate_ids, known_ids)
-                
-                print(f"Strategy '{strategy_name}': {len(matches)} matches found")
-                
-                if len(matches) > max_matches:
-                    max_matches = len(matches)
-                    best_strategy = strategy_name
-                    matched_set = matches
-            except Exception as e:
-                print(f"Strategy '{strategy_name}' failed: {str(e)}")
-        
-        if max_matches == 0:
-            print("Critical error: No matches found between known CVs and candidate sources")
-            print("Manual inspection of both catalogs required for identifier compatibility verification")
-            return False
-        
-        print(f"Using strategy '{best_strategy}' with {max_matches} matches")
-        
-        # Create binary classification labels based on matched identifiers
-        y = self.filtered_data[id_col].isin(matched_set).astype(int)
+        # Create binary classification labels
+        y = candidate_ids.isin(known_ids).astype(int)
         positive_count = y.sum()
         
-        print(f"Using {positive_count} known CVs as positive examples")
+        print(f"Found {positive_count} matches between known CVs and candidate sources")
         
-        # Check if sufficient positive examples exist for training
         if positive_count < 10:
             print(f"Warning: Very few positive examples ({positive_count}). Classification may be unreliable.")
             if positive_count < 3:
                 print("Error: Insufficient positive examples for training. Aborting classifier.")
                 return False
         
-        # Proceed with model training using exclusively known CVs as positive examples
+        # Proceed with model training
         X = self.scaled_features
-        
-        # Check if we have embedding features
-        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in X.columns]
-        
-        if embedding_features:
-            print(f"Using {len(embedding_features)} contrastive curves embedding features for training")
-        
-        # Create labels based on known CVs - the ONLY source of positive examples
-        y = self.filtered_data.index.isin(known_ids).astype(int)
-        positive_count = sum(y)
-        print(f"Using {positive_count} known CVs as positive examples")
-        
-        # Check if we have sufficient positive examples
-        if positive_count < 10:
-            print("Warning: Very few positive examples (n={positive_count}). Classification may be unreliable.")
-            if positive_count < 3:
-                print("Error: Insufficient positive examples for training. Aborting classifier.")
-                return False
         
         # Split data for training and testing
         X_train, X_test, y_train, y_test = train_test_split(
@@ -1323,33 +1252,24 @@ class PrimvsCVFinder:
         # Create class weights to handle imbalance
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
         
-        # Configure XGBoost with optimal parameters for contrastive embeddings
+        # Configure XGBoost
         model = xgb.XGBClassifier(
-            n_estimators=300,          # More trees for complex feature relationships
-            max_depth=4,               # Slightly deeper trees to capture embedding interactions
-            learning_rate=0.05,        # Lower learning rate for better generalization
+            n_estimators=200,
+            max_depth=3,
+            learning_rate=0.1,
             objective='binary:logistic',
-            scale_pos_weight=pos_weight,  # Handle class imbalance
-            colsample_bytree=0.8,      # Use 80% of features per tree to reduce overfitting
-            subsample=0.8,             # Use 80% of samples per tree to reduce overfitting
-            n_jobs=-1,                 # Use all processors
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
             random_state=42
         )
-        
-        # Add sample_weight to account for possible class imbalance
-        sample_weights = None
-        if positive_count / len(y_train) < 0.1:  # If positive class is less than 10%
-            class_weights = {0: 1, 1: len(y_train) / sum(y_train) / 2}
-            sample_weights = np.array([class_weights[y] for y in y_train])
         
         # Train model
         model.fit(
             X_train, y_train,
-            sample_weight=sample_weights,
-            eval_set=[(X_train, y_train), (X_test, y_test)],
-            eval_metric='auc',
-            early_stopping_rounds=20,
-            verbose=False
+            #eval_set=[(X_train, y_train), (X_test, y_test)],
+            #eval_metric='auc',
+            #early_stopping_rounds=20,
+            #verbose=False
         )
         
         # Evaluate on test set
@@ -1359,62 +1279,17 @@ class PrimvsCVFinder:
         print("\nClassification Report:")
         print(classification_report(y_test, y_pred))
         
-        # Save feature importances
-        feature_imp = pd.DataFrame({
-            'Feature': X.columns,
-            'Importance': model.feature_importances_
-        }).sort_values('Importance', ascending=False)
-        
-        # Categorize features
-        feature_imp['Category'] = 'Traditional'
-        feature_imp.loc[feature_imp['Feature'].isin(embedding_features), 'Category'] = 'Embedding'
-        
-        print("\nTop 10 important features:")
-        print(feature_imp.head(10))
-        
-        # Plot feature importance
-        plt.figure(figsize=(12, 8))
-        # Color by category
-        colors = ['#ff7f0e' if cat == 'Embedding' else '#1f77b4' 
-                  for cat in feature_imp.head(20)['Category']]
-        
-        sns.barplot(x='Importance', y='Feature', 
-                    data=feature_imp.head(20), 
-                    palette=dict(zip(feature_imp.head(20)['Feature'], colors)))
-        
-        plt.title('Feature Importance for CV Classification')
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'feature_importance.png'), dpi=300)
-        plt.close()
-        
-        # Calculate AUC
-        from sklearn.metrics import roc_curve, auc
-        fpr, tpr, _ = roc_curve(y_test, y_prob)
-        roc_auc = auc(fpr, tpr)
-        
-        # Plot ROC curve
-        plt.figure(figsize=(8, 6))
-        plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.3f}')
-        plt.plot([0, 1], [0, 1], 'k--')
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('ROC Curve')
-        plt.legend(loc='lower right')
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'roc_curve.png'), dpi=300)
-        plt.close()
-        
         # Save model
         model_path = os.path.join(self.output_dir, 'cv_classifier.joblib')
         joblib.dump(model, model_path)
         print(f"Model saved to {model_path}")
         
-        # Save best iteration
-        best_iteration = model.best_iteration if hasattr(model, 'best_iteration') else None
-        print(f"Best iteration: {best_iteration}")
-        
         self.model = model
         return True
+
+
+
+
 
 
 
@@ -1841,7 +1716,7 @@ class PrimvsCVFinder:
                     print("Classifier prediction failed. Continuing with heuristic selection.")
                 
                 # Step 7b: Analyze importance of embedding features
-                self.analyze_embedding_importance()
+                #self.analyze_embedding_importance()
         
         # Step 8: Select final candidates
         if not self.select_candidates():
@@ -1879,12 +1754,13 @@ class PrimvsCVFinder:
         
         return True
 
+
+
 def main():
     """Main function to run the CV finder."""
-
-
+    # Fixed paths to match your description
     primvs_file = '../PRIMVS/PRIMVS_CC_CV_cand.fits'
-    output_dir = "../PRIMVS/"
+    output_dir = "../PRIMVS/cv_results"
     known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits"
     period_limit = 10.0  # Very generous upper limit (days)
     amplitude_limit = 0.03  # Very low amplitude threshold (mag)
@@ -1912,11 +1788,13 @@ def main():
     success = finder.run_pipeline()
     
     if success:
-        print(f"CV finder completed successfully. Results in {args.output_dir}")
+        print(f"CV finder completed successfully. Results in {output_dir}")
         return 0
     else:
         print("CV finder failed.")
         return 1
 
+if __name__ == "__main__":
+    sys.exit(main())
 if __name__ == "__main__":
     sys.exit(main())    
