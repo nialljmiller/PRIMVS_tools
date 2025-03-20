@@ -105,1235 +105,6 @@ class PrimvsCVFinder:
         self.cv_candidates = None
         self.model = None
     
-    def load_primvs_data(self):
-        """Load data from the PRIMVS FITS file."""
-        print(f"Loading PRIMVS data from {self.primvs_file}...")
-        
-        try:
-            # Attempt to open with memory mapping for large files
-            with fits.open(self.primvs_file, memmap=True) as hdul:
-                # Extract data from the first extension (index 1)
-                data = Table(hdul[1].data)
-                
-                # Convert to pandas DataFrame for easier manipulation
-                self.primvs_data = data.to_pandas()
-                
-                # Check if expected columns are present
-                required_cols = ['sourceid', 'true_period', 'true_amplitude', 'best_fap']
-                missing_cols = [col for col in required_cols if col not in self.primvs_data.columns]
-                
-                if missing_cols:
-                    missing_str = ', '.join(missing_cols)
-                    print(f"Warning: Missing required columns: {missing_str}")
-                    return False
-                
-                # Handle NaN values in critical columns
-                for col in required_cols:
-                    if self.primvs_data[col].isnull().any():
-                        print(f"Handling NaN values in {col}")
-                        if col in ['true_period', 'true_amplitude']:
-                            # For these, we'll drop rows with NaN
-                            self.primvs_data = self.primvs_data.dropna(subset=[col])
-                        else:
-                            # For others, we can fill with a default
-                            self.primvs_data[col] = self.primvs_data[col].fillna(1.0)
-                
-                # Add log_period for better scaling in ML models
-                self.primvs_data['log_period'] = np.log10(self.primvs_data['true_period'])
-                
-                # Rename color columns if present with standard format
-                color_mappings = {
-                    'z_med_mag-ks_med_mag': 'Z-K',
-                    'y_med_mag-ks_med_mag': 'Y-K',
-                    'j_med_mag-ks_med_mag': 'J-K',
-                    'h_med_mag-ks_med_mag': 'H-K'
-                }
-                
-                for old_name, new_name in color_mappings.items():
-                    if old_name in self.primvs_data.columns:
-                        self.primvs_data.rename(columns={old_name: new_name}, inplace=True)
-                
-                print(f"Loaded {len(self.primvs_data)} sources from PRIMVS catalog")
-                return True
-                
-        except Exception as e:
-            print(f"Error loading PRIMVS data: {str(e)}")
-            return False
-    
-    def apply_initial_filters(self):
-        """
-        Apply initial loose filters to select potential CV candidates.
-        These filters are intentionally permissive to maximize completeness.
-        """
-        if self.primvs_data is None or len(self.primvs_data) == 0:
-            print("No PRIMVS data loaded. Call load_primvs_data() first.")
-            return False
-        
-        print("Applying initial CV selection filters...")
-        
-        # Start with the full dataset
-        filtered_data = self.primvs_data.copy()
-        initial_count = len(filtered_data)
-        
-        # 1. Period filter: CVs typically have periods < 1 day, but we're generous with 5 days
-        period_mask = filtered_data['true_period'] < self.period_limit
-        period_count = period_mask.sum()
-        
-        # 2. Amplitude filter: CVs show significant variability
-        amplitude_mask = filtered_data['true_amplitude'] > self.amplitude_limit
-        amplitude_count = amplitude_mask.sum()
-        
-        # 3. FAP filter: Period should be reliable
-        fap_mask = filtered_data['best_fap'] < self.fap_limit
-        fap_count = fap_mask.sum()
-        
-        # Apply all filters
-        combined_mask = period_mask & amplitude_mask & fap_mask
-        
-        filtered_data = filtered_data[combined_mask]
-        
-        # Report on filtering
-        print(f"Initial count: {initial_count} sources")
-        print(f"Period filter (< {self.period_limit} days): {period_count} sources passed")
-        print(f"Amplitude filter (> {self.amplitude_limit} mag): {amplitude_count} sources passed")
-        print(f"FAP filter (< {self.fap_limit}): {fap_count} sources passed")
-        print(f"After all filters: {len(filtered_data)} candidate sources")
-        
-        self.filtered_data = filtered_data
-        return True
-
-
-    def extract_features(self):
-        """Extract and normalize features for CV detection, including contrastive curves embeddings."""
-        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
-            print("No filtered data available. Call apply_initial_filters() first.")
-            return None
-        
-        print("Extracting features for CV detection...")
-        
-        # Filter feature list to include only available columns
-        available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
-        
-        # Extract contrastive curves embeddings if available
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
-        
-        if embedding_features:
-            print(f"Found {len(embedding_features)} contrastive curves embedding features")
-            available_features.extend(embedding_features)
-        else:
-            print("No contrastive curves embeddings found in the data")
-        
-        # Extract feature matrix
-        X = self.filtered_data[available_features].copy()
-        
-        # Handle missing values
-        for col in X.columns:
-            if X[col].isnull().any():
-                if X[col].dtype in [np.float64, np.int64]:
-                    X[col] = X[col].fillna(X[col].median())
-                else:
-                    X[col] = X[col].fillna(X[col].mode()[0] if len(X[col].mode()) > 0 else 0)
-        
-        # Scale features (but not embedding features which are already normalized)
-        self.scaler = StandardScaler()
-        cols_to_scale = [col for col in X.columns if col not in embedding_features]
-        
-        if cols_to_scale:
-            X_scaled = X.copy()
-            X_scaled[cols_to_scale] = self.scaler.fit_transform(X[cols_to_scale])
-        else:
-            X_scaled = X.copy()
-        
-        self.features = X
-        self.scaled_features = X_scaled
-        self.feature_names = available_features
-        
-        return X_scaled
-
-
-
-
-
-
-
-    def load_known_cvs(self):
-        """
-        Load known CVs for classifier training with enhanced ID matching capability.
-        """
-        if self.known_cv_file is None:
-            print("No known CV file provided. Skipping.")
-            return None
-        
-        print(f"Loading known CVs from {self.known_cv_file}...")
-        
-        try:
-            # Determine file type and load accordingly
-            if self.known_cv_file.endswith('.fits'):
-                with fits.open(self.known_cv_file) as hdul:
-                    # Convert to pandas DataFrame
-                    cv_data = Table(hdul[1].data).to_pandas()
-            elif self.known_cv_file.endswith('.csv'):
-                cv_data = pd.read_csv(self.known_cv_file)
-            else:
-                print(f"Unsupported file format: {self.known_cv_file}")
-                return None
-            
-            print(f"Loaded {len(cv_data)} known CV sources")
-            
-            # Try to find ID column for matching
-            id_columns = ['sourceid', 'primvs_id', 'id', 'source_id', 'ID']
-            id_col = None
-            
-            for col in id_columns:
-                if col in cv_data.columns:
-                    id_col = col
-                    print(f"Using '{id_col}' column for CV identification")
-                    break
-            
-            if id_col is None:
-                print("Could not find ID column in known CV file.")
-                print("Available columns:", cv_data.columns.tolist())
-                return None
-            
-            # Extract IDs as strings to ensure consistent matching
-            known_ids = set(cv_data[id_col].astype(str))
-            print(f"Extracted {len(known_ids)} unique CV IDs")
-            
-            return known_ids
-                
-        except Exception as e:
-            print(f"Error loading known CVs: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-
-
-
-
-
-    def train_two_stage_classifier(self):
-        """
-        Train a two-stage classifier that integrates traditional astronomical features with 
-        contrastive curve embeddings for robust CV identification in time-domain survey data.
-        
-        This implementation utilizes the complete known CV dataset structure for comprehensive 
-        training, properly handling feature alignment between training and candidate sets.
-        """
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return False
-        
-        print("Training two-stage CV classifier...")
-        
-        # Load the complete known CV dataset
-        if self.known_cv_file is None:
-            print("Error: No known CV file provided. Classifier aborted.")
-            return False
-        
-        try:
-            # Load complete known CV dataset with appropriate format handling
-            if self.known_cv_file.endswith('.fits'):
-                with fits.open(self.known_cv_file) as hdul:
-                    known_cv_data = Table(hdul[1].data).to_pandas()
-            elif self.known_cv_file.endswith('.csv'):
-                known_cv_data = pd.read_csv(self.known_cv_file)
-            else:
-                print(f"Unsupported file format: {self.known_cv_file}")
-                return False
-            
-            print(f"Loaded {len(known_cv_data)} known CV records for training")
-            
-            # Identify feature categories
-            cc_embedding_cols = [str(i) for i in range(64)]
-            embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
-            traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-            
-            print(f"Traditional features: {len(traditional_features)}")
-            print(f"Embedding features: {len(embedding_features)}")
-            
-            # Prepare training and validation datasets
-            
-            # Ensure necessary columns exist in both datasets
-            required_features = traditional_features + embedding_features
-            known_cv_features = [f for f in required_features if f in known_cv_data.columns]
-            
-            # Extract common features between datasets
-            candidate_features = self.scaled_features[known_cv_features].copy()
-            known_cv_subset = known_cv_data[known_cv_features].copy()
-            
-            # Handle missing values in known CV dataset
-            for col in known_cv_subset.columns:
-                if known_cv_subset[col].isnull().any():
-                    if known_cv_subset[col].dtype in [np.float64, np.int64]:
-                        known_cv_subset[col] = known_cv_subset[col].fillna(known_cv_subset[col].median())
-                    else:
-                        known_cv_subset[col] = known_cv_subset[col].fillna(
-                            known_cv_subset[col].mode()[0] if len(known_cv_subset[col].mode()) > 0 else 0
-                        )
-            
-            # Scale known CV features using the same scaler as candidates
-            for col in traditional_features:
-                if col in known_cv_subset.columns:
-                    # Reshape for scikit-learn compatibility
-                    values = known_cv_subset[col].values.reshape(-1, 1)
-                    scaled_values = self.scaler.transform(values)
-                    known_cv_subset[col] = scaled_values.flatten()
-            
-            # Create positive examples (known CVs) and negative examples (candidates)
-            X_positive = known_cv_subset.values
-            y_positive = np.ones(len(X_positive))
-            
-            # For negative examples, use all filtered data (or a representative sample if too large)
-            max_neg_samples = min(len(candidate_features), len(X_positive) * 5)  # Cap negative examples
-            if len(candidate_features) > max_neg_samples:
-                # Random sampling without replacement
-                neg_indices = np.random.choice(len(candidate_features), max_neg_samples, replace=False)
-                X_negative = candidate_features.values[neg_indices]
-            else:
-                X_negative = candidate_features.values
-            y_negative = np.zeros(len(X_negative))
-            
-            # Combine datasets
-            X_combined = np.vstack([X_positive, X_negative])
-            y_combined = np.concatenate([y_positive, y_negative])
-            
-            print(f"Training dataset constructed: {len(y_positive)} positive examples, {len(y_negative)} negative examples")
-            
-            # Split into training and validation sets
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_combined, y_combined, test_size=0.25, random_state=42, stratify=y_combined
-            )
-            
-            # Create class weights to account for potential imbalance
-            pos_weight = (len(y_train) - np.sum(y_train)) / np.sum(y_train) if np.sum(y_train) > 0 else 1.0
-            
-            # Separate features by type
-            trad_indices = [i for i, col in enumerate(known_cv_features) if col in traditional_features]
-            emb_indices = [i for i, col in enumerate(known_cv_features) if col in embedding_features]
-            
-            # Extract feature subsets for two-stage classification
-            X_trad_train = X_train[:, trad_indices] if trad_indices else None
-            X_trad_val = X_val[:, trad_indices] if trad_indices else None
-            
-            X_emb_train = X_train[:, emb_indices] if emb_indices else None
-            X_emb_val = X_val[:, emb_indices] if emb_indices else None
-            
-            # STAGE 1: Train model with traditional features
-            print("\nStage 1: Training model with traditional features...")
-            
-            if X_trad_train is not None and X_trad_train.shape[1] > 0:
-                model_trad = xgb.XGBClassifier(
-                    n_estimators=200,
-                    max_depth=3,
-                    learning_rate=0.1,
-                    objective='binary:logistic',
-                    scale_pos_weight=pos_weight,
-                    n_jobs=-1,
-                    random_state=42
-                )
-                
-                model_trad.fit(X_trad_train, y_train)
-                
-                # Evaluate traditional model
-                y_pred_trad = model_trad.predict(X_trad_val)
-                prob_trad = model_trad.predict_proba(X_trad_val)[:, 1]
-                
-                print("\nTraditional Feature Model Performance:")
-                print(classification_report(y_val, y_pred_trad))
-                
-                # Get feature importance for traditional model
-                trad_feature_names = [known_cv_features[i] for i in trad_indices]
-                trad_importance = pd.DataFrame({
-                    'Feature': trad_feature_names,
-                    'Importance': model_trad.feature_importances_
-                }).sort_values('Importance', ascending=False)
-                
-                print("\nTop traditional features by importance:")
-                for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
-                    print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-            else:
-                print("Insufficient traditional features available. Skipping this stage.")
-                model_trad = None
-            
-            # STAGE 2: Train model with embedding features if available
-            if X_emb_train is not None and X_emb_train.shape[1] > 0:
-                print("\nStage 2: Training model with embedding features...")
-                
-                # Apply PCA to reduce dimensionality of embeddings while preserving variance
-                from sklearn.decomposition import PCA
-                
-                # Determine optimal number of components (explaining ~90% variance)
-                pca = PCA().fit(X_emb_train)
-                explained_variance = np.cumsum(pca.explained_variance_ratio_)
-                n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-                print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-                
-                # Apply PCA transformation
-                pca = PCA(n_components=n_components)
-                X_emb_train_pca = pca.fit_transform(X_emb_train)
-                X_emb_val_pca = pca.transform(X_emb_val)
-                
-                # Train embedding model
-                model_emb = xgb.XGBClassifier(
-                    n_estimators=200,
-                    max_depth=3,
-                    learning_rate=0.1,
-                    objective='binary:logistic',
-                    scale_pos_weight=pos_weight,
-                    n_jobs=-1,
-                    random_state=42
-                )
-                
-                model_emb.fit(X_emb_train_pca, y_train)
-                
-                # Evaluate embedding model
-                y_pred_emb = model_emb.predict(X_emb_val_pca)
-                prob_emb = model_emb.predict_proba(X_emb_val_pca)[:, 1]
-                
-                print("\nEmbedding Feature Model Performance:")
-                print(classification_report(y_val, y_pred_emb))
-                
-                # STAGE 3: Train meta-model (stacking) if both models available
-                if model_trad is not None:
-                    print("\nStage 3: Training meta-model to combine predictions...")
-                    
-                    # Create meta-features (predictions from base models)
-                    meta_features_train = np.column_stack([
-                        model_trad.predict_proba(X_trad_train)[:, 1],
-                        model_emb.predict_proba(X_emb_train_pca)[:, 1]
-                    ])
-                    
-                    meta_features_val = np.column_stack([
-                        prob_trad,
-                        prob_emb
-                    ])
-                    
-                    # Train meta-model
-                    meta_model = xgb.XGBClassifier(
-                        n_estimators=100,
-                        max_depth=2,
-                        learning_rate=0.1,
-                        objective='binary:logistic',
-                        scale_pos_weight=pos_weight,
-                        n_jobs=-1,
-                        random_state=42
-                    )
-                    
-                    meta_model.fit(meta_features_train, y_train)
-                    
-                    # Evaluate meta-model
-                    y_pred_meta = meta_model.predict(meta_features_val)
-                    
-                    print("\nMeta-Model Performance:")
-                    print(classification_report(y_val, y_pred_meta))
-                    
-                    # Calculate blend weights
-                    blend_weights = meta_model.feature_importances_
-                    print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-                    
-                    # STAGE 4: Apply ensemble model to all candidate data
-                    print("\nApplying ensemble classifier to all candidate data...")
-                    
-                    # Extract features from all candidates in the same order as training
-                    X_trad_full = self.scaled_features[[known_cv_features[i] for i in trad_indices]].values
-                    X_emb_full = self.scaled_features[[known_cv_features[i] for i in emb_indices]].values
-                    
-                    # Apply PCA to full embedding dataset
-                    X_emb_full_pca = pca.transform(X_emb_full)
-                    
-                    # Get predictions from both models
-                    trad_probs = model_trad.predict_proba(X_trad_full)[:, 1]
-                    emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-                    
-                    # Combine using meta-model
-                    meta_features_full = np.column_stack([trad_probs, emb_probs])
-                    final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-                    
-                    # Store models for later use
-                    self.model_trad = model_trad
-                    self.model_emb = model_emb
-                    self.model_meta = meta_model
-                    self.pca = pca
-                    
-                    # Add predictions to filtered data
-                    self.filtered_data['cv_prob_trad'] = trad_probs
-                    self.filtered_data['cv_prob_emb'] = emb_probs
-                    self.filtered_data['cv_prob'] = final_probs
-                    
-                    # Store feature names for later interpretation
-                    self.trad_feature_names = [known_cv_features[i] for i in trad_indices]
-                    self.emb_feature_names = [known_cv_features[i] for i in emb_indices]
-                    
-                    # Save models
-                    joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-                    joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-                    joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-                    joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-                    
-                    # Set the ensemble as the primary model
-                    self.model = meta_model
-                else:
-                    # Only embedding model available
-                    print("\nUsing only embedding-based model (no traditional features available)")
-                    
-                    # Get predictions for all data
-                    X_emb_full = self.scaled_features[[known_cv_features[i] for i in emb_indices]].values
-                    X_emb_full_pca = pca.transform(X_emb_full)
-                    emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-                    
-                    # Add predictions to filtered data
-                    self.filtered_data['cv_prob'] = emb_probs
-                    
-                    # Store feature names for later interpretation
-                    self.emb_feature_names = [known_cv_features[i] for i in emb_indices]
-                    
-                    # Save model
-                    joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-                    joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-                    
-                    # Set as primary model
-                    self.model = model_emb
-                    self.pca = pca
-            elif model_trad is not None:
-                # Only traditional model available
-                print("\nUsing only traditional-feature model (no embedding features available)")
-                
-                # Get predictions for all data
-                X_trad_full = self.scaled_features[[known_cv_features[i] for i in trad_indices]].values
-                trad_probs = model_trad.predict_proba(X_trad_full)[:, 1]
-                
-                # Add predictions to filtered data
-                self.filtered_data['cv_prob'] = trad_probs
-                
-                # Store feature names for later interpretation
-                self.trad_feature_names = [known_cv_features[i] for i in trad_indices]
-                
-                # Save model
-                joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-                
-                # Set as primary model
-                self.model = model_trad
-            else:
-                print("Error: Neither traditional nor embedding features could be processed. Classification failed.")
-                return False
-            
-            # Generate visualization of probability distribution
-            plt.figure(figsize=(10, 6))
-            plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
-            plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-            plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-            plt.xlabel('CV Probability')
-            plt.ylabel('Number of Sources')
-            plt.title('Distribution of CV Probabilities')
-            plt.yscale('log')  # Log scale for better visualization of distribution
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
-            plt.close()
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error in two-stage classifier training: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-
-
-
-
-    
-    def run_classifier(self):
-        """
-        Run the trained classifier on all filtered data to identify CV candidates.
-        If no model is available, this will train one first.
-        """
-        if not hasattr(self, 'model') or self.model is None:
-            print("No trained model available. Training now...")
-            self.train_classifier()
-
-        print("Running classifier on all filtered data...")
-        
-        # Get predictions and probabilities
-        cv_probs = self.model.predict_proba(self.scaled_features)[:, 1]
-        
-        # Add to filtered data
-        self.filtered_data['cv_prob'] = cv_probs
-        
-        # Plot probability distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(cv_probs, bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
-    
-
-    def select_candidates(self):
-        """
-        Select final CV candidates primarily using XGBoost classification results when available,
-        with embedding proximity as a secondary factor to refine the selection.
-        """
-        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
-            print("No filtered data available. Call apply_initial_filters() first.")
-            return False
-        
-        print("Selecting final CV candidates...")
-        
-        # Define selection criteria prioritizing XGBoost classification
-        # Check if XGBoost classifier probabilities are available
-        if 'cv_prob' in self.filtered_data.columns:
-            print("Using XGBoost classifier probabilities for candidate selection")
-            
-            # Identify high confidence candidates
-            high_confidence_threshold = 0.7
-            high_confidence_mask = self.filtered_data['cv_prob'] >= high_confidence_threshold
-            medium_confidence_threshold = 0.5
-            medium_confidence_mask = (self.filtered_data['cv_prob'] >= medium_confidence_threshold) & (self.filtered_data['cv_prob'] < high_confidence_threshold)
-            
-            high_confidence_count = high_confidence_mask.sum()
-            medium_confidence_count = medium_confidence_mask.sum()
-            
-            print(f"Found {high_confidence_count} high confidence candidates (prob >= {high_confidence_threshold})")
-            print(f"Found {medium_confidence_count} medium confidence candidates ({medium_confidence_threshold} <= prob < {high_confidence_threshold})")
-            
-            # Create combined mask for all candidates
-            candidate_mask = self.filtered_data['cv_prob'] >= medium_confidence_threshold
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = candidate_mask
-            
-            # Add confidence level classification
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[medium_confidence_mask, 'confidence_level'] = 'medium'
-            self.filtered_data.loc[high_confidence_mask, 'confidence_level'] = 'high'
-            
-            # Set confidence directly from classifier probability
-            self.filtered_data['confidence'] = self.filtered_data['cv_prob']
-            
-        # If XGBoost results not available, try anomaly detection
-        elif 'is_anomaly' in self.filtered_data.columns:
-            print("No classifier results available. Using anomaly detection results.")
-            
-            anomaly_mask = self.filtered_data['is_anomaly']
-            anomaly_count = anomaly_mask.sum()
-            
-            print(f"Found {anomaly_count} candidates using anomaly detection")
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = anomaly_mask
-            
-            # Default medium confidence for anomaly-detected candidates
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[anomaly_mask, 'confidence_level'] = 'medium'
-            self.filtered_data['confidence'] = 0.5  # Default medium confidence
-            
-        # If neither is available, use domain-knowledge score as fallback
-        elif 'cv_score' in self.filtered_data.columns:
-            print("Using domain-knowledge CV score for candidate selection")
-            
-            high_score_threshold = 0.7
-            medium_score_threshold = 0.5
-            
-            high_score_mask = self.filtered_data['cv_score'] >= high_score_threshold
-            medium_score_mask = (self.filtered_data['cv_score'] >= medium_score_threshold) & (self.filtered_data['cv_score'] < high_score_threshold)
-            
-            high_score_count = high_score_mask.sum()
-            medium_score_count = medium_score_mask.sum()
-            
-            print(f"Found {high_score_count} high score candidates (score >= {high_score_threshold})")
-            print(f"Found {medium_score_count} medium score candidates ({medium_score_threshold} <= score < {high_score_threshold})")
-            
-            # Create combined mask for all candidates
-            candidate_mask = self.filtered_data['cv_score'] >= medium_score_threshold
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = candidate_mask
-            
-            # Add confidence level classification
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[medium_score_mask, 'confidence_level'] = 'medium'
-            self.filtered_data.loc[high_score_mask, 'confidence_level'] = 'high'
-            
-            # Set confidence directly from cv_score
-            self.filtered_data['confidence'] = self.filtered_data['cv_score']
-            
-        # If none of the above are available, use simplified method
-        else:
-            print("No advanced selection criteria available. Using simplified selection.")
-            return self.select_candidates_simple()
-        
-        # Create final candidate set
-        self.cv_candidates = self.filtered_data[self.filtered_data['is_cv_candidate']].copy()
-        
-        # If embedding information is available, use it to refine the rankings
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
-        
-        if embedding_features and self.known_cv_file is not None and len(embedding_features) >= 10:
-            print("Refining candidate rankings using embedding proximity to known CVs...")
-            
-            # Load known CV IDs
-            known_ids = self.load_known_cvs()
-            
-            if known_ids is not None and len(known_ids) > 0:
-                # Determine ID column for matching
-                id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-                id_col = None
-                
-                for col in id_columns:
-                    if col in self.cv_candidates.columns:
-                        id_col = col
-                        break
-                
-                if id_col is not None:
-                    # Flag known CVs in candidates
-                    self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].astype(str).isin(known_ids)
-                    
-                    # Extract embeddings and reduce dimensionality
-                    from sklearn.decomposition import PCA
-                    
-                    # Extract embeddings for candidates and known CVs
-                    all_embeddings = self.cv_candidates[embedding_features].values
-                    
-                    # Apply PCA
-                    pca = PCA(n_components=3)
-                    all_embeddings_3d = pca.fit_transform(all_embeddings)
-                    
-                    # Add PCA dimensions
-                    self.cv_candidates['pca_1'] = all_embeddings_3d[:, 0]
-                    self.cv_candidates['pca_2'] = all_embeddings_3d[:, 1]
-                    self.cv_candidates['pca_3'] = all_embeddings_3d[:, 2]
-                    
-                    # Split known CVs and candidates
-                    known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
-                    candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
-                    
-                    if len(known_cvs) > 0 and len(candidates) > 0:
-                        # Calculate embedding distances
-                        from scipy.spatial.distance import cdist
-                        
-                        known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
-                        candidate_points = candidates[['pca_1', 'pca_2', 'pca_3']].values
-                        
-                        # Calculate minimum distance from each candidate to any known CV
-                        distances = cdist(candidate_points, known_points, 'euclidean')
-                        min_distances = np.min(distances, axis=1)
-                        
-                        # Add distance to nearest known CV
-                        candidates['distance_to_nearest_cv'] = min_distances
-                        
-                        # Normalized distance (0-1 scale, 0 is closest)
-                        max_dist = min_distances.max()
-                        if max_dist > 0:
-                            candidates['norm_distance'] = min_distances / max_dist
-                        else:
-                            candidates['norm_distance'] = 0
-                        
-                        # Compute embedding similarity score (inverse of normalized distance)
-                        candidates['embedding_similarity'] = 1 - candidates['norm_distance']
-                        
-                        # Blend classifier confidence with embedding similarity (weighted average)
-                        # Weight classifier confidence more heavily
-                        classifier_weight = 0.8
-                        embedding_weight = 0.2
-                        
-                        if 'confidence' in candidates.columns:
-                            candidates['blended_score'] = (
-                                classifier_weight * candidates['confidence'] + 
-                                embedding_weight * candidates['embedding_similarity']
-                            )
-                        else:
-                            candidates['blended_score'] = candidates['embedding_similarity']
-                        
-                        # Update main candidates dataframe with these scores
-                        self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'distance_to_nearest_cv'] = candidates['distance_to_nearest_cv'].values
-                        self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'embedding_similarity'] = candidates['embedding_similarity'].values
-                        
-                        if 'blended_score' in candidates.columns:
-                            self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'blended_score'] = candidates['blended_score'].values
-                            
-                            # Replace confidence with blended score for ranking, but keep original confidence
-                            self.cv_candidates['original_confidence'] = self.cv_candidates['confidence']
-                            self.cv_candidates['confidence'] = self.cv_candidates['blended_score']
-                        
-                        print(f"Enhanced candidate scoring with embedding proximity information")
-        
-        # Sort by confidence (which may now be the blended score)
-        self.cv_candidates = self.cv_candidates.sort_values('confidence', ascending=False)
-        
-        print(f"Selected {len(self.cv_candidates)} CV candidates")
-        return True
-
-
-
-
-    def train_two_stage_classifier(self):
-        """
-        Train a two-stage classifier combining traditional feature-based models with
-        embedding-based models for optimal CV candidate selection.
-        
-        This approach maintains interpretability while leveraging the representational
-        power of contrastive curve embeddings through an ensemble methodology.
-        """
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return False
-        
-        print("Training two-stage CV classifier...")
-        
-        # Retrieve known CV identifiers
-        known_ids = self.load_known_cvs()
-        
-        if known_ids is None or len(known_ids) == 0:
-            print("Error: No known CVs available for training. Classifier aborted.")
-            return False
-        
-        # Determine candidate identifier column
-        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-        id_col = None
-        
-        for col in id_columns:
-            if col in self.filtered_data.columns:
-                id_col = col
-                break
-        
-        if id_col is None:
-            print("Error: No suitable identifier column found in candidate data.")
-            return False
-        
-        print(f"Using identifier column '{id_col}' for matching")
-        
-        # Convert both known IDs and candidate IDs to strings for consistent matching
-        candidate_ids = self.filtered_data[id_col].astype(str)
-        
-        # Create binary classification labels
-        y = candidate_ids.isin(known_ids).astype(int)
-        positive_count = y.sum()
-        
-        print(f"Found {positive_count} matches between known CVs and candidate sources")
-        
-        if positive_count < 10:
-            print(f"Warning: Very few positive examples ({positive_count}). Classification may be unreliable.")
-            if positive_count < 3:
-                print("Error: Insufficient positive examples for training. Aborting classifier.")
-                return False
-        
-        # Split features into traditional and embedding sets
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
-        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-        
-        print(f"Traditional features: {len(traditional_features)}")
-        print(f"Embedding features: {len(embedding_features)}")
-        
-        # Extract feature sets as numpy arrays to avoid indexing issues
-        X_trad = self.scaled_features[traditional_features].values
-        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
-        
-        # Split data for training and validation using indices
-        # We'll use array indexing rather than DataFrame iloc to avoid the observed error
-        X_indices = np.arange(len(X_trad))
-        train_indices, val_indices = train_test_split(
-            X_indices, test_size=0.25, random_state=42, stratify=y
-        )
-        
-        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
-        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        
-        if X_emb is not None:
-            X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
-        
-        # Create class weights to handle imbalance
-        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
-        
-        # STAGE 1: Train model with traditional features
-        print("\nStage 1: Training model with traditional features...")
-        
-        model_trad = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        model_trad.fit(
-            X_trad_train, y_train,
-            #eval_set=[(X_trad_val, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=20,
-            #verbose=False
-        )
-        
-        # Evaluate traditional model
-        y_pred_trad = model_trad.predict(X_trad_val)
-        prob_trad = model_trad.predict_proba(X_trad_val)[:, 1]
-        
-        print("\nTraditional Feature Model Performance:")
-        print(classification_report(y_val, y_pred_trad))
-        
-        # Get feature importance for traditional model
-        trad_importance = pd.DataFrame({
-            'Feature': traditional_features,
-            'Importance': model_trad.feature_importances_
-        }).sort_values('Importance', ascending=False)
-        
-        print("\nTop 5 traditional features:")
-        for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
-            print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-        
-
-        print("\nStage 2: Training model with embedding features...")
-        
-        # Apply PCA to reduce dimensionality of embeddings while preserving variance
-        from sklearn.decomposition import PCA
-        
-        # Determine optimal number of components (explaining ~90% variance)
-        pca = PCA().fit(X_emb_train)
-        explained_variance = np.cumsum(pca.explained_variance_ratio_)
-        n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-        print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-        
-        # Apply PCA transformation
-        pca = PCA(n_components=n_components)
-        X_emb_train_pca = pca.fit_transform(X_emb_train)
-        X_emb_val_pca = pca.transform(X_emb_val)
-        
-        # Train embedding model
-        model_emb = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        model_emb.fit(
-            X_emb_train_pca, y_train,
-            #eval_set=[(X_emb_val_pca, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=20,
-            #verbose=False
-        )
-        
-        # Evaluate embedding model
-        y_pred_emb = model_emb.predict(X_emb_val_pca)
-        prob_emb = model_emb.predict_proba(X_emb_val_pca)[:, 1]
-        
-        print("\nEmbedding Feature Model Performance:")
-        print(classification_report(y_val, y_pred_emb))
-        
-        # STAGE 3: Train meta-model (stacking)
-        print("\nStage 3: Training meta-model to combine predictions...")
-        
-        # Create meta-features (predictions from base models)
-        meta_features_train = np.column_stack([
-            model_trad.predict_proba(X_trad_train)[:, 1],
-            model_emb.predict_proba(X_emb_train_pca)[:, 1]
-        ])
-        
-        meta_features_val = np.column_stack([
-            prob_trad,
-            prob_emb
-        ])
-        
-        # Train meta-model
-        meta_model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=2,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        meta_model.fit(
-            meta_features_train, y_train,
-            #eval_set=[(meta_features_val, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=10,
-            #verbose=False
-        )
-        
-        # Evaluate meta-model
-        y_pred_meta = meta_model.predict(meta_features_val)
-        
-        print("\nMeta-Model Performance:")
-        print(classification_report(y_val, y_pred_meta))
-        
-        # Calculate blend weights
-        blend_weights = meta_model.feature_importances_
-        print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-        
-        # STAGE 4: Apply to all data
-        print("\nApplying two-stage classifier to all data...")
-        
-        # Prepare PCA for full dataset
-        X_emb_full_pca = pca.transform(X_emb) if X_emb is not None else None
-        
-        # Get predictions from both models
-        trad_probs = model_trad.predict_proba(X_trad)[:, 1]
-        emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-        
-        # Combine using meta-model
-        meta_features_full = np.column_stack([trad_probs, emb_probs])
-        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-        
-        # Store models for later use
-        self.model_trad = model_trad
-        self.model_emb = model_emb
-        self.model_meta = meta_model
-        self.pca = pca
-        
-        # Add predictions to filtered data
-        self.filtered_data['cv_prob_trad'] = trad_probs
-        self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = final_probs
-        
-        # Save traditional feature names for later interpretation
-        self.traditional_features = traditional_features
-        
-        # Save models
-        joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-        joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-        
-        # Set the ensemble as the primary model
-        self.model = meta_model
-        
-
-            
-        # Plot probability distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
-        plt.yscale('log')  # Set y-axis to log scale
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
-
-
-
-
-    def run_pipeline(self):
-        """Run the complete CV finder pipeline with two-stage classification."""
-        start_time = time.time()
-        
-        print("\n" + "="*80)
-        print("RUNNING PRIMVS CV FINDER PIPELINE WITH TWO-STAGE CLASSIFICATION")
-        print("="*80 + "\n")
-        
-        # Step 1: Load PRIMVS data
-        if not self.load_primvs_data():
-            print("Failed to load PRIMVS data. Aborting.")
-            return False
-        
-        # Step 2: Apply initial filters
-        if not self.apply_initial_filters():
-            print("Failed to apply initial filters. Aborting.")
-            return False
-        
-        # Step 3: Extract features for classification
-        if self.extract_features() is None:
-            print("Failed to extract features. Aborting.")
-            return False
-        
-        # Step 4: Calculate CV score using domain knowledge
-        if not self.calculate_cv_score():
-            print("Failed to calculate CV scores. Continuing with limited features.")
-        
-        # Step 5: Detect anomalies
-        #if not self.detect_anomalies():
-        #    print("Anomaly detection failed or found no anomalies. Continuing without anomaly features.")
-        
-        # Step 6: Train two-stage classifier if known CVs are available
-        if self.known_cv_file is not None:
-            if not self.train_two_stage_classifier():
-                print("Two-stage classifier training failed. Falling back to heuristic selection.")
-            else:
-                # Step 7: Visualize two-stage classification results
-                self.visualize_two_stage_classification()
-        
-        # Step 8: Select final candidates
-        if not self.select_candidates():
-            print("Failed to select candidates. Aborting.")
-            return False
-        
-        # Step 9: Plot candidates
-        self.plot_candidates()
-
-
-        # Step 10: Create embedding-specific visualizations
-        print("\nGenerating embedding-specific visualizations...")
-        
-        # Step 10a: Visualize embeddings in reduced dimensional space
-        self.visualize_embeddings()
-        
-        # Step 10b: Compare candidates with known CVs in embedding space
-        self.compare_candidates_with_known_cvs()
-        
-        # Step 10c: Comprehensive visualization of classification in embedding space
-        self.visualize_classification_in_embedding_space()
-        
-
-
-
-        
-        # Step 10: Save candidates
-        if not self.save_candidates():
-            print("Failed to save candidates.")
-            return False
-        
-        end_time = time.time()
-        runtime = end_time - start_time
-        
-        print("\n" + "="*80)
-        print(f"PIPELINE COMPLETED in {timedelta(seconds=int(runtime))}")
-        print(f"Found {len(self.cv_candidates)} CV candidates")
-        print(f"Results saved to: {self.output_dir}")
-        print("="*80 + "\n")
-        
-        return True
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def detect_anomalies(self):
-        """Use Isolation Forest to identify anomalous sources that might be CVs."""
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return None
-        
-        print("Detecting anomalous sources with Isolation Forest...")
-        
-        # Initialize Isolation Forest
-        iso_forest = IsolationForest(
-            n_estimators=200,
-            contamination=0.05,  # Expect 5% of sources to be unusual
-            random_state=42,
-            n_jobs=-1  # Use all processors
-        )
-        
-        # Fit and predict
-        anomaly_scores = iso_forest.fit_predict(self.scaled_features)
-        
-        # Get anomaly scores (decision function)
-        decision_scores = iso_forest.decision_function(self.scaled_features)
-        
-        # Add anomaly scores to filtered data
-        self.filtered_data['anomaly_score'] = decision_scores
-        
-        # Mark anomalies (where prediction is -1)
-        anomaly_mask = anomaly_scores == -1
-        self.filtered_data['is_anomaly'] = anomaly_mask
-        
-        n_anomalies = anomaly_mask.sum()
-        anomaly_percent = 100 * n_anomalies / len(self.filtered_data)
-        print(f"Identified {n_anomalies} anomalous sources ({anomaly_percent:.2f}%)")
-        
-        return n_anomalies > 0
-    
-    def calculate_cv_score(self):
-        """
-        Calculate a CV score based on domain knowledge of CV characteristics.
-        This combines multiple heuristics based on CV properties.
-        """
-        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
-            print("No filtered data available. Call apply_initial_filters() first.")
-            return False
-        
-        print("Calculating CV scores based on domain knowledge...")
-        
-        # Make a copy of the filtered data
-        data = self.filtered_data.copy()
-        
-        # 1. Period-based score: Higher for shorter periods
-        # CVs typically have periods in the hours range
-        data['period_score'] = np.clip(1.0 - np.log10(data['true_period']) / 2.0, 0, 1)
-        
-        # 2. Amplitude-based score: Higher for larger amplitudes
-        # Scale to 0-1 using a sigmoid function centered at 0.5 mag
-        data['amplitude_score'] = 1 / (1 + np.exp(-2 * (data['true_amplitude'] - 0.5)))
-        
-        # 3. Skewness-based score: CV light curves often show asymmetry
-        if 'skew' in data.columns:
-            # Absolute skewness matters (positive or negative)
-            data['skew_score'] = np.clip(np.abs(data['skew']) / 2.0, 0, 1)
-        else:
-            data['skew_score'] = 0.5  # Default if not available
-        
-        # 4. Color-based score: CVs often have colors compatible with hot components
-        if all(col in data.columns for col in ['J-K', 'H-K']):
-            # This is a simplified approximation - would need refinement
-            # Most CVs have relatively blue colors
-            data['color_score'] = 1 - np.clip((data['J-K'] + data['H-K']) / 2, 0, 1)
-        else:
-            data['color_score'] = 0.5  # Default if colors not available
-        
-        # 5. Periodicity quality: Higher for more reliable periods
-        data['fap_score'] = 1 - np.clip(data['best_fap'], 0, 1)
-        
-        # Combine scores with different weights
-        data['cv_score'] = (
-            0.30 * data['period_score'] +
-            0.30 * data['amplitude_score'] +
-            0.15 * data['skew_score'] +
-            0.15 * data['color_score'] +
-            0.10 * data['fap_score']
-        )
-        
-        # Update the filtered data
-        self.filtered_data = data
-        
-        # Create a histogram of the scores to help set thresholds
-        plt.figure(figsize=(10, 6))
-        plt.hist(data['cv_score'], bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.7, color='g', linestyle='--', label='High confidence threshold (0.7)')
-        plt.xlabel('CV Score')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Scores')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_score_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
-            
-
 
 
 
@@ -2178,6 +949,8 @@ class PrimvsCVFinder:
                     self.filtered_data['b'],
                     alpha=0.1, s=1, color='gray', label='All filtered sources'
                 )
+
+
             
             # Plot candidates
             plt.scatter(
@@ -2189,6 +962,10 @@ class PrimvsCVFinder:
                 cmap='viridis',
                 label='CV candidates'
             )
+            
+            ax = plt.gca()
+            overlay_tess_pointings(plt, ax=ax, alpha=0.15)
+        
             
             plt.colorbar(label='Confidence' if 'confidence' in self.cv_candidates else None)
             plt.xlabel('Galactic Longitude (l)')
@@ -2773,7 +1550,7 @@ class PrimvsCVFinder:
         
         # Disk region: -65° < l < -10° and -2° < b < -10°
         disk_x = np.array([-65, -65, -10, -10, -65])
-        disk_y = np.array([-2, -10, -10, -2, -2])
+        disk_y = np.array([4, -4, -10, -2, -2])
         plt.plot(disk_x, disk_y, 'k--', alpha=0.5, linewidth=1)
         
         # Add region labels
@@ -3016,7 +1793,7 @@ class PrimvsCVFinder:
         
         # Set limits to focus on disk region
         plt.xlim(-65, -10)
-        plt.ylim(-10, -1)
+        #plt.ylim(, -1)
         
         plt.savefig(os.path.join(viz_dir, 'galactic_distribution_disk.png'), dpi=300)
         plt.close()
@@ -3466,6 +2243,1360 @@ class PrimvsCVFinder:
 
 
 
+
+
+
+
+
+
+
+
+    def load_primvs_data(self):
+        """Load data from the PRIMVS FITS file."""
+        print(f"Loading PRIMVS data from {self.primvs_file}...")
+        
+        try:
+            # Attempt to open with memory mapping for large files
+            with fits.open(self.primvs_file, memmap=True) as hdul:
+                # Extract data from the first extension (index 1)
+                data = Table(hdul[1].data)
+                
+                # Convert to pandas DataFrame for easier manipulation
+                self.primvs_data = data.to_pandas()
+                
+                # Check if expected columns are present
+                required_cols = ['sourceid', 'true_period', 'true_amplitude', 'best_fap']
+                missing_cols = [col for col in required_cols if col not in self.primvs_data.columns]
+                
+                if missing_cols:
+                    missing_str = ', '.join(missing_cols)
+                    print(f"Warning: Missing required columns: {missing_str}")
+                    return False
+                
+                # Handle NaN values in critical columns
+                for col in required_cols:
+                    if self.primvs_data[col].isnull().any():
+                        print(f"Handling NaN values in {col}")
+                        if col in ['true_period', 'true_amplitude']:
+                            # For these, we'll drop rows with NaN
+                            self.primvs_data = self.primvs_data.dropna(subset=[col])
+                        else:
+                            # For others, we can fill with a default
+                            self.primvs_data[col] = self.primvs_data[col].fillna(1.0)
+                
+                # Add log_period for better scaling in ML models
+                self.primvs_data['log_period'] = np.log10(self.primvs_data['true_period'])
+                
+                # Rename color columns if present with standard format
+                color_mappings = {
+                    'z_med_mag-ks_med_mag': 'Z-K',
+                    'y_med_mag-ks_med_mag': 'Y-K',
+                    'j_med_mag-ks_med_mag': 'J-K',
+                    'h_med_mag-ks_med_mag': 'H-K'
+                }
+                
+                for old_name, new_name in color_mappings.items():
+                    if old_name in self.primvs_data.columns:
+                        self.primvs_data.rename(columns={old_name: new_name}, inplace=True)
+                
+                print(f"Loaded {len(self.primvs_data)} sources from PRIMVS catalog")
+                return True
+                
+        except Exception as e:
+            print(f"Error loading PRIMVS data: {str(e)}")
+            return False
+    
+    def apply_initial_filters(self):
+        """
+        Apply initial loose filters to select potential CV candidates.
+        These filters are intentionally permissive to maximize completeness.
+        """
+        if self.primvs_data is None or len(self.primvs_data) == 0:
+            print("No PRIMVS data loaded. Call load_primvs_data() first.")
+            return False
+        
+        print("Applying initial CV selection filters...")
+        
+        # Start with the full dataset
+        filtered_data = self.primvs_data.copy()
+        initial_count = len(filtered_data)
+        
+        # 1. Period filter: CVs typically have periods < 1 day, but we're generous with 5 days
+        period_mask = filtered_data['true_period'] < self.period_limit
+        period_count = period_mask.sum()
+        
+        # 2. Amplitude filter: CVs show significant variability
+        amplitude_mask = filtered_data['true_amplitude'] > self.amplitude_limit
+        amplitude_count = amplitude_mask.sum()
+        
+        # 3. FAP filter: Period should be reliable
+        fap_mask = filtered_data['best_fap'] < self.fap_limit
+        fap_count = fap_mask.sum()
+        
+        # Apply all filters
+        combined_mask = period_mask & amplitude_mask & fap_mask
+        
+        filtered_data = filtered_data[combined_mask]
+        
+        # Report on filtering
+        print(f"Initial count: {initial_count} sources")
+        print(f"Period filter (< {self.period_limit} days): {period_count} sources passed")
+        print(f"Amplitude filter (> {self.amplitude_limit} mag): {amplitude_count} sources passed")
+        print(f"FAP filter (< {self.fap_limit}): {fap_count} sources passed")
+        print(f"After all filters: {len(filtered_data)} candidate sources")
+        
+        self.filtered_data = filtered_data
+        return True
+
+
+    def extract_features(self):
+        """Extract and normalize features for CV detection, including contrastive curves embeddings."""
+        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
+            print("No filtered data available. Call apply_initial_filters() first.")
+            return None
+        
+        print("Extracting features for CV detection...")
+        
+        # Filter feature list to include only available columns
+        available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
+        
+        # Extract contrastive curves embeddings if available
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
+        
+        if embedding_features:
+            print(f"Found {len(embedding_features)} contrastive curves embedding features")
+            available_features.extend(embedding_features)
+        else:
+            print("No contrastive curves embeddings found in the data")
+        
+        # Extract feature matrix
+        X = self.filtered_data[available_features].copy()
+        
+        # Handle missing values
+        for col in X.columns:
+            if X[col].isnull().any():
+                if X[col].dtype in [np.float64, np.int64]:
+                    X[col] = X[col].fillna(X[col].median())
+                else:
+                    X[col] = X[col].fillna(X[col].mode()[0] if len(X[col].mode()) > 0 else 0)
+        
+        # Scale features (but not embedding features which are already normalized)
+        self.scaler = StandardScaler()
+        cols_to_scale = [col for col in X.columns if col not in embedding_features]
+        
+        if cols_to_scale:
+            X_scaled = X.copy()
+            X_scaled[cols_to_scale] = self.scaler.fit_transform(X[cols_to_scale])
+        else:
+            X_scaled = X.copy()
+        
+        self.features = X
+        self.scaled_features = X_scaled
+        self.feature_names = available_features
+        
+        return X_scaled
+
+
+    def select_optimal_features(self):
+        """
+        Select optimal features combining domain knowledge and data-driven discovery,
+        with special handling for contrastive curves embeddings.
+        """
+        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
+            print("No features available. Call extract_features() first.")
+            return False
+        
+        print("Performing feature selection...")
+        start_time = time.time()
+        
+        # Prepare data
+        known_ids = self.load_known_cvs()
+        if known_ids is None or len(known_ids) == 0:
+            print("No known CVs available for training.")
+            return False
+        
+        id_col = 'sourceid' if 'sourceid' in self.filtered_data.columns else 'primvs_id'
+        y = self.filtered_data[id_col].astype(str).isin(known_ids).astype(int)
+        X = self.scaled_features
+        feature_names = list(self.scaled_features.columns)
+        
+        # Identify domain knowledge features and embedding features
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in feature_names]
+        domain_features = [col for col in self.cv_features if col in feature_names]
+        
+        print(f"Total features: {len(feature_names)}")
+        print(f"  - {len(domain_features)} domain knowledge features")
+        print(f"  - {len(embedding_features)} embedding features")
+        print(f"  - {len(feature_names) - len(domain_features) - len(embedding_features)} other features")
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y
+        )
+        
+        # Train model with all features to get importance
+        model = xgb.XGBClassifier(
+            n_estimators=100,
+            max_depth=3,
+            learning_rate=0.1,
+            objective='binary:logistic',
+            scale_pos_weight=(len(y_train) - y_train.sum()) / y_train.sum(),
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        model.fit(X_train, y_train)
+        
+        # Get feature importance
+        importance = model.feature_importances_
+        feature_imp = pd.DataFrame({
+            'Feature': feature_names,
+            'Importance': importance,
+            'Category': 'Other'
+        }).sort_values('Importance', ascending=False)
+        
+        # Tag features by category for analysis
+        feature_imp.loc[feature_imp['Feature'].isin(domain_features), 'Category'] = 'Domain'
+        feature_imp.loc[feature_imp['Feature'].isin(embedding_features), 'Category'] = 'Embedding'
+        
+        # Save feature importance
+        feature_imp.to_csv(os.path.join(self.output_dir, 'feature_importance.csv'), index=False)
+        
+        # Compare feature sets
+        from sklearn.metrics import average_precision_score, roc_auc_score
+        
+        print("\nEvaluating feature set performance...")
+        
+        # Create feature sets to evaluate
+        feature_sets = {
+            'All Features': feature_names,
+            'Domain Features': domain_features,
+            'Embedding Features': embedding_features,
+            'Top 50%': feature_imp.head(len(feature_names)//2)['Feature'].tolist(),
+            'Top 20': feature_imp.head(20)['Feature'].tolist(),
+            'Combined (Domain + Top Embeddings)': domain_features + 
+                [f for f in feature_imp[feature_imp['Category'] == 'Embedding']
+                .head(min(20, len(embedding_features)))['Feature'].tolist() 
+                if f not in domain_features]
+        }
+        
+        results = []
+        
+        for name, feature_set in feature_sets.items():
+            if not feature_set:  # Skip empty sets
+                continue
+                
+            model = xgb.XGBClassifier(
+                n_estimators=100,
+                max_depth=3,
+                learning_rate=0.1,
+                objective='binary:logistic',
+                scale_pos_weight=(len(y_train) - y_train.sum()) / y_train.sum(),
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            model.fit(X_train[feature_set], y_train)
+            y_prob = model.predict_proba(X_test[feature_set])[:, 1]
+            
+            # Calculate metrics
+            ap = average_precision_score(y_test, y_prob)
+            roc = roc_auc_score(y_test, y_prob)
+            
+            results.append({
+                'Feature Set': name,
+                'Features': len(feature_set),
+                'AP': ap,
+                'ROC AUC': roc
+            })
+        
+        # Convert to DataFrame and sort by AP
+        results_df = pd.DataFrame(results).sort_values('AP', ascending=False)
+        
+        # Save results
+        results_df.to_csv(os.path.join(self.output_dir, 'feature_set_comparison.csv'), index=False)
+        
+        print("\nFeature set comparison results:")
+        print(results_df)
+        
+        # Select best feature set
+        best_set_name = results_df.iloc[0]['Feature Set']
+        best_features = feature_sets[best_set_name]
+        
+        print(f"\nSelected best feature set: {best_set_name} with {len(best_features)} features")
+        print(f"Average Precision: {results_df.iloc[0]['AP']:.4f}")
+        
+        # Store the best features
+        self.optimal_features = best_features
+        
+        # Visualize feature importance by category
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(x='Category', y='Importance', data=feature_imp)
+        plt.title('Feature Importance by Category')
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, 'feature_importance_by_category.png'), dpi=300)
+        plt.close()
+        
+        # Report runtime
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"Feature selection completed in {timedelta(seconds=int(duration))}")
+        
+        return True
+
+
+
+
+    def load_known_cvs(self):
+        """
+        Load known CVs for classifier training with enhanced ID matching capability.
+        """
+        if self.known_cv_file is None:
+            print("No known CV file provided. Skipping.")
+            return None
+        
+        print(f"Loading known CVs from {self.known_cv_file}...")
+        
+        try:
+            # Determine file type and load accordingly
+            if self.known_cv_file.endswith('.fits'):
+                with fits.open(self.known_cv_file) as hdul:
+                    # Convert to pandas DataFrame
+                    cv_data = Table(hdul[1].data).to_pandas()
+            elif self.known_cv_file.endswith('.csv'):
+                cv_data = pd.read_csv(self.known_cv_file)
+            else:
+                print(f"Unsupported file format: {self.known_cv_file}")
+                return None
+            
+            print(f"Loaded {len(cv_data)} known CV sources")
+            
+            # Try to find ID column for matching
+            id_columns = ['sourceid', 'primvs_id', 'id', 'source_id', 'ID']
+            id_col = None
+            
+            for col in id_columns:
+                if col in cv_data.columns:
+                    id_col = col
+                    print(f"Using '{id_col}' column for CV identification")
+                    break
+            
+            if id_col is None:
+                print("Could not find ID column in known CV file.")
+                print("Available columns:", cv_data.columns.tolist())
+                return None
+            
+            # Extract IDs as strings to ensure consistent matching
+            known_ids = set(cv_data[id_col].astype(str))
+            print(f"Extracted {len(known_ids)} unique CV IDs")
+            
+            return known_ids
+                
+        except Exception as e:
+            print(f"Error loading known CVs: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
+
+
+
+    def train_two_stage_classifier(self):
+        """
+        Train a two-stage classifier that integrates traditional astronomical features with 
+        contrastive curve embeddings for robust CV identification in time-domain survey data.
+        
+        This implementation utilizes the complete known CV dataset structure for comprehensive 
+        training, properly handling feature alignment between training and candidate sets.
+        """
+        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
+            print("No features available. Call extract_features() first.")
+            return False
+        
+        print("Training two-stage CV classifier...")
+        
+        # Load the complete known CV dataset
+        if self.known_cv_file is None:
+            print("Error: No known CV file provided. Classifier aborted.")
+            return False
+        
+        try:
+            # Load complete known CV dataset with appropriate format handling
+            if self.known_cv_file.endswith('.fits'):
+                with fits.open(self.known_cv_file) as hdul:
+                    known_cv_data = Table(hdul[1].data).to_pandas()
+            elif self.known_cv_file.endswith('.csv'):
+                known_cv_data = pd.read_csv(self.known_cv_file)
+            else:
+                print(f"Unsupported file format: {self.known_cv_file}")
+                return False
+            
+            print(f"Loaded {len(known_cv_data)} known CV records for training")
+            
+            # Identify feature categories
+            cc_embedding_cols = [str(i) for i in range(64)]
+            embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
+            traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+            
+            print(f"Traditional features: {len(traditional_features)}")
+            print(f"Embedding features: {len(embedding_features)}")
+            
+            # Prepare training and validation datasets
+            
+            # Ensure necessary columns exist in both datasets
+            required_features = traditional_features + embedding_features
+            known_cv_features = [f for f in required_features if f in known_cv_data.columns]
+            
+            # Extract common features between datasets
+            candidate_features = self.scaled_features[known_cv_features].copy()
+            known_cv_subset = known_cv_data[known_cv_features].copy()
+            
+            # Handle missing values in known CV dataset
+            for col in known_cv_subset.columns:
+                if known_cv_subset[col].isnull().any():
+                    if known_cv_subset[col].dtype in [np.float64, np.int64]:
+                        known_cv_subset[col] = known_cv_subset[col].fillna(known_cv_subset[col].median())
+                    else:
+                        known_cv_subset[col] = known_cv_subset[col].fillna(
+                            known_cv_subset[col].mode()[0] if len(known_cv_subset[col].mode()) > 0 else 0
+                        )
+            
+            # Scale known CV features using the same scaler as candidates
+            for col in traditional_features:
+                if col in known_cv_subset.columns:
+                    # Reshape for scikit-learn compatibility
+                    values = known_cv_subset[col].values.reshape(-1, 1)
+                    scaled_values = self.scaler.transform(values)
+                    known_cv_subset[col] = scaled_values.flatten()
+            
+            # Create positive examples (known CVs) and negative examples (candidates)
+            X_positive = known_cv_subset.values
+            y_positive = np.ones(len(X_positive))
+            
+            # For negative examples, use all filtered data (or a representative sample if too large)
+            max_neg_samples = min(len(candidate_features), len(X_positive) * 5)  # Cap negative examples
+            if len(candidate_features) > max_neg_samples:
+                # Random sampling without replacement
+                neg_indices = np.random.choice(len(candidate_features), max_neg_samples, replace=False)
+                X_negative = candidate_features.values[neg_indices]
+            else:
+                X_negative = candidate_features.values
+            y_negative = np.zeros(len(X_negative))
+            
+            # Combine datasets
+            X_combined = np.vstack([X_positive, X_negative])
+            y_combined = np.concatenate([y_positive, y_negative])
+            
+            print(f"Training dataset constructed: {len(y_positive)} positive examples, {len(y_negative)} negative examples")
+            
+            # Split into training and validation sets
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_combined, y_combined, test_size=0.25, random_state=42, stratify=y_combined
+            )
+            
+            # Create class weights to account for potential imbalance
+            pos_weight = (len(y_train) - np.sum(y_train)) / np.sum(y_train) if np.sum(y_train) > 0 else 1.0
+            
+            # Separate features by type
+            trad_indices = [i for i, col in enumerate(known_cv_features) if col in traditional_features]
+            emb_indices = [i for i, col in enumerate(known_cv_features) if col in embedding_features]
+            
+            # Extract feature subsets for two-stage classification
+            X_trad_train = X_train[:, trad_indices] if trad_indices else None
+            X_trad_val = X_val[:, trad_indices] if trad_indices else None
+            
+            X_emb_train = X_train[:, emb_indices] if emb_indices else None
+            X_emb_val = X_val[:, emb_indices] if emb_indices else None
+            
+
+
+
+            # STAGE 1: Train model with traditional features
+            print("\nStage 1: Training model with traditional features...")
+            
+            model_trad = xgb.XGBClassifier(
+                n_estimators=200,
+                max_depth=3,
+                learning_rate=0.1,
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            model_trad.fit(X_trad_train, y_train)
+            
+            # Evaluate traditional model
+            y_pred_trad = model_trad.predict(X_trad_val)
+            prob_trad = model_trad.predict_proba(X_trad_val)[:, 1]
+            
+            print("\nTraditional Feature Model Performance:")
+            print(classification_report(y_val, y_pred_trad))
+            
+            # Get feature importance for traditional model
+            trad_feature_names = [known_cv_features[i] for i in trad_indices]
+            trad_importance = pd.DataFrame({
+                'Feature': trad_feature_names,
+                'Importance': model_trad.feature_importances_
+            }).sort_values('Importance', ascending=False)
+            
+            print("\nTop traditional features by importance:")
+            for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
+                print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
+
+
+
+
+            print("\nStage 2: Training model with embedding features...")
+            
+            # Apply PCA to reduce dimensionality of embeddings while preserving variance
+            from sklearn.decomposition import PCA
+            
+            # Determine optimal number of components (explaining ~90% variance)
+            pca = PCA().fit(X_emb_train)
+            explained_variance = np.cumsum(pca.explained_variance_ratio_)
+            n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
+            print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
+            
+            # Apply PCA transformation
+            pca = PCA(n_components=n_components)
+            X_emb_train_pca = pca.fit_transform(X_emb_train)
+            X_emb_val_pca = pca.transform(X_emb_val)
+            
+            # Train embedding model
+            model_emb = xgb.XGBClassifier(
+                n_estimators=200,
+                max_depth=3,
+                learning_rate=0.1,
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            model_emb.fit(X_emb_train_pca, y_train)
+            
+            # Evaluate embedding model
+            y_pred_emb = model_emb.predict(X_emb_val_pca)
+            prob_emb = model_emb.predict_proba(X_emb_val_pca)[:, 1]
+            
+            print("\nEmbedding Feature Model Performance:")
+            print(classification_report(y_val, y_pred_emb))
+
+
+
+            
+            # STAGE 3: Train meta-model (stacking) if both models available
+            print("\nStage 3: Training meta-model to combine predictions...")
+                            
+            # Create meta-features (predictions from base models)
+            meta_features_train = np.column_stack([
+                model_trad.predict_proba(X_trad_train)[:, 1],
+                model_emb.predict_proba(X_emb_train_pca)[:, 1]
+            ])
+            
+            meta_features_val = np.column_stack([
+                prob_trad,
+                prob_emb
+            ])
+            
+            # Train meta-model using Logistic Regression instead of XGBoost
+            from sklearn.linear_model import LogisticRegression
+            
+            meta_model = LogisticRegression(
+                class_weight='balanced',  # Handle class imbalance
+                C=1.0,                    # Regularization strength (inverse)
+                solver='liblinear',       # Efficient solver for small datasets
+                random_state=42
+            )
+            
+            meta_model.fit(meta_features_train, y_train)
+            
+            # Evaluate meta-model
+            y_pred_meta = meta_model.predict(meta_features_val)
+            
+            print("\nMeta-Model Performance:")
+            print(classification_report(y_val, y_pred_meta))
+            
+            # Extract coefficients instead of feature importances
+            blend_weights = meta_model.coef_[0]
+            print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
+
+
+            # STAGE 4: Apply ensemble model to all candidate data
+            print("\nApplying ensemble classifier to all candidate data...")
+            
+            # Extract features from all candidates in the same order as training
+            X_trad_full = self.scaled_features[[known_cv_features[i] for i in trad_indices]].values
+            X_emb_full = self.scaled_features[[known_cv_features[i] for i in emb_indices]].values
+            
+            # Apply PCA to full embedding dataset
+            X_emb_full_pca = pca.transform(X_emb_full)
+            
+            # Get predictions from both models
+            trad_probs = model_trad.predict_proba(X_trad_full)[:, 1]
+            emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
+            
+            # Combine using meta-model
+            meta_features_full = np.column_stack([trad_probs, emb_probs])
+            final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
+            
+            # Store models for later use
+            self.model_trad = model_trad
+            self.model_emb = model_emb
+            self.model_meta = meta_model
+            self.pca = pca
+            
+            # Add predictions to filtered data
+            self.filtered_data['cv_prob_trad'] = trad_probs
+            self.filtered_data['cv_prob_emb'] = emb_probs
+            self.filtered_data['cv_prob'] = final_probs
+            
+            # Store feature names for later interpretation
+            self.trad_feature_names = [known_cv_features[i] for i in trad_indices]
+            self.emb_feature_names = [known_cv_features[i] for i in emb_indices]
+            
+            # Save models
+            joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
+            joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
+            joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
+            joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
+            
+            # Set the ensemble as the primary model
+            self.model = meta_model
+            
+            # Generate visualization of probability distribution
+            plt.figure(figsize=(10, 6))
+            plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
+            plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+            plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+            plt.xlabel('CV Probability')
+            plt.ylabel('Number of Sources')
+            plt.title('Distribution of CV Probabilities')
+            plt.yscale('log')  # Log scale for better visualization of distribution
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
+            plt.close()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error in two-stage classifier training: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+
+
+
+
+    
+    def run_classifier(self):
+        """
+        Run the trained classifier on all filtered data to identify CV candidates.
+        If no model is available, this will train one first.
+        """
+        if not hasattr(self, 'model') or self.model is None:
+            print("No trained model available. Training now...")
+            self.train_classifier()
+
+        print("Running classifier on all filtered data...")
+        
+        # Get predictions and probabilities
+        cv_probs = self.model.predict_proba(self.scaled_features)[:, 1]
+        
+        # Add to filtered data
+        self.filtered_data['cv_prob'] = cv_probs
+        
+        # Plot probability distribution
+        plt.figure(figsize=(10, 6))
+        plt.hist(cv_probs, bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+        plt.xlabel('CV Probability')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Probabilities')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
+        plt.close()
+        
+        return True
+    
+
+    def select_candidates(self):
+        """
+        Select final CV candidates primarily using XGBoost classification results when available,
+        with embedding proximity as a secondary factor to refine the selection.
+        """
+        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
+            print("No filtered data available. Call apply_initial_filters() first.")
+            return False
+        
+        print("Selecting final CV candidates...")
+        
+        # Define selection criteria prioritizing XGBoost classification
+        # Check if XGBoost classifier probabilities are available
+        if 'cv_prob' in self.filtered_data.columns:
+            print("Using XGBoost classifier probabilities for candidate selection")
+            
+            # Identify high confidence candidates
+            high_confidence_threshold = 0.7
+            high_confidence_mask = self.filtered_data['cv_prob'] >= high_confidence_threshold
+            medium_confidence_threshold = 0.5
+            medium_confidence_mask = (self.filtered_data['cv_prob'] >= medium_confidence_threshold) & (self.filtered_data['cv_prob'] < high_confidence_threshold)
+            
+            high_confidence_count = high_confidence_mask.sum()
+            medium_confidence_count = medium_confidence_mask.sum()
+            
+            print(f"Found {high_confidence_count} high confidence candidates (prob >= {high_confidence_threshold})")
+            print(f"Found {medium_confidence_count} medium confidence candidates ({medium_confidence_threshold} <= prob < {high_confidence_threshold})")
+            
+            # Create combined mask for all candidates
+            candidate_mask = self.filtered_data['cv_prob'] >= medium_confidence_threshold
+            
+            # Set candidate flag
+            self.filtered_data['is_cv_candidate'] = candidate_mask
+            
+            # Add confidence level classification
+            self.filtered_data['confidence_level'] = 'low'
+            self.filtered_data.loc[medium_confidence_mask, 'confidence_level'] = 'medium'
+            self.filtered_data.loc[high_confidence_mask, 'confidence_level'] = 'high'
+            
+            # Set confidence directly from classifier probability
+            self.filtered_data['confidence'] = self.filtered_data['cv_prob']
+            
+        # If XGBoost results not available, try anomaly detection
+        elif 'is_anomaly' in self.filtered_data.columns:
+            print("No classifier results available. Using anomaly detection results.")
+            
+            anomaly_mask = self.filtered_data['is_anomaly']
+            anomaly_count = anomaly_mask.sum()
+            
+            print(f"Found {anomaly_count} candidates using anomaly detection")
+            
+            # Set candidate flag
+            self.filtered_data['is_cv_candidate'] = anomaly_mask
+            
+            # Default medium confidence for anomaly-detected candidates
+            self.filtered_data['confidence_level'] = 'low'
+            self.filtered_data.loc[anomaly_mask, 'confidence_level'] = 'medium'
+            self.filtered_data['confidence'] = 0.5  # Default medium confidence
+            
+        # If neither is available, use domain-knowledge score as fallback
+        elif 'cv_score' in self.filtered_data.columns:
+            print("Using domain-knowledge CV score for candidate selection")
+            
+            high_score_threshold = 0.7
+            medium_score_threshold = 0.5
+            
+            high_score_mask = self.filtered_data['cv_score'] >= high_score_threshold
+            medium_score_mask = (self.filtered_data['cv_score'] >= medium_score_threshold) & (self.filtered_data['cv_score'] < high_score_threshold)
+            
+            high_score_count = high_score_mask.sum()
+            medium_score_count = medium_score_mask.sum()
+            
+            print(f"Found {high_score_count} high score candidates (score >= {high_score_threshold})")
+            print(f"Found {medium_score_count} medium score candidates ({medium_score_threshold} <= score < {high_score_threshold})")
+            
+            # Create combined mask for all candidates
+            candidate_mask = self.filtered_data['cv_score'] >= medium_score_threshold
+            
+            # Set candidate flag
+            self.filtered_data['is_cv_candidate'] = candidate_mask
+            
+            # Add confidence level classification
+            self.filtered_data['confidence_level'] = 'low'
+            self.filtered_data.loc[medium_score_mask, 'confidence_level'] = 'medium'
+            self.filtered_data.loc[high_score_mask, 'confidence_level'] = 'high'
+            
+            # Set confidence directly from cv_score
+            self.filtered_data['confidence'] = self.filtered_data['cv_score']
+            
+        # If none of the above are available, use simplified method
+        else:
+            print("No advanced selection criteria available. Using simplified selection.")
+            return self.select_candidates_simple()
+        
+        # Create final candidate set
+        self.cv_candidates = self.filtered_data[self.filtered_data['is_cv_candidate']].copy()
+        
+        # If embedding information is available, use it to refine the rankings
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
+        
+        if embedding_features and self.known_cv_file is not None and len(embedding_features) >= 10:
+            print("Refining candidate rankings using embedding proximity to known CVs...")
+            
+            # Load known CV IDs
+            known_ids = self.load_known_cvs()
+            
+            if known_ids is not None and len(known_ids) > 0:
+                # Determine ID column for matching
+                id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
+                id_col = None
+                
+                for col in id_columns:
+                    if col in self.cv_candidates.columns:
+                        id_col = col
+                        break
+                
+                if id_col is not None:
+                    # Flag known CVs in candidates
+                    self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].astype(str).isin(known_ids)
+                    
+                    # Extract embeddings and reduce dimensionality
+                    from sklearn.decomposition import PCA
+                    
+                    # Extract embeddings for candidates and known CVs
+                    all_embeddings = self.cv_candidates[embedding_features].values
+                    
+                    # Apply PCA
+                    pca = PCA(n_components=3)
+                    all_embeddings_3d = pca.fit_transform(all_embeddings)
+                    
+                    # Add PCA dimensions
+                    self.cv_candidates['pca_1'] = all_embeddings_3d[:, 0]
+                    self.cv_candidates['pca_2'] = all_embeddings_3d[:, 1]
+                    self.cv_candidates['pca_3'] = all_embeddings_3d[:, 2]
+                    
+                    # Split known CVs and candidates
+                    known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+                    candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
+                    
+                    if len(known_cvs) > 0 and len(candidates) > 0:
+                        # Calculate embedding distances
+                        from scipy.spatial.distance import cdist
+                        
+                        known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
+                        candidate_points = candidates[['pca_1', 'pca_2', 'pca_3']].values
+                        
+                        # Calculate minimum distance from each candidate to any known CV
+                        distances = cdist(candidate_points, known_points, 'euclidean')
+                        min_distances = np.min(distances, axis=1)
+                        
+                        # Add distance to nearest known CV
+                        candidates['distance_to_nearest_cv'] = min_distances
+                        
+                        # Normalized distance (0-1 scale, 0 is closest)
+                        max_dist = min_distances.max()
+                        if max_dist > 0:
+                            candidates['norm_distance'] = min_distances / max_dist
+                        else:
+                            candidates['norm_distance'] = 0
+                        
+                        # Compute embedding similarity score (inverse of normalized distance)
+                        candidates['embedding_similarity'] = 1 - candidates['norm_distance']
+                        
+                        # Blend classifier confidence with embedding similarity (weighted average)
+                        # Weight classifier confidence more heavily
+                        classifier_weight = 0.8
+                        embedding_weight = 0.2
+                        
+                        if 'confidence' in candidates.columns:
+                            candidates['blended_score'] = (
+                                classifier_weight * candidates['confidence'] + 
+                                embedding_weight * candidates['embedding_similarity']
+                            )
+                        else:
+                            candidates['blended_score'] = candidates['embedding_similarity']
+                        
+                        # Update main candidates dataframe with these scores
+                        self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'distance_to_nearest_cv'] = candidates['distance_to_nearest_cv'].values
+                        self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'embedding_similarity'] = candidates['embedding_similarity'].values
+                        
+                        if 'blended_score' in candidates.columns:
+                            self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'blended_score'] = candidates['blended_score'].values
+                            
+                            # Replace confidence with blended score for ranking, but keep original confidence
+                            self.cv_candidates['original_confidence'] = self.cv_candidates['confidence']
+                            self.cv_candidates['confidence'] = self.cv_candidates['blended_score']
+                        
+                        print(f"Enhanced candidate scoring with embedding proximity information")
+        
+        # Sort by confidence (which may now be the blended score)
+        self.cv_candidates = self.cv_candidates.sort_values('confidence', ascending=False)
+        
+        print(f"Selected {len(self.cv_candidates)} CV candidates")
+        return True
+
+
+
+
+
+    def optimize_hyperparameters(self, max_evaluations=100):
+        """
+        Perform efficient hyperparameter optimization for XGBoost using Bayesian optimization.
+        This approach focuses on smart exploration rather than brute force grid search.
+        
+        Parameters:
+        -----------
+        max_evaluations : int
+            Maximum number of hyperparameter combinations to evaluate
+        """
+        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
+            print("No features available. Call extract_features() first.")
+            return False
+        
+        print(f"Starting hyperparameter optimization with max {max_evaluations} evaluations...")
+        start_time = time.time()
+        
+        # Get training data
+        known_ids = self.load_known_cvs()
+        if known_ids is None or len(known_ids) == 0:
+            print("No known CVs available for training.")
+            return False
+        
+        # Prepare data
+        id_col = 'sourceid' if 'sourceid' in self.filtered_data.columns else 'primvs_id'
+        y = self.filtered_data[id_col].astype(str).isin(known_ids).astype(int)
+        X = self.scaled_features
+        
+        # For very large datasets, use a subset for optimization
+        if len(X) > 100000:
+            print(f"Dataset is large ({len(X)} samples). Using stratified subset for optimization.")
+            X_subset, _, y_subset, _ = train_test_split(
+                X, y, 
+                train_size=100000,  # Use 100k samples maximum
+                stratify=y,
+                random_state=42
+            )
+            X, y = X_subset, y_subset
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, 
+            test_size=0.25, 
+            random_state=42,
+            stratify=y
+        )
+        
+        # Calculate class weight
+        pos_weight = (len(y_train) - y_train.sum()) / y_train.sum() if y_train.sum() > 0 else 1.0
+        
+        # Try to import specialized optimization libraries
+        try:
+            from skopt import BayesSearchCV
+            from skopt.space import Real, Integer, Categorical
+            
+            print("Using Bayesian optimization for hyperparameter tuning")
+            
+            # Define parameter search space for Bayesian optimization
+            param_space = {
+                'max_depth': Integer(2, 8),
+                'learning_rate': Real(0.01, 0.3, prior='log-uniform'),
+                'n_estimators': Integer(50, 500),
+                'min_child_weight': Integer(1, 10),
+                'gamma': Real(0.0, 0.5, prior='uniform'),
+                'subsample': Real(0.6, 1.0, prior='uniform'),
+                'colsample_bytree': Real(0.6, 1.0, prior='uniform'),
+                'reg_alpha': Real(0.0, 10.0, prior='log-uniform'),
+                'reg_lambda': Real(0.0, 10.0, prior='log-uniform')
+            }
+            
+            # Check for GPU availability
+            gpu_available = False
+            try:
+                import torch
+                gpu_available = torch.cuda.is_available()
+            except ImportError:
+                pass
+            
+            if gpu_available:
+                param_space['tree_method'] = Categorical(['gpu_hist'])
+                print("GPU acceleration enabled for hyperparameter optimization")
+            else:
+                param_space['tree_method'] = Categorical(['hist', 'approx'])
+                print("Using CPU for hyperparameter optimization")
+            
+            # Create the base model
+            model = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            # Create CV strategy with stratification for imbalanced data
+            from sklearn.model_selection import StratifiedKFold
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            
+            # Create the Bayesian optimization search
+            search = BayesSearchCV(
+                estimator=model,
+                search_spaces=param_space,
+                n_iter=max_evaluations,
+                scoring='average_precision',
+                cv=cv,
+                n_jobs=-1,
+                verbose=0,
+                random_state=42
+            )
+            
+            # Run optimization
+            search.fit(X_train, y_train)
+            
+            # Get best parameters and model
+            best_params = search.best_params_
+            best_score = search.best_score_
+            
+            print(f"Best score from Bayesian optimization: {best_score:.4f}")
+            print(f"Best parameters from Bayesian optimization:")
+            #for param, value in best_params.items():
+            #    print(f"  {param}: {value}")
+                
+            # Create model with best parameters
+            optimized_model = xgb.XGBClassifier(
+                **best_params,
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+        except ImportError:
+            # Fall back to efficient Random Search if scikit-optimize is not available
+            print("Bayesian optimization not available. Using adaptive random search instead.")
+            
+            from sklearn.model_selection import RandomizedSearchCV
+            
+            # Define parameter search space
+            param_space = {
+                'max_depth': [2, 3, 4, 5, 6, 8],
+                'learning_rate': [0.01, 0.03, 0.05, 0.1, 0.2, 0.3],
+                'n_estimators': [50, 100, 200, 300, 400, 500],
+                'min_child_weight': [1, 3, 5, 7, 10],
+                'gamma': [0, 0.1, 0.2, 0.3, 0.4, 0.5],
+                'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
+                'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+                'reg_alpha': [0, 0.1, 1, 5, 10],
+                'reg_lambda': [0, 0.1, 1, 5, 10]
+            }
+            
+            # Check for GPU availability
+            gpu_available = False
+            try:
+                import torch
+                gpu_available = torch.cuda.is_available()
+            except ImportError:
+                pass
+            
+            if gpu_available:
+                param_space['tree_method'] = ['gpu_hist']
+                print("GPU acceleration enabled for hyperparameter optimization")
+            else:
+                param_space['tree_method'] = ['hist', 'approx']
+                print("Using CPU for hyperparameter optimization")
+            
+            # Create the base model
+            model = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42,
+                early_stopping_rounds=10  # Enable early stopping to make it more efficient
+            )
+            
+            # Create CV strategy with stratification for imbalanced data
+            from sklearn.model_selection import StratifiedKFold
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            
+            # Create validation set for early stopping
+            X_train_main, X_train_val, y_train_main, y_train_val = train_test_split(
+                X_train, y_train, 
+                test_size=0.2, 
+                random_state=42,
+                stratify=y_train
+            )
+            
+            # Create the random search
+            search = RandomizedSearchCV(
+                estimator=model,
+                param_distributions=param_space,
+                n_iter=max_evaluations,
+                scoring='average_precision',
+                cv=cv,
+                verbose=0,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            # Prepare evaluation set for early stopping
+            eval_set = [(X_train_val, y_train_val)]
+            
+            # Run optimization
+            search.fit(X_train_main, y_train_main, eval_set=eval_set)
+            
+            # Get best parameters and model
+            best_params = search.best_params_
+            best_score = search.best_score_
+            
+            print(f"Best score from random search: {best_score:.4f}")
+            print(f"Best parameters from random search:")
+            for param, value in best_params.items():
+                print(f"  {param}: {value}")
+                
+            # Create model with best parameters
+            optimized_model = xgb.XGBClassifier(
+                **best_params,
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42
+            )
+        
+        # Final evaluation on test set
+        optimized_model.fit(X_train, y_train)
+        test_score = optimized_model.score(X_test, y_test)
+        
+        print(f"Final model test accuracy: {test_score:.4f}")
+        
+        # Train final model on all data
+        print("Training final model on all data with optimized parameters...")
+        final_model = xgb.XGBClassifier(
+            **best_params,
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        final_model.fit(X, y)
+        
+        # Save the optimized model
+        self.model = final_model
+        joblib.dump(final_model, os.path.join(self.output_dir, 'cv_classifier_optimized.joblib'))
+        
+        # Save parameters for future reference
+        import json
+        with open(os.path.join(self.output_dir, 'optimized_hyperparameters.json'), 'w') as f:
+            json.dump(best_params, f, indent=4)
+        
+        # Report optimization time
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"Hyperparameter optimization completed in {timedelta(seconds=int(duration))}")
+        
+        # Analyze feature importance of final model
+        feature_importance = pd.DataFrame({
+            'Feature': X.columns,
+            'Importance': final_model.feature_importances_
+        }).sort_values('Importance', ascending=False)
+        
+        print("\nTop 10 most important features:")
+        for i, (_, row) in enumerate(feature_importance.head(10).iterrows()):
+            print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
+        
+        # Save feature importance
+        feature_importance.to_csv(os.path.join(self.output_dir, 'feature_importance_optimized.csv'), index=False)
+        
+        return True
+
+
+
+
+
+
+    def detect_anomalies(self):
+        """Use Isolation Forest to identify anomalous sources that might be CVs."""
+        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
+            print("No features available. Call extract_features() first.")
+            return None
+        
+        print("Detecting anomalous sources with Isolation Forest...")
+        
+        # Initialize Isolation Forest
+        iso_forest = IsolationForest(
+            n_estimators=200,
+            contamination=0.05,  # Expect 5% of sources to be unusual
+            random_state=42,
+            n_jobs=-1  # Use all processors
+        )
+        
+        # Fit and predict
+        anomaly_scores = iso_forest.fit_predict(self.scaled_features)
+        
+        # Get anomaly scores (decision function)
+        decision_scores = iso_forest.decision_function(self.scaled_features)
+        
+        # Add anomaly scores to filtered data
+        self.filtered_data['anomaly_score'] = decision_scores
+        
+        # Mark anomalies (where prediction is -1)
+        anomaly_mask = anomaly_scores == -1
+        self.filtered_data['is_anomaly'] = anomaly_mask
+        
+        n_anomalies = anomaly_mask.sum()
+        anomaly_percent = 100 * n_anomalies / len(self.filtered_data)
+        print(f"Identified {n_anomalies} anomalous sources ({anomaly_percent:.2f}%)")
+        
+        return n_anomalies > 0
+
+
+    def calculate_cv_score(self):
+        """
+        Calculate a CV score based on domain knowledge of CV characteristics.
+        This combines multiple heuristics based on CV properties.
+        """
+        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
+            print("No filtered data available. Call apply_initial_filters() first.")
+            return False
+        
+        print("Calculating CV scores based on domain knowledge...")
+        
+        # Make a copy of the filtered data
+        data = self.filtered_data.copy()
+        
+        # 1. Period-based score: Higher for shorter periods
+        # CVs typically have periods in the hours range
+        data['period_score'] = np.clip(1.0 - np.log10(data['true_period']) / 2.0, 0, 1)
+        
+        # 2. Amplitude-based score: Higher for larger amplitudes
+        # Scale to 0-1 using a sigmoid function centered at 0.5 mag
+        data['amplitude_score'] = 1 / (1 + np.exp(-2 * (data['true_amplitude'] - 0.5)))
+        
+        # 3. Skewness-based score: CV light curves often show asymmetry
+        if 'skew' in data.columns:
+            # Absolute skewness matters (positive or negative)
+            data['skew_score'] = np.clip(np.abs(data['skew']) / 2.0, 0, 1)
+        else:
+            data['skew_score'] = 0.5  # Default if not available
+        
+        # 4. Color-based score: CVs often have colors compatible with hot components
+        if all(col in data.columns for col in ['J-K', 'H-K']):
+            # This is a simplified approximation - would need refinement
+            # Most CVs have relatively blue colors
+            data['color_score'] = 1 - np.clip((data['J-K'] + data['H-K']) / 2, 0, 1)
+        else:
+            data['color_score'] = 0.5  # Default if colors not available
+        
+        # 5. Periodicity quality: Higher for more reliable periods
+        data['fap_score'] = 1 - np.clip(data['best_fap'], 0, 1)
+        
+        # Combine scores with different weights
+        data['cv_score'] = (
+            0.30 * data['period_score'] +
+            0.30 * data['amplitude_score'] +
+            0.15 * data['skew_score'] +
+            0.15 * data['color_score'] +
+            0.10 * data['fap_score']
+        )
+        
+        # Update the filtered data
+        self.filtered_data = data
+        
+        # Create a histogram of the scores to help set thresholds
+        plt.figure(figsize=(10, 6))
+        plt.hist(data['cv_score'], bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.7, color='g', linestyle='--', label='High confidence threshold (0.7)')
+        plt.xlabel('CV Score')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Scores')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_score_distribution.png'), dpi=300)
+        plt.close()
+        
+        return True
+            
+
+    def pipeline(self):
+        """Run the complete CV finder pipeline with advanced feature selection and hyperparameter tuning."""
+        start_time = time.time()
+        
+        print("\n" + "="*80)
+        print("RUNNING ENHANCED PRIMVS CV FINDER PIPELINE")
+        print("="*80 + "\n")
+        
+        # Step 1: Load PRIMVS data
+        if not self.load_primvs_data():
+            print("Failed to load PRIMVS data. Aborting.")
+            return False
+        
+        # Step 2: Apply initial filters
+        if not self.apply_initial_filters():
+            print("Failed to apply initial filters. Aborting.")
+            return False
+        
+        # Step 3: Extract features
+        if self.extract_features() is None:
+            print("Failed to extract features. Aborting.")
+            return False
+        
+        # Step 4: Perform advanced feature selection
+        if not self.select_optimal_features():
+            print("Feature selection failed. Continuing with all features.")
+        else:
+            # Use only optimal features if available
+            if hasattr(self, 'optimal_features') and self.optimal_features:
+                self.scaled_features = self.scaled_features[self.optimal_features]
+                print(f"Using {len(self.optimal_features)} optimal features for classification")
+        
+        # Step 5: Calculate CV score
+        if not self.calculate_cv_score():
+            print("Failed to calculate CV scores. Continuing with limited features.")
+        
+        # Step 6: Detect anomalies
+        if not self.detect_anomalies():
+            print("Anomaly detection failed. Continuing without anomaly features.")
+        
+        # Step 7: Optimize hyperparameters
+        if self.known_cv_file is not None:
+            if not self.optimize_hyperparameters():
+                print("Hyperparameter optimization failed. Continuing with default parameters.")
+                # Fall back to basic classifier
+                if not self.train_classifier():
+                    print("Classifier training failed. Continuing with heuristic selection.")
+            
+            # Step the classifier on all data (model was set in hyperparameter optimization if successful)
+            if not self.run_classifier():
+                print("Classifier prediction failed. Continuing with heuristic selection.")
+        
+        # Step 8: Select final candidates
+        if not self.select_candidates():
+            print("Failed to select candidates. Aborting.")
+            return False
+        
+        # Step 9: Plot candidates
+        self.plot_candidates()
+        
+        # Step 10: Create embedding-specific visualizations
+        print("\nGenerating embedding-specific visualizations...")
+        
+        # Step 10a: Visualize embeddings
+        self.visualize_embeddings()
+        
+        # Step 10b: Compare with known CVs
+        self.compare_candidates_with_known_cvs()
+        
+        # Step 10c: Classification in embedding space
+        self.visualize_classification_in_embedding_space()
+        
+        # Step 11: Save candidates
+        if not self.save_candidates():
+            print("Failed to save candidates.")
+            return False
+        
+        end_time = time.time()
+        runtime = end_time - start_time
+        
+        print("\n" + "="*80)
+        print(f"ENHANCED PIPELINE COMPLETED in {timedelta(seconds=int(runtime))}")
+        print(f"Found {len(self.cv_candidates)} CV candidates")
+        print(f"Results saved to: {self.output_dir}")
+        print("="*80 + "\n")
+        
+        return True
+
+
+
+
+
+
+
+
 def main():
     """Main function to run the CV finder."""
     # Fixed paths to match your description
@@ -3474,7 +3605,7 @@ def main():
     known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits"
     period_limit = 10.0  # Very generous upper limit (days)
     amplitude_limit = 0.03  # Very low amplitude threshold (mag)
-    fap_limit = 0.7  # Permissive FAP threshold
+    fap_limit = 1.0  # Permissive FAP threshold
 
     print(f"Starting CV finder with parameters:")
     print(f"  - PRIMVS file: {primvs_file}")
@@ -3495,7 +3626,7 @@ def main():
     )
     
     # Run pipeline
-    success = finder.run_pipeline()
+    success = finder.pipeline()
     
     if success:
         print(f"CV finder completed successfully. Results in {output_dir}")
@@ -3504,7 +3635,143 @@ def main():
         print("CV finder failed.")
         return 1
 
+
+
+
+
+
+def overlay_tess_pointings(plt, ax=None, alpha=0.3, sectors=None, cameras=None):
+    """
+    Overlay TESS camera pointings on a galactic plot.
+    
+    Parameters:
+    -----------
+    plt : matplotlib.pyplot
+        The pyplot instance
+    ax : matplotlib.axes, optional
+        The axes to plot on. If None, uses current axes.
+    alpha : float, optional
+        Transparency of the camera fields
+    sectors : list, optional
+        List of sectors to include. If None, includes all sectors.
+    cameras : list, optional
+        List of cameras to include. If None, includes all cameras.
+    
+    Returns:
+    --------
+    ax : matplotlib.axes
+        The axes with the overlay
+    """
+    import numpy as np
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+    import matplotlib.patches as patches
+    
+    if ax is None:
+        ax = plt.gca()
+    
+    # TESS camera field data
+    tess_data = {
+        "Sector": np.arange(1, 14),
+        "Camera 1": [
+            (352.68, -64.85), (16.56, -54.02), (36.31, -44.26), (55.01, -36.64), 
+            (73.54, -31.93), (92.01, -30.58), (110.26, -32.63), (128.12, -37.74), 
+            (145.91, -45.30), (165.05, -54.82), (189.12, -65.54), (229.59, -75.13), 
+            (298.67, -76.33)
+        ],
+        "Camera 2": [
+            (324.57, -33.17), (352.08, -23.06), (17.17, -12.22), (41.81, -2.76), 
+            (67.06, 3.53), (92.81, 5.41), (118.18, 2.57), (142.37, -4.18), 
+            (165.70, -13.46), (189.90, -23.89), (217.30, -33.73), (249.34, -40.26), 
+            (284.05, -40.90)
+        ],
+        "Camera 3": [
+            (338.58, -55.08), (5.70, -44.31), (28.46, -33.91), (49.88, -25.47), 
+            (71.11, -20.13), (92.31, -18.59), (113.25, -20.93), (133.69, -26.70), 
+            (154.09, -35.04), (176.16, -45.14), (203.40, -55.72), (241.52, -63.82), 
+            (289.59, -64.68)
+        ],
+        "Camera 4": [
+            (19.49, -71.98), (33.36, -62.19), (47.39, -53.85), (61.87, -47.52), 
+            (76.70, -43.68), (91.62, -42.58), (106.36, -44.24), (120.60, -48.42), 
+            (134.27, -54.73), (147.70, -62.89), (161.39, -72.63), (177.30, -83.38), 
+            (357.94, -85.50)
+        ]
+    }
+    
+    # Filter sectors if specified
+    if sectors is not None:
+        sector_indices = [i for i, s in enumerate(tess_data["Sector"]) if s in sectors]
+    else:
+        sector_indices = range(len(tess_data["Sector"]))
+    
+    # Filter cameras if specified
+    if cameras is not None:
+        camera_keys = [f"Camera {c}" for c in cameras]
+    else:
+        camera_keys = ["Camera 1", "Camera 2", "Camera 3", "Camera 4"]
+    
+    # TESS camera field of view (approximate radius in degrees)
+    camera_radius = 12.0  # Each camera has a 24° × 24° field of view
+    
+    # Colors for different cameras
+    camera_colors = {
+        "Camera 1": "blue",
+        "Camera 2": "green",
+        "Camera 3": "red",
+        "Camera 4": "purple"
+    }
+    
+    # Plot each camera field
+    for camera_key in camera_keys:
+        for idx in sector_indices:
+            # Get RA, Dec
+            ra, dec = tess_data[camera_key][idx]
+            
+            # Convert to galactic coordinates
+            coords = SkyCoord(ra=ra*u.degree, dec=dec*u.degree, frame='icrs')
+            l, b = coords.galactic.l.degree, coords.galactic.b.degree
+            
+            # Ensure l is in -180 to 180 range to match your plots
+            if l > 180:
+                l -= 360
+            
+            # Create a circle patch at the pointing location
+            circle = patches.Circle(
+                (l, b), 
+                camera_radius, 
+                color=camera_colors[camera_key], 
+                fill=True, 
+                alpha=alpha,
+                label=f"Sector {tess_data['Sector'][idx]}, {camera_key}" if idx == 0 else None
+            )
+            ax.add_patch(circle)
+    
+    # Create a legend for the cameras (only showing one entry per camera)
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    if len(by_label) > 0:
+        ax.legend(by_label.values(), by_label.keys(), loc='upper right')
+    
+    return ax    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 if __name__ == "__main__":
     sys.exit(main())
-if __name__ == "__main__":
-    sys.exit(main())    
+
+
+
