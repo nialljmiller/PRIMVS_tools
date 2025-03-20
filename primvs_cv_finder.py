@@ -201,9 +201,10 @@ class PrimvsCVFinder:
         
         self.filtered_data = filtered_data
         return True
-    
+
+
     def extract_features(self):
-        """Extract and normalize features for CV detection."""
+        """Extract and normalize features for CV detection, including contrastive curves embeddings."""
         if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
             print("No filtered data available. Call apply_initial_filters() first.")
             return None
@@ -213,11 +214,15 @@ class PrimvsCVFinder:
         # Filter feature list to include only available columns
         available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
         
-        if len(available_features) < 5:
-            print(f"Warning: Only {len(available_features)} features available: {available_features}")
-            print("This may affect classification accuracy.")
+        # Extract contrastive curves embeddings if available
+        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
+        
+        if embedding_features:
+            print(f"Found {len(embedding_features)} contrastive curves embedding features")
+            available_features.extend(embedding_features)
         else:
-            print(f"Using {len(available_features)} features for classification")
+            print("No contrastive curves embeddings found in the data")
         
         # Extract feature matrix
         X = self.filtered_data[available_features].copy()
@@ -226,25 +231,378 @@ class PrimvsCVFinder:
         for col in X.columns:
             if X[col].isnull().any():
                 if X[col].dtype in [np.float64, np.int64]:
-                    # Fill numeric with median
                     X[col] = X[col].fillna(X[col].median())
                 else:
-                    # Fill others with mode
                     X[col] = X[col].fillna(X[col].mode()[0] if len(X[col].mode()) > 0 else 0)
         
-        # Scale features
+        # Scale features (but not embedding features which are already normalized)
         self.scaler = StandardScaler()
-        X_scaled = pd.DataFrame(
-            self.scaler.fit_transform(X),
-            columns=X.columns,
-            index=X.index
-        )
+        cols_to_scale = [col for col in X.columns if col not in embedding_features]
+        
+        if cols_to_scale:
+            X_scaled = X.copy()
+            X_scaled[cols_to_scale] = self.scaler.fit_transform(X[cols_to_scale])
+        else:
+            X_scaled = X.copy()
         
         self.features = X
         self.scaled_features = X_scaled
         self.feature_names = available_features
         
         return X_scaled
+
+
+
+    def analyze_embedding_importance(self):
+        """Analyze the importance of contrastive curves embeddings in the classification model."""
+        if not hasattr(self, 'model') or self.model is None:
+            print("No trained model available for analysis.")
+            return
+        
+        if not hasattr(self, 'features') or self.features is None:
+            print("No feature data available for analysis.")
+            return
+        
+        print("Analyzing importance of contrastive curves embeddings...")
+        
+        # Identify embedding features
+        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.features.columns]
+        
+        if not embedding_features:
+            print("No contrastive curves embeddings found for analysis.")
+            return
+        
+        # Get feature importance from the model
+        importance = self.model.feature_importances_
+        
+        # Create DataFrame of feature importance
+        feature_imp = pd.DataFrame({
+            'Feature': self.features.columns,
+            'Importance': importance
+        }).sort_values('Importance', ascending=False)
+        
+        # Add feature category
+        feature_imp['Category'] = 'Traditional'
+        feature_imp.loc[feature_imp['Feature'].isin(embedding_features), 'Category'] = 'Embedding'
+        
+        # Calculate aggregate importance by category
+        category_imp = feature_imp.groupby('Category')['Importance'].sum().reset_index()
+        
+        # Plot overall feature importance by category
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x='Category', y='Importance', data=category_imp)
+        plt.title('Aggregate Feature Importance by Category')
+        plt.ylabel('Total Importance')
+        plt.grid(True, alpha=0.3)
+        
+        plt.savefig(os.path.join(self.output_dir, 'embedding_vs_traditional_importance.png'), dpi=300)
+        plt.close()
+        
+        # Plot top 20 individual features
+        plt.figure(figsize=(12, 8))
+        top_features = feature_imp.head(20)
+        colors = ['#1f77b4' if cat == 'Traditional' else '#ff7f0e' for cat in top_features['Category']]
+        
+        plt.barh(top_features['Feature'], top_features['Importance'], color=colors)
+        plt.xlabel('Importance')
+        plt.title('Top 20 Features by Importance')
+        
+        # Create custom legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#1f77b4', label='Traditional Features'),
+            Patch(facecolor='#ff7f0e', label='Embedding Features')
+        ]
+        plt.legend(handles=legend_elements)
+        
+        plt.gca().invert_yaxis()  # Invert y-axis to have highest importance at the top
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(self.output_dir, 'top_20_features.png'), dpi=300)
+        plt.close()
+        
+        # Calculate importance of embedding dimensions
+        embedding_imp = feature_imp[feature_imp['Category'] == 'Embedding'].copy()
+        
+        if len(embedding_imp) > 0:
+            # Extract embedding index from feature name
+            embedding_imp['Dimension'] = embedding_imp['Feature'].str.extract(r'embedding_(\d+)').astype(int)
+            
+            # Plot importance by embedding dimension
+            plt.figure(figsize=(12, 6))
+            plt.bar(embedding_imp['Dimension'], embedding_imp['Importance'])
+            plt.xlabel('Embedding Dimension')
+            plt.ylabel('Importance')
+            plt.title('Importance by Contrastive Curves Embedding Dimension')
+            plt.grid(True, alpha=0.3)
+            
+            plt.savefig(os.path.join(self.output_dir, 'embedding_dimension_importance.png'), dpi=300)
+            plt.close()
+            
+            # Report top 5 most important embedding dimensions
+            top_dimensions = embedding_imp.sort_values('Importance', ascending=False).head(5)
+            
+            print("\nTop 5 most important embedding dimensions:")
+            for _, row in top_dimensions.iterrows():
+                print(f"  Dimension {row['Dimension']}: {row['Importance']:.6f}")
+            
+            # Calculate total contribution of embeddings
+            total_imp = feature_imp['Importance'].sum()
+            embedding_total = embedding_imp['Importance'].sum()
+            traditional_total = total_imp - embedding_total
+            
+            print(f"\nContribution to total feature importance:")
+            print(f"  Traditional features: {traditional_total:.6f} ({100*traditional_total/total_imp:.2f}%)")
+            print(f"  Embedding features:   {embedding_total:.6f} ({100*embedding_total/total_imp:.2f}%)")
+
+
+
+    def compare_candidates_with_known_cvs(self):
+        """Compare CV candidates with known CVs in the contrastive curves embedding space."""
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates available for comparison.")
+            return
+        
+        # Load known CVs
+        known_ids = self.load_known_cvs()
+        if known_ids is None or len(known_ids) == 0:
+            print("No known CVs available for comparison.")
+            return
+        
+        # Check if embeddings are available
+        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
+        
+        if len(embedding_features) < 10:
+            print("Insufficient embedding features for visualization.")
+            return
+        
+        print("Comparing candidates with known CVs in embedding space...")
+        
+        # Flag known CVs in the candidates
+        id_col = 'sourceid' if 'sourceid' in self.cv_candidates.columns else 'primvs_id'
+        self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].isin(known_ids)
+        
+        # Extract embeddings
+        embeddings = self.cv_candidates[embedding_features].values
+        
+        # Apply PCA for dimensionality reduction
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=3)
+        embeddings_3d = pca.fit_transform(embeddings)
+        
+        # Add PCA dimensions to candidates dataframe
+        self.cv_candidates['pca_1'] = embeddings_3d[:, 0]
+        self.cv_candidates['pca_2'] = embeddings_3d[:, 1]
+        self.cv_candidates['pca_3'] = embeddings_3d[:, 2]
+        
+        # Create 3D visualization
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Plot known CVs
+        known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+        ax.scatter(
+            known_cvs['pca_1'],
+            known_cvs['pca_2'],
+            known_cvs['pca_3'],
+            c='red',
+            marker='*',
+            s=50,
+            alpha=0.8,
+            label='Known CVs'
+        )
+        
+        # Plot candidates
+        candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
+        ax.scatter(
+            candidates['pca_1'],
+            candidates['pca_2'],
+            candidates['pca_3'],
+            c='blue',
+            alpha=0.6,
+            s=10,
+            label='Candidates'
+        )
+        
+        ax.set_xlabel('PCA Component 1')
+        ax.set_ylabel('PCA Component 2')
+        ax.set_zlabel('PCA Component 3')
+        plt.title('Known CVs vs. Candidates in Contrastive Curves Embedding Space')
+        plt.legend()
+        
+        plt.savefig(os.path.join(self.output_dir, 'cv_known_vs_candidates_3d.png'), dpi=300)
+        plt.close()
+        
+        # Create 2D visualization
+        plt.figure(figsize=(10, 8))
+        
+        # Plot known CVs
+        plt.scatter(
+            known_cvs['pca_1'],
+            known_cvs['pca_2'],
+            c='red',
+            marker='*',
+            s=50,
+            alpha=0.8,
+            label='Known CVs'
+        )
+        
+        # Plot candidates
+        plt.scatter(
+            candidates['pca_1'],
+            candidates['pca_2'],
+            c='blue',
+            alpha=0.6,
+            s=10,
+            label='Candidates'
+        )
+        
+        plt.xlabel('PCA Component 1')
+        plt.ylabel('PCA Component 2')
+        plt.title('Known CVs vs. Candidates in 2D Projection')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        plt.savefig(os.path.join(self.output_dir, 'cv_known_vs_candidates_2d.png'), dpi=300)
+        plt.close()
+        
+        # Calculate and display proximity statistics
+        from scipy.spatial.distance import cdist
+        
+        known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
+        candidate_points = candidates[['pca_1', 'pca_2', 'pca_3']].values
+        
+        # Calculate minimum distance from each candidate to any known CV
+        if len(known_points) > 0 and len(candidate_points) > 0:
+            distances = cdist(candidate_points, known_points, 'euclidean')
+            min_distances = np.min(distances, axis=1)
+            
+            # Add distance to nearest known CV
+            candidates_with_dist = candidates.copy()
+            candidates_with_dist['distance_to_nearest_cv'] = min_distances
+            
+            # Plot histogram of distances
+            plt.figure(figsize=(10, 6))
+            plt.hist(min_distances, bins=50, alpha=0.7)
+            plt.axvline(np.median(min_distances), color='r', linestyle='--', 
+                       label=f'Median: {np.median(min_distances):.3f}')
+            plt.xlabel('Distance to Nearest Known CV')
+            plt.ylabel('Number of Candidates')
+            plt.title('Distribution of Candidate Distances to Nearest Known CV')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            plt.savefig(os.path.join(self.output_dir, 'cv_distance_distribution.png'), dpi=300)
+            plt.close()
+            
+            # Save the top 20 closest candidates to known CVs
+            closest_candidates = candidates_with_dist.sort_values('distance_to_nearest_cv').head(20)
+            closest_file = os.path.join(self.output_dir, 'closest_candidates_to_known_cvs.csv')
+            closest_candidates.to_csv(closest_file, index=False)
+            
+            print(f"Saved {len(closest_candidates)} closest candidates to {closest_file}")
+            
+            # Calculate and report statistics
+            print(f"Distance statistics to nearest known CV:")
+            print(f"  Minimum: {min_distances.min():.3f}")
+            print(f"  Maximum: {min_distances.max():.3f}")
+            print(f"  Mean:    {min_distances.mean():.3f}")
+            print(f"  Median:  {np.median(min_distances):.3f}")
+
+
+
+    def visualize_embeddings(self):
+        """Visualize the contrastive curves embeddings in relation to CV classification."""
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates to visualize.")
+            return
+        
+        # Check if embeddings are available
+        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
+        
+        if len(embedding_features) < 10:
+            print("Insufficient embedding features for visualization.")
+            return
+            
+        print("Generating embedding visualizations...")
+        
+        # Extract embeddings
+        embeddings = self.cv_candidates[embedding_features].values
+        
+        # Apply PCA for dimensionality reduction
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=3)
+        embeddings_3d = pca.fit_transform(embeddings)
+        
+        # Add PCA dimensions to candidates dataframe
+        self.cv_candidates['pca_1'] = embeddings_3d[:, 0]
+        self.cv_candidates['pca_2'] = embeddings_3d[:, 1]
+        self.cv_candidates['pca_3'] = embeddings_3d[:, 2]
+        
+        # Create visualization
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Color by confidence if available
+        if 'confidence' in self.cv_candidates.columns:
+            sc = ax.scatter(
+                self.cv_candidates['pca_1'],
+                self.cv_candidates['pca_2'],
+                self.cv_candidates['pca_3'],
+                c=self.cv_candidates['confidence'],
+                cmap='viridis',
+                alpha=0.7,
+                s=10
+            )
+            plt.colorbar(sc, label='Confidence')
+        else:
+            ax.scatter(
+                self.cv_candidates['pca_1'],
+                self.cv_candidates['pca_2'],
+                self.cv_candidates['pca_3'],
+                alpha=0.7,
+                s=10
+            )
+        
+        ax.set_xlabel('PCA Component 1')
+        ax.set_ylabel('PCA Component 2')
+        ax.set_zlabel('PCA Component 3')
+        plt.title('Contrastive Curves Embedding Space for CV Candidates')
+        
+        plt.savefig(os.path.join(self.output_dir, 'cv_embeddings_3d.png'), dpi=300)
+        plt.close()
+        
+        # Create 2D visualization of first two components
+        plt.figure(figsize=(10, 8))
+        
+        if 'confidence' in self.cv_candidates.columns:
+            sc = plt.scatter(
+                self.cv_candidates['pca_1'],
+                self.cv_candidates['pca_2'],
+                c=self.cv_candidates['confidence'],
+                cmap='viridis',
+                alpha=0.7,
+                s=10
+            )
+            plt.colorbar(sc, label='Confidence')
+        else:
+            plt.scatter(
+                self.cv_candidates['pca_1'],
+                self.cv_candidates['pca_2'],
+                alpha=0.7,
+                s=10
+            )
+        
+        plt.xlabel('PCA Component 1')
+        plt.ylabel('PCA Component 2')
+        plt.title('2D Projection of Contrastive Curves Embedding Space')
+        plt.grid(True, alpha=0.3)
+        
+        plt.savefig(os.path.join(self.output_dir, 'cv_embeddings_2d.png'), dpi=300)
+        plt.close()
     
     def detect_anomalies(self):
         """Use Isolation Forest to identify anomalous sources that might be CVs."""
@@ -395,23 +753,456 @@ class PrimvsCVFinder:
             print(f"Error loading known CVs: {str(e)}")
             return None
     
+
+    def visualize_classification_in_embedding_space(self):
+        """
+        Create comprehensive visualizations showing classification results in the embedding space.
+        This helps evaluate how well the classifier aligns with the semantic structure of the data.
+        """
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates to visualize.")
+            return
+        
+        # Check if embeddings and classification results are available
+        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
+        
+        if len(embedding_features) < 10:
+            print("Insufficient embedding features for visualization.")
+            return
+        
+        # Classification confidence metrics to check
+        confidence_metrics = ['confidence', 'cv_prob', 'cv_score', 'probability']
+        confidence_col = None
+        for col in confidence_metrics:
+            if col in self.cv_candidates.columns:
+                confidence_col = col
+                break
+        
+        if confidence_col is None:
+            print("No classification confidence metric found.")
+            return
+        
+        print(f"Visualizing classification results in embedding space using {confidence_col}...")
+        
+        # Check if we have known CV information
+        known_ids = self.load_known_cvs()
+        if known_ids is not None:
+            id_col = 'sourceid' if 'sourceid' in self.cv_candidates.columns else 'primvs_id'
+            self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].isin(known_ids)
+        else:
+            self.cv_candidates['is_known_cv'] = False
+        
+        # Apply PCA to reduce dimensionality
+        from sklearn.decomposition import PCA
+        embeddings = self.cv_candidates[embedding_features].values
+        pca = PCA(n_components=3)
+        embeddings_3d = pca.fit_transform(embeddings)
+        
+        # Add PCA dimensions to candidates dataframe
+        self.cv_candidates['pca_1'] = embeddings_3d[:, 0]
+        self.cv_candidates['pca_2'] = embeddings_3d[:, 1]
+        self.cv_candidates['pca_3'] = embeddings_3d[:, 2]
+        
+        # Calculate explained variance
+        explained_variance = pca.explained_variance_ratio_
+        
+        # 1. 3D scatterplot colored by classification confidence
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Plot all candidates with color based on confidence
+        sc = ax.scatter(
+            self.cv_candidates['pca_1'], 
+            self.cv_candidates['pca_2'], 
+            self.cv_candidates['pca_3'],
+            c=self.cv_candidates[confidence_col],
+            cmap='viridis',
+            alpha=0.7,
+            s=10
+        )
+        
+        # If we have known CVs, mark them
+        if known_ids is not None and any(self.cv_candidates['is_known_cv']):
+            known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+            ax.scatter(
+                known_cvs['pca_1'],
+                known_cvs['pca_2'],
+                known_cvs['pca_3'],
+                color='red',
+                marker='*',
+                s=100,
+                label='Known CVs'
+            )
+        
+        plt.colorbar(sc, label=confidence_col.capitalize())
+        ax.set_xlabel(f'PCA 1 ({explained_variance[0]:.2%})')
+        ax.set_ylabel(f'PCA 2 ({explained_variance[1]:.2%})')
+        ax.set_zlabel(f'PCA 3 ({explained_variance[2]:.2%})')
+        
+        plt.title('Classification Confidence in Embedding Space')
+        if known_ids is not None and any(self.cv_candidates['is_known_cv']):
+            plt.legend()
+        
+        plt.savefig(os.path.join(self.output_dir, 'classification_3d_embedding.png'), dpi=300)
+        plt.close()
+        
+        # 2. 2D scatter plot with contour of density
+        plt.figure(figsize=(12, 10))
+        
+        # Create contour of density for all points
+        from scipy.stats import kde
+        nbins = 100
+        x = self.cv_candidates['pca_1']
+        y = self.cv_candidates['pca_2']
+        k = kde.gaussian_kde([x, y])
+        xi, yi = np.mgrid[x.min():x.max():nbins*1j, y.min():y.max():nbins*1j]
+        zi = k(np.vstack([xi.flatten(), yi.flatten()]))
+        
+        # Plot the contours
+        plt.contourf(xi, yi, zi.reshape(xi.shape), alpha=0.3, cmap=plt.cm.Greens)
+        
+        # Plot high confidence candidates
+        high_confidence = self.cv_candidates[self.cv_candidates[confidence_col] > 0.8]
+        plt.scatter(
+            high_confidence['pca_1'], 
+            high_confidence['pca_2'],
+            c=high_confidence[confidence_col],
+            cmap='viridis',
+            alpha=0.8,
+            s=20,
+            label='High Confidence'
+        )
+        
+        # Mark known CVs
+        if known_ids is not None and any(self.cv_candidates['is_known_cv']):
+            known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+            plt.scatter(
+                known_cvs['pca_1'],
+                known_cvs['pca_2'],
+                color='red',
+                marker='*',
+                s=200,
+                edgecolors='black',
+                label='Known CVs'
+            )
+        
+        plt.xlabel(f'PCA 1 ({explained_variance[0]:.2%})')
+        plt.ylabel(f'PCA 2 ({explained_variance[1]:.2%})')
+        plt.title('High Confidence Candidates in Embedding Space')
+        plt.colorbar(label=confidence_col.capitalize())
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.savefig(os.path.join(self.output_dir, 'high_confidence_embedding.png'), dpi=300)
+        plt.close()
+        
+        # 3. Multiple views of the 3D embedding space
+        if known_ids is not None and any(self.cv_candidates['is_known_cv']):
+            fig = plt.figure(figsize=(18, 6))
+            
+            # First view
+            ax1 = fig.add_subplot(131, projection='3d')
+            
+            # Plot all candidates with low opacity
+            ax1.scatter(
+                self.cv_candidates['pca_1'], 
+                self.cv_candidates['pca_2'], 
+                self.cv_candidates['pca_3'],
+                color='blue',
+                alpha=0.1,
+                s=5
+            )
+            
+            # Plot high confidence candidates
+            high_confidence = self.cv_candidates[self.cv_candidates[confidence_col] > 0.8]
+            ax1.scatter(
+                high_confidence['pca_1'], 
+                high_confidence['pca_2'], 
+                high_confidence['pca_3'],
+                color='blue',
+                alpha=0.6,
+                s=20,
+                label='High Confidence'
+            )
+            
+            # Plot known CVs
+            known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+            ax1.scatter(
+                known_cvs['pca_1'],
+                known_cvs['pca_2'],
+                known_cvs['pca_3'],
+                color='red',
+                marker='*',
+                s=100,
+                label='Known CVs'
+            )
+            
+            ax1.set_xlabel('PCA 1')
+            ax1.set_ylabel('PCA 2')
+            ax1.set_zlabel('PCA 3')
+            ax1.view_init(elev=20, azim=30)
+            ax1.set_title('View 1')
+            
+            # Second view
+            ax2 = fig.add_subplot(132, projection='3d')
+            
+            ax2.scatter(
+                self.cv_candidates['pca_1'], 
+                self.cv_candidates['pca_2'], 
+                self.cv_candidates['pca_3'],
+                color='blue',
+                alpha=0.1,
+                s=5
+            )
+            
+            ax2.scatter(
+                high_confidence['pca_1'], 
+                high_confidence['pca_2'], 
+                high_confidence['pca_3'],
+                color='blue',
+                alpha=0.6,
+                s=20
+            )
+            
+            ax2.scatter(
+                known_cvs['pca_1'],
+                known_cvs['pca_2'],
+                known_cvs['pca_3'],
+                color='red',
+                marker='*',
+                s=100
+            )
+            
+            ax2.set_xlabel('PCA 1')
+            ax2.set_ylabel('PCA 2')
+            ax2.set_zlabel('PCA 3')
+            ax2.view_init(elev=0, azim=70)
+            ax2.set_title('View 2')
+            
+            # Third view
+            ax3 = fig.add_subplot(133, projection='3d')
+            
+            ax3.scatter(
+                self.cv_candidates['pca_1'], 
+                self.cv_candidates['pca_2'], 
+                self.cv_candidates['pca_3'],
+                color='blue',
+                alpha=0.1,
+                s=5
+            )
+            
+            ax3.scatter(
+                high_confidence['pca_1'], 
+                high_confidence['pca_2'], 
+                high_confidence['pca_3'],
+                color='blue',
+                alpha=0.6,
+                s=20
+            )
+            
+            ax3.scatter(
+                known_cvs['pca_1'],
+                known_cvs['pca_2'],
+                known_cvs['pca_3'],
+                color='red',
+                marker='*',
+                s=100
+            )
+            
+            ax3.set_xlabel('PCA 1')
+            ax3.set_ylabel('PCA 2')
+            ax3.set_zlabel('PCA 3')
+            ax3.view_init(elev=45, azim=120)
+            ax3.set_title('View 3')
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.output_dir, 'multiple_views_embedding.png'), dpi=300)
+            plt.close()
+        
+        # 4. Find nearest neighbors to known CVs
+        if known_ids is not None and any(self.cv_candidates['is_known_cv']):
+            from scipy.spatial.distance import cdist
+            
+            # Get known CVs and candidates
+            known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+            candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
+            
+            # Calculate distances in PCA space
+            known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
+            candidate_points = candidates[['pca_1', 'pca_2', 'pca_3']].values
+            
+            # For each known CV, find the 5 nearest candidates
+            nearest_neighbors = []
+            
+            for i, (_, known_cv) in enumerate(known_cvs.iterrows()):
+                known_point = known_cv[['pca_1', 'pca_2', 'pca_3']].values.reshape(1, -1)
+                distances = cdist(known_point, candidate_points, 'euclidean')[0]
+                
+                # Get indices of 5 nearest candidates
+                nearest_indices = np.argsort(distances)[:5]
+                
+                # Get details of these candidates
+                for rank, idx in enumerate(nearest_indices):
+                    candidate = candidates.iloc[idx]
+                    nearest_neighbors.append({
+                        'known_cv_id': known_cv[id_col],
+                        'candidate_id': candidate[id_col],
+                        'distance': distances[idx],
+                        'rank': rank + 1,
+                        'confidence': candidate[confidence_col],
+                        'pca_1': candidate['pca_1'],
+                        'pca_2': candidate['pca_2'],
+                        'pca_3': candidate['pca_3']
+                    })
+            
+            # Create dataframe of nearest neighbors
+            nn_df = pd.DataFrame(nearest_neighbors)
+            
+            # Save to CSV
+            nn_file = os.path.join(self.output_dir, 'nearest_neighbors_to_known_cvs.csv')
+            nn_df.to_csv(nn_file, index=False)
+            
+            print(f"Saved nearest neighbors to {nn_file}")
+            
+            # Plot examples of nearest neighbors for a few known CVs
+            if len(known_cvs) > 0:
+                # Select up to 3 known CVs to show examples
+                example_cvs = known_cvs.sample(min(3, len(known_cvs)))
+                
+                for i, (_, known_cv) in enumerate(example_cvs.iterrows()):
+                    # Get nearest neighbors for this CV
+                    cv_neighbors = nn_df[nn_df['known_cv_id'] == known_cv[id_col]]
+                    
+                    if len(cv_neighbors) > 0:
+                        fig = plt.figure(figsize=(12, 8))
+                        ax = fig.add_subplot(111, projection='3d')
+                        
+                        # Plot all candidates with low opacity
+                        ax.scatter(
+                            candidates['pca_1'], 
+                            candidates['pca_2'], 
+                            candidates['pca_3'],
+                            color='blue',
+                            alpha=0.1,
+                            s=5
+                        )
+                        
+                        # Plot the known CV
+                        ax.scatter(
+                            known_cv['pca_1'],
+                            known_cv['pca_2'],
+                            known_cv['pca_3'],
+                            color='red',
+                            marker='*',
+                            s=200,
+                            label=f'Known CV {known_cv[id_col]}'
+                        )
+                        
+                        # Plot its nearest neighbors
+                        for _, neighbor in cv_neighbors.iterrows():
+                            ax.scatter(
+                                neighbor['pca_1'],
+                                neighbor['pca_2'],
+                                neighbor['pca_3'],
+                                color='green',
+                                marker='o',
+                                s=100,
+                                alpha=0.8,
+                                label=f'Rank {int(neighbor["rank"])}: {neighbor["candidate_id"]}'
+                            )
+                        
+                        ax.set_xlabel('PCA 1')
+                        ax.set_ylabel('PCA 2')
+                        ax.set_zlabel('PCA 3')
+                        ax.set_title(f'Known CV {known_cv[id_col]} and its Nearest Neighbors')
+                        ax.legend()
+                        
+                        plt.savefig(os.path.join(self.output_dir, f'cv_{known_cv[id_col]}_neighbors.png'), dpi=300)
+                        plt.close()
+        
+        # 5. Create UMAP visualization if available
+        try:
+            import umap
+            
+            print("Creating UMAP visualization of embedding space...")
+            
+            # Apply UMAP to the embeddings
+            reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42)
+            embedding_umap = reducer.fit_transform(embeddings)
+            
+            # Add UMAP coordinates to the dataframe
+            self.cv_candidates['umap_1'] = embedding_umap[:, 0]
+            self.cv_candidates['umap_2'] = embedding_umap[:, 1]
+            
+            # Create scatter plot
+            plt.figure(figsize=(12, 10))
+            
+            # Plot all candidates
+            sc = plt.scatter(
+                self.cv_candidates['umap_1'], 
+                self.cv_candidates['umap_2'],
+                c=self.cv_candidates[confidence_col],
+                cmap='viridis',
+                alpha=0.7,
+                s=10
+            )
+            
+            # Mark known CVs if available
+            if known_ids is not None and any(self.cv_candidates['is_known_cv']):
+                known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+                plt.scatter(
+                    known_cvs['umap_1'],
+                    known_cvs['umap_2'],
+                    color='red',
+                    marker='*',
+                    s=200,
+                    edgecolors='black',
+                    label='Known CVs'
+                )
+                plt.legend()
+            
+            plt.colorbar(sc, label=confidence_col.capitalize())
+            plt.xlabel('UMAP Dimension 1')
+            plt.ylabel('UMAP Dimension 2')
+            plt.title('UMAP Projection of Contrastive Curves Embedding Space')
+            plt.grid(True, alpha=0.3)
+            
+            plt.savefig(os.path.join(self.output_dir, 'umap_embedding.png'), dpi=300)
+            plt.close()
+            
+            # Save the dataframe with embedding coordinates
+            embedding_file = os.path.join(self.output_dir, 'cv_candidates_with_embeddings.csv')
+            self.cv_candidates.to_csv(embedding_file, index=False)
+            print(f"Saved candidates with embedding coordinates to {embedding_file}")
+            
+        except ImportError:
+            print("UMAP not available. Skipping UMAP visualization.")
+
+
+
     def train_classifier(self):
         """
-        Train an XGBoost classifier to identify CVs.
-        If known CVs are provided, they are used as positive examples.
-        Otherwise, high-scoring candidates are used as positives.
+        Train an XGBoost classifier to identify CVs, leveraging contrastive curves embeddings.
         """
         if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
             print("No features available. Call extract_features() first.")
             return False
         
-        print("Training CV classifier...")
+        print("Training CV classifier with contrastive curves embeddings...")
         
         # Get known CVs if available
         known_ids = self.load_known_cvs()
         
         # Prepare training data
         X = self.scaled_features
+        
+        # Check if we have embedding features
+        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in X.columns]
+        
+        if embedding_features:
+            print(f"Using {len(embedding_features)} contrastive curves embedding features for training")
         
         if known_ids is not None:
             # Create labels based on known CVs
@@ -429,7 +1220,7 @@ class PrimvsCVFinder:
             if 'cv_score' not in self.filtered_data.columns:
                 print("No cv_score available. Call calculate_cv_score() first.")
                 return False
-                
+                    
             threshold = 0.7  # Use high-scoring candidates
             y = (self.filtered_data['cv_score'] > threshold).astype(int)
             print(f"Using {sum(y)} high-scoring candidates (score > {threshold}) as positive examples")
@@ -451,45 +1242,95 @@ class PrimvsCVFinder:
         # Create class weights to handle imbalance
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
         
-        # Train XGBoost classifier
+        # Configure XGBoost with optimal parameters for contrastive embeddings
         model = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
+            n_estimators=300,          # More trees for complex feature relationships
+            max_depth=4,               # Slightly deeper trees to capture embedding interactions
+            learning_rate=0.05,        # Lower learning rate for better generalization
             objective='binary:logistic',
             scale_pos_weight=pos_weight,  # Handle class imbalance
-            n_jobs=-1,  # Use all processors
+            colsample_bytree=0.8,      # Use 80% of features per tree to reduce overfitting
+            subsample=0.8,             # Use 80% of samples per tree to reduce overfitting
+            n_jobs=-1,                 # Use all processors
             random_state=42
         )
         
-        model.fit(X_train, y_train)
+        # Add sample_weight to account for possible class imbalance
+        sample_weights = None
+        if sum(y_train) / len(y_train) < 0.1:  # If positive class is less than 10%
+            class_weights = {0: 1, 1: len(y_train) / sum(y_train) / 2}
+            sample_weights = np.array([class_weights[y] for y in y_train])
+        
+        # Train model
+        model.fit(
+            X_train, y_train,
+            sample_weight=sample_weights,
+            eval_set=[(X_train, y_train), (X_test, y_test)],
+            eval_metric='auc',
+            early_stopping_rounds=20,
+            verbose=False
+        )
         
         # Evaluate on test set
         y_pred = model.predict(X_test)
+        y_prob = model.predict_proba(X_test)[:, 1]
+        
         print("\nClassification Report:")
         print(classification_report(y_test, y_pred))
         
         # Save feature importances
-        feature_imp = pd.DataFrame(
-            sorted(zip(model.feature_importances_, X.columns)),
-            columns=['Importance', 'Feature']
-        ).sort_values('Importance', ascending=False)
+        feature_imp = pd.DataFrame({
+            'Feature': X.columns,
+            'Importance': model.feature_importances_
+        }).sort_values('Importance', ascending=False)
+        
+        # Categorize features
+        feature_imp['Category'] = 'Traditional'
+        feature_imp.loc[feature_imp['Feature'].isin(embedding_features), 'Category'] = 'Embedding'
         
         print("\nTop 10 important features:")
         print(feature_imp.head(10))
         
         # Plot feature importance
         plt.figure(figsize=(12, 8))
-        sns.barplot(x='Importance', y='Feature', data=feature_imp.head(20))
+        # Color by category
+        colors = ['#ff7f0e' if cat == 'Embedding' else '#1f77b4' 
+                  for cat in feature_imp.head(20)['Category']]
+        
+        sns.barplot(x='Importance', y='Feature', 
+                    data=feature_imp.head(20), 
+                    palette=dict(zip(feature_imp.head(20)['Feature'], colors)))
+        
         plt.title('Feature Importance for CV Classification')
         plt.tight_layout()
         plt.savefig(os.path.join(self.output_dir, 'feature_importance.png'), dpi=300)
+        plt.close()
+        
+        # Calculate AUC
+        from sklearn.metrics import roc_curve, auc
+        fpr, tpr, _ = roc_curve(y_test, y_prob)
+        roc_auc = auc(fpr, tpr)
+        
+        # Plot ROC curve
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.3f}')
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curve')
+        plt.legend(loc='lower right')
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'roc_curve.png'), dpi=300)
         plt.close()
         
         # Save model
         model_path = os.path.join(self.output_dir, 'cv_classifier.joblib')
         joblib.dump(model, model_path)
         print(f"Model saved to {model_path}")
+        
+        # Save best iteration
+        best_iteration = model.best_iteration if hasattr(model, 'best_iteration') else None
+        print(f"Best iteration: {best_iteration}")
         
         self.model = model
         return True
@@ -897,13 +1738,14 @@ class PrimvsCVFinder:
                 f.write(f"{sort_col.capitalize()}: {conf:.4f}\n")
                 
         print(f"Summary saved to {summary_path}")
-    
+
+
     def run_pipeline(self):
-        """Run the complete CV finder pipeline."""
+        """Run the complete CV finder pipeline with contrastive curves embeddings integration."""
         start_time = time.time()
         
         print("\n" + "="*80)
-        print("RUNNING PRIMVS CV FINDER PIPELINE")
+        print("RUNNING PRIMVS CV FINDER PIPELINE WITH CONTRASTIVE CURVES INTEGRATION")
         print("="*80 + "\n")
         
         # Step 1: Load PRIMVS data
@@ -916,7 +1758,7 @@ class PrimvsCVFinder:
             print("Failed to apply initial filters. Aborting.")
             return False
         
-        # Step 3: Extract features for classification
+        # Step 3: Extract features for classification (including contrastive curves embeddings)
         if self.extract_features() is None:
             print("Failed to extract features. Aborting.")
             return False
@@ -929,7 +1771,7 @@ class PrimvsCVFinder:
         if not self.detect_anomalies():
             print("Anomaly detection failed or found no anomalies. Continuing without anomaly features.")
         
-        # Step 6: Train classifier if known CVs available
+        # Step 6: Train classifier with embedding-optimized parameters
         if self.known_cv_file is not None:
             if not self.train_classifier():
                 print("Classifier training failed. Continuing with heuristic selection.")
@@ -937,16 +1779,31 @@ class PrimvsCVFinder:
                 # Step 7: Run classifier on all data
                 if not self.run_classifier():
                     print("Classifier prediction failed. Continuing with heuristic selection.")
+                
+                # Step 7b: Analyze importance of embedding features
+                self.analyze_embedding_importance()
         
         # Step 8: Select final candidates
         if not self.select_candidates():
             print("Failed to select candidates. Aborting.")
             return False
         
-        # Step 9: Plot candidates
+        # Step 9: Plot candidates (traditional plots)
         self.plot_candidates()
         
-        # Step 10: Save candidates
+        # Step 10: Create embedding-specific visualizations
+        print("\nGenerating embedding-specific visualizations...")
+        
+        # Step 10a: Visualize embeddings in reduced dimensional space
+        self.visualize_embeddings()
+        
+        # Step 10b: Compare candidates with known CVs in embedding space
+        self.compare_candidates_with_known_cvs()
+        
+        # Step 10c: Comprehensive visualization of classification in embedding space
+        self.visualize_classification_in_embedding_space()
+        
+        # Step 11: Save candidates
         if not self.save_candidates():
             print("Failed to save candidates.")
             return False
@@ -961,9 +1818,6 @@ class PrimvsCVFinder:
         print("="*80 + "\n")
         
         return True
-
-
-
 
 def main():
     """Main function to run the CV finder."""
