@@ -969,9 +969,9 @@ def main():
     """Main function to run the CV finder."""
 
 
-    primvs_file = '../PRIMVS/PRIMVS_CV_cand.fits'
+    primvs_file = '../PRIMVS/PRIMVS_CC_CV_cand.fits'
     output_dir = "../PRIMVS/"
-    known_cvs = "../PRIMVS/PRIMVS_CV.fits:"
+    known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits:"
     period_limit = 10.0  # Very generous upper limit (days)
     amplitude_limit = 0.03  # Very low amplitude threshold (mag)
     fap_limit = 0.7  # Permissive FAP threshold
