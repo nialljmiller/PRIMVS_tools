@@ -215,7 +215,7 @@ class PrimvsCVFinder:
         available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
         
         # Extract contrastive curves embeddings if available
-        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
         
         if embedding_features:
@@ -266,7 +266,7 @@ class PrimvsCVFinder:
         print("Analyzing importance of contrastive curves embeddings...")
         
         # Identify embedding features
-        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in cc_embedding_cols if col in self.features.columns]
         
         if not embedding_features:
@@ -371,7 +371,7 @@ class PrimvsCVFinder:
             return
         
         # Check if embeddings are available
-        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
         
         if len(embedding_features) < 10:
@@ -520,7 +520,7 @@ class PrimvsCVFinder:
             return
         
         # Check if embeddings are available
-        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
         
         if len(embedding_features) < 10:
@@ -705,11 +705,10 @@ class PrimvsCVFinder:
         plt.close()
         
         return True
-    
+        
     def load_known_cvs(self):
         """
-        Load known CVs for training the classifier.
-        This function can load from various formats with flexible matching.
+        Load known CVs for classifier training with enhanced diagnostic information.
         """
         if self.known_cv_file is None:
             print("No known CV file provided. Skipping.")
@@ -721,7 +720,15 @@ class PrimvsCVFinder:
             # Determine file type and load accordingly
             if self.known_cv_file.endswith('.fits'):
                 with fits.open(self.known_cv_file) as hdul:
-                    cv_data = Table(hdul[1].data).to_pandas()
+                    # Examine structure before conversion
+                    header = hdul[1].header
+                    cv_data_raw = hdul[1].data
+                    
+                    # Report column information
+                    print(f"Known CV catalog columns: {cv_data_raw.names}")
+                    
+                    # Convert to pandas DataFrame
+                    cv_data = Table(cv_data_raw).to_pandas()
             elif self.known_cv_file.endswith('.csv'):
                 cv_data = pd.read_csv(self.known_cv_file)
             else:
@@ -737,22 +744,39 @@ class PrimvsCVFinder:
             for col in id_columns:
                 if col in cv_data.columns:
                     id_col = col
+                    print(f"Using '{id_col}' column for CV identification")
                     break
             
             if id_col is None:
                 print("Could not find ID column in known CV file.")
+                print("Available columns:", cv_data.columns.tolist())
                 return None
             
-            # Extract IDs as a set for faster lookup
+            # Extract IDs with data type preservation
             known_ids = set(cv_data[id_col])
             print(f"Extracted {len(known_ids)} unique CV IDs")
             
-            return known_ids
+            # Analyze ID characteristics
+            if len(known_ids) > 0:
+                sample_id = next(iter(known_ids))
+                print(f"Sample ID format: '{sample_id}' (type: {type(sample_id)})")
+                
+                # Check for potential numeric vs string discrepancies
+                numeric_ids = sum(1 for id in known_ids if isinstance(id, (int, float)) or 
+                                 (isinstance(id, str) and id.replace('.','',1).isdigit()))
+                string_ids = len(known_ids) - numeric_ids
+                
+                print(f"ID composition: {numeric_ids} numeric, {string_ids} non-numeric")
             
+            return known_ids
+                
         except Exception as e:
             print(f"Error loading known CVs: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
-    
+
+
 
     def visualize_classification_in_embedding_space(self):
         """
@@ -764,7 +788,7 @@ class PrimvsCVFinder:
             return
         
         # Check if embeddings and classification results are available
-        cc_embedding_cols = [f'cc_embedding_{i}' for i in range(64)]
+        cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
         
         if len(embedding_features) < 10:
@@ -1181,9 +1205,11 @@ class PrimvsCVFinder:
 
 
 
+
     def train_classifier(self):
         """
-        Train an XGBoost classifier to identify CVs, leveraging contrastive curves embeddings.
+        Train an XGBoost classifier exclusively using verified CVs as positive examples,
+        with enhanced source matching procedure to resolve identifier discrepancies.
         """
         if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
             print("No features available. Call extract_features() first.")
@@ -1191,10 +1217,83 @@ class PrimvsCVFinder:
         
         print("Training CV classifier with contrastive curves embeddings...")
         
-        # Get known CVs if available
+        # Retrieve known CV identifiers
         known_ids = self.load_known_cvs()
         
-        # Prepare training data
+        if known_ids is None or len(known_ids) == 0:
+            print("Error: No known CVs available for training. Classifier aborted.")
+            return False
+        
+        # Determine candidate identifier column
+        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
+        id_col = None
+        
+        for col in id_columns:
+            if col in self.filtered_data.columns:
+                id_col = col
+                break
+        
+        if id_col is None:
+            print("Error: No suitable identifier column found in candidate data.")
+            return False
+        
+        # Enhanced source matching procedure with diagnostic output
+        print(f"Using identifier column '{id_col}' for matching")
+        print(f"Known CV identifiers type: {type(list(known_ids)[0])}")
+        print(f"Candidate identifiers type: {self.filtered_data[id_col].dtype}")
+        
+        # Sample values for diagnostic purposes
+        print(f"Sample known CVs (first 3): {list(known_ids)[:3]}")
+        print(f"Sample candidates (first 3): {self.filtered_data[id_col].head(3).tolist()}")
+        
+        # Try different matching strategies
+        match_strategies = [
+            ("Direct matching", lambda x, y: set(x) & set(y)),
+            ("String conversion", lambda x, y: set(str(i) for i in x) & set(str(j) for j in y)),
+            ("Numeric conversion", lambda x, y: set(float(i) if isinstance(i, str) and i.replace('.','',1).isdigit() else i for i in x) & 
+                                               set(float(j) if isinstance(j, str) and j.replace('.','',1).isdigit() else j for j in y))
+        ]
+        
+        max_matches = 0
+        best_strategy = None
+        matched_set = set()
+        
+        for strategy_name, match_func in match_strategies:
+            try:
+                # Convert filtered_data index to list for matching
+                candidate_ids = self.filtered_data[id_col].tolist()
+                matches = match_func(candidate_ids, known_ids)
+                
+                print(f"Strategy '{strategy_name}': {len(matches)} matches found")
+                
+                if len(matches) > max_matches:
+                    max_matches = len(matches)
+                    best_strategy = strategy_name
+                    matched_set = matches
+            except Exception as e:
+                print(f"Strategy '{strategy_name}' failed: {str(e)}")
+        
+        if max_matches == 0:
+            print("Critical error: No matches found between known CVs and candidate sources")
+            print("Manual inspection of both catalogs required for identifier compatibility verification")
+            return False
+        
+        print(f"Using strategy '{best_strategy}' with {max_matches} matches")
+        
+        # Create binary classification labels based on matched identifiers
+        y = self.filtered_data[id_col].isin(matched_set).astype(int)
+        positive_count = y.sum()
+        
+        print(f"Using {positive_count} known CVs as positive examples")
+        
+        # Check if sufficient positive examples exist for training
+        if positive_count < 10:
+            print(f"Warning: Very few positive examples ({positive_count}). Classification may be unreliable.")
+            if positive_count < 3:
+                print("Error: Insufficient positive examples for training. Aborting classifier.")
+                return False
+        
+        # Proceed with model training using exclusively known CVs as positive examples
         X = self.scaled_features
         
         # Check if we have embedding features
@@ -1204,35 +1303,17 @@ class PrimvsCVFinder:
         if embedding_features:
             print(f"Using {len(embedding_features)} contrastive curves embedding features for training")
         
-        if known_ids is not None:
-            # Create labels based on known CVs
-            y = self.filtered_data.index.isin(known_ids).astype(int)
-            print(f"Using {sum(y)} known CVs as positive examples")
-            
-            # Check if we have enough positive examples
-            if sum(y) < 10:
-                print("Warning: Very few positive examples. Classification may be unreliable.")
-                if sum(y) < 3:
-                    print("Error: Insufficient positive examples for training. Aborting classifier.")
-                    return False
-        else:
-            # No known CVs, use high-scoring candidates as positives
-            if 'cv_score' not in self.filtered_data.columns:
-                print("No cv_score available. Call calculate_cv_score() first.")
+        # Create labels based on known CVs - the ONLY source of positive examples
+        y = self.filtered_data.index.isin(known_ids).astype(int)
+        positive_count = sum(y)
+        print(f"Using {positive_count} known CVs as positive examples")
+        
+        # Check if we have sufficient positive examples
+        if positive_count < 10:
+            print("Warning: Very few positive examples (n={positive_count}). Classification may be unreliable.")
+            if positive_count < 3:
+                print("Error: Insufficient positive examples for training. Aborting classifier.")
                 return False
-                    
-            threshold = 0.7  # Use high-scoring candidates
-            y = (self.filtered_data['cv_score'] > threshold).astype(int)
-            print(f"Using {sum(y)} high-scoring candidates (score > {threshold}) as positive examples")
-            
-            if sum(y) < 10:
-                print("Warning: Very few positive examples. Using anomaly detection instead.")
-                if 'is_anomaly' in self.filtered_data.columns:
-                    y = self.filtered_data['is_anomaly'].astype(int)
-                    print(f"Using {sum(y)} anomalous sources as positive examples")
-                else:
-                    print("Error: No suitable training examples. Aborting classifier.")
-                    return False
         
         # Split data for training and testing
         X_train, X_test, y_train, y_test = train_test_split(
@@ -1257,7 +1338,7 @@ class PrimvsCVFinder:
         
         # Add sample_weight to account for possible class imbalance
         sample_weights = None
-        if sum(y_train) / len(y_train) < 0.1:  # If positive class is less than 10%
+        if positive_count / len(y_train) < 0.1:  # If positive class is less than 10%
             class_weights = {0: 1, 1: len(y_train) / sum(y_train) / 2}
             sample_weights = np.array([class_weights[y] for y in y_train])
         
@@ -1334,6 +1415,10 @@ class PrimvsCVFinder:
         
         self.model = model
         return True
+
+
+
+
     
     def run_classifier(self):
         """
@@ -1342,10 +1427,8 @@ class PrimvsCVFinder:
         """
         if not hasattr(self, 'model') or self.model is None:
             print("No trained model available. Training now...")
-            if not self.train_classifier():
-                print("Could not train classifier. Using simplified selection.")
-                return self.select_candidates_simple()
-        
+            self.train_classifier()
+
         print("Running classifier on all filtered data...")
         
         # Get predictions and probabilities
@@ -1411,10 +1494,12 @@ class PrimvsCVFinder:
         
         return True
     
+
+
     def select_candidates(self):
         """
-        Select final CV candidates using all available methods.
-        This combines ML classification, anomaly detection, and heuristic scores.
+        Select final CV candidates using ML classification when available or revert to simplistic
+        criteria only when necessary. Domain knowledge scores are not used for selection.
         """
         if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
             print("No filtered data available. Call apply_initial_filters() first.")
@@ -1425,68 +1510,43 @@ class PrimvsCVFinder:
         # Define selection criteria based on available methods
         criteria = []
         
-        # 1. ML-based selection
+        # Prioritize ML-based selection when available
         if 'cv_prob' in self.filtered_data.columns:
             ml_mask = self.filtered_data['cv_prob'] > 0.5
             criteria.append(('ML-based (prob > 0.5)', ml_mask))
         
-        # 2. Score-based selection
-        if 'cv_score' in self.filtered_data.columns:
-            score_mask = self.filtered_data['cv_score'] > 0.6
-            criteria.append(('Score-based (score > 0.6)', score_mask))
-        
-        # 3. Anomaly-based selection
-        if 'is_anomaly' in self.filtered_data.columns:
+        # Use anomaly detection as secondary criterion if available
+        if 'is_anomaly' in self.filtered_data.columns and not criteria:
             anomaly_mask = self.filtered_data['is_anomaly']
             criteria.append(('Anomaly-based', anomaly_mask))
-            
+                
         # If no advanced criteria are available, use simplified selection
         if not criteria:
             print("No advanced selection criteria available. Using simplified selection.")
             return self.select_candidates_simple()
         
-        # Combine all criteria (any match makes a candidate)
-        combined_mask = np.zeros(len(self.filtered_data), dtype=bool)
-        
-        for name, mask in criteria:
-            combined_mask = combined_mask | mask
-            print(f"  - {name}: {mask.sum()} candidates")
-        
-        # Add candidate flag
-        self.filtered_data['is_cv_candidate'] = combined_mask
+        # Apply highest priority criterion available
+        name, mask = criteria[0]
+        self.filtered_data['is_cv_candidate'] = mask
         
         # Create final candidate set
-        self.cv_candidates = self.filtered_data[combined_mask].copy()
+        self.cv_candidates = self.filtered_data[mask].copy()
+        print(f"Selected {len(self.cv_candidates)} CV candidates using {name} criterion")
         
-        # Add confidence level based on how many criteria were met
-        n_criteria = len(criteria)
-        if n_criteria > 1:
-            confidence = np.zeros(len(self.cv_candidates))
-            
-            for i, (name, mask) in enumerate(criteria):
-                # Sources that match this criterion
-                matches = self.cv_candidates.index.isin(self.filtered_data[mask].index)
-                confidence[matches] += 1 / n_criteria
-                
-            self.cv_candidates['confidence'] = confidence
+        # Set confidence values based on probabilities when available
+        if 'cv_prob' in self.cv_candidates.columns:
+            self.cv_candidates['confidence'] = self.cv_candidates['cv_prob']
         else:
-            # With only one criterion, use its score directly
-            name, mask = criteria[0]
-            if name.startswith('ML-based'):
-                self.cv_candidates['confidence'] = self.cv_candidates['cv_prob']
-            elif name.startswith('Score-based'):
-                self.cv_candidates['confidence'] = self.cv_candidates['cv_score']
-            else:
-                # Default confidence
-                self.cv_candidates['confidence'] = 0.7
-        
-        print(f"Selected {len(self.cv_candidates)} CV candidates")
+            # Default confidence (constant value to avoid bias)
+            self.cv_candidates['confidence'] = 0.7
         
         # Sort by confidence
         self.cv_candidates = self.cv_candidates.sort_values('confidence', ascending=False)
         
         return True
-    
+
+
+
     def plot_candidates(self):
         """Generate plots to visualize the CV candidates."""
         if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
@@ -1825,7 +1885,7 @@ def main():
 
     primvs_file = '../PRIMVS/PRIMVS_CC_CV_cand.fits'
     output_dir = "../PRIMVS/"
-    known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits:"
+    known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits"
     period_limit = 10.0  # Very generous upper limit (days)
     amplitude_limit = 0.03  # Very low amplitude threshold (mag)
     fap_limit = 0.7  # Permissive FAP threshold
