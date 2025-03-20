@@ -33,8 +33,659 @@ import xgboost as xgb
 import joblib
 import sys
 
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+from matplotlib.patches import Polygon
+import matplotlib.patheffects as path_effects
+
 # Suppress unnecessary warnings
 warnings.filterwarnings('ignore')
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from astropy.coordinates import SkyCoord, Galactic, ICRS
+import astropy.units as u
+from matplotlib.patches import Polygon
+import matplotlib.patheffects as path_effects
+from matplotlib.transforms import Affine2D
+import matplotlib as mpl
+
+class TESSCycle8Overlay:
+    """
+    Enhanced class to handle TESS Cycle 8 observation footprints with proper camera rotation
+    for overlay on galactic plots.
+    """
+    
+    def __init__(self):
+        # Define TESS Year 8 data with complete spacecraft and camera orientation
+        self.tess_cycle8_data = {
+            "Sector": [97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107],
+            "Spacecraft": [
+                (41.66, -41.85, 210.37),
+                (80.17, -31.06, 186.64),
+                (157.21, -41.16, 215.94),
+                (180.54, -51.91, 212.87),
+                (209.02, -62.03, 217.75),
+                (249.18, -68.71, 236.07),
+                (297.54, -68.11, 263.19),
+                (335.46, -60.75, 279.24),
+                (2.58, -50.55, 282.74),
+                (25.01, -40.12, 279.10),
+                (45.87, -31.23, 271.34)
+            ],
+            "Camera 1": [
+                (24.13, -9.32, 292.44),
+                (76.26, 4.75, 275.70),
+                (136.70, -10.03, 296.66),
+                (160.77, -19.40, 290.79),
+                (184.53, -29.77, 289.32),
+                (210.05, -39.39, 292.95),
+                (239.66, -46.44, 302.50),
+                (273.80, -48.76, 317.02),
+                (308.41, -45.00, 331.21),
+                (338.92, -36.33, 339.59),
+                (5.23, -25.55, 341.34)
+            ],
+            "Camera 2": [
+                (34.60, -31.26, 296.14),
+                (78.71, -19.13, 276.02),
+                (149.01, -31.13, 301.08),
+                (171.88, -41.46, 296.53),
+                (197.12, -51.89, 297.73),
+                (228.76, -60.37, 307.55),
+                (269.50, -63.95, 327.47),
+                (310.89, -60.43, 347.75),
+                (343.49, -51.67, 357.83),
+                (9.24, -40.96, 358.81),
+                (31.87, -30.75, 354.10)
+            ],
+            "Camera 3": [
+                (51.45, -51.83, 127.55),
+                (82.05, -42.96, 97.78),
+                (168.24, -50.40, 133.88),
+                (194.15, -61.36, 134.29),
+                (231.12, -70.22, 148.05),
+                (284.10, -72.46, 179.13),
+                (328.67, -66.46, 202.01),
+                (357.50, -56.84, 208.16),
+                (19.73, -46.57, 205.65),
+                (39.96, -37.24, 198.48),
+                (59.79, -30.20, 188.47)
+            ],
+            "Camera 4": [
+                (90.00, -66.56, 161.25),
+                (90.00, -66.56, 104.42),
+                (206.58, -62.97, 166.47),
+                (251.44, -70.27, 187.40),
+                (303.95, -68.82, 217.35),
+                (340.57, -60.80, 231.85),
+                (5.45, -50.96, 234.00),
+                (26.00, -41.28, 230.08),
+                (45.61, -32.84, 222.47),
+                (65.56, -26.76, 212.26),
+                (85.93, -24.07, 200.58)
+            ]
+        }
+        
+        # Convert to galactic coordinates
+        self._convert_to_galactic()
+        
+    def _convert_to_galactic(self):
+        """Convert equatorial coordinates (RA, Dec, Roll) to galactic coordinates (l, b, roll_gal)"""
+        galactic_coords = {"Sector": [], "Camera": [], "l": [], "b": [], "roll": []}
+        
+        for sector in self.tess_cycle8_data["Sector"]:
+            idx = sector - 97  # Index for accessing camera positions
+            for cam_num, camera in enumerate(["Camera 1", "Camera 2", "Camera 3", "Camera 4"], 1):
+                ra, dec, roll = self.tess_cycle8_data[camera][idx]
+                sky_coord = SkyCoord(ra=ra * u.degree, dec=dec * u.degree, frame='icrs')
+                galactic = sky_coord.galactic
+                
+                # Convert l to consistent -180 to +180 range for better visualization
+                l_centered = galactic.l.degree
+                if l_centered > 180:
+                    l_centered -= 360
+                
+                galactic_coords["Sector"].append(sector)
+                galactic_coords["Camera"].append(cam_num)
+                galactic_coords["l"].append(l_centered)
+                galactic_coords["b"].append(galactic.b.degree)
+                galactic_coords["roll"].append(roll)
+        
+        # Convert to DataFrame and store
+        self.galactic_df = pd.DataFrame(galactic_coords)
+    
+    def _create_camera_footprint(self, l, b, roll=0, size=12):
+        """
+        Create an accurate representation of TESS camera footprint with rotation
+        
+        Parameters:
+        -----------
+        l : float
+            Galactic longitude of camera center
+        b : float
+            Galactic latitude of camera center
+        roll : float
+            Camera roll angle in degrees
+        size : float
+            Half-size of the camera field (default: 12 degrees for 24°×24° field)
+        
+        Returns:
+        --------
+        tuple : (longitudes, latitudes) of footprint vertices
+        """
+        # Create square vertices (before rotation)
+        vertices_l = np.array([-size, size, size, -size, -size])
+        vertices_b = np.array([-size, -size, size, size, -size])
+        
+        # Apply rotation (simplified approach in flat coordinates)
+        # Note: This is an approximation that works reasonably well for small areas
+        # For more accurate representation, a proper spherical rotation would be needed
+        roll_rad = np.radians(roll-90)  # Adjust for camera orientation
+        rotated_l = vertices_l * np.cos(roll_rad) - vertices_b * np.sin(roll_rad)
+        rotated_b = vertices_l * np.sin(roll_rad) + vertices_b * np.cos(roll_rad)
+        
+        # Translate to camera center
+        vertices_l = l + rotated_l
+        vertices_b = b + rotated_b
+        
+        return vertices_l, vertices_b
+    
+    def add_to_plot(self, ax, show_labels=True, alpha=0.2, cameras=None, sectors=None):
+        """
+        Add TESS Cycle 8 camera footprints to an existing matplotlib axis
+        
+        Parameters:
+        -----------
+        ax : matplotlib.axes.Axes
+            The axis to add the TESS footprints to
+        show_labels : bool
+            Whether to show sector labels for each camera (default: True)
+        alpha : float
+            Transparency for the camera footprints (default: 0.2)
+        cameras : list or None
+            List of camera numbers to include (1-4, default: all)
+        sectors : list or None
+            List of sector numbers to include (97-107, default: all)
+        """
+        if cameras is None:
+            cameras = [1, 2, 3, 4]
+        if sectors is None:
+            sectors = list(range(97, 108))
+            
+        # Filter data based on specified cameras and sectors
+        plot_data = self.galactic_df[
+            (self.galactic_df["Camera"].isin(cameras)) & 
+            (self.galactic_df["Sector"].isin(sectors))
+        ]
+        
+        # Define colors for each camera
+        camera_colors = {
+            1: 'red',
+            2: 'purple',
+            3: 'blue',
+            4: 'green'
+        }
+        
+        # Add footprints to plot
+        for _, row in plot_data.iterrows():
+            l, b = row["l"], row["b"]
+            cam = row["Camera"]
+            sector = row["Sector"]
+            roll = row["roll"]
+            
+            # Create camera footprint
+            vertices_l, vertices_b = self._create_camera_footprint(l, b, roll)
+            
+            # Draw the camera footprint as a polygon
+            polygon = Polygon(
+                np.column_stack([vertices_l, vertices_b]),
+                alpha=alpha,
+                color=camera_colors[cam],
+                closed=True,
+                label=f"Camera {cam}" if f"Camera {cam}" not in [p.get_label() for p in ax.get_children() if hasattr(p, 'get_label')] else ""
+            )
+            ax.add_patch(polygon)
+            
+            # Add sector label if requested
+            if show_labels:
+                text = ax.text(l, b, str(sector), fontsize=8, ha='center', va='center',
+                         color='white', fontweight='bold')
+                text.set_path_effects([
+                    path_effects.Stroke(linewidth=2, foreground='black'),
+                    path_effects.Normal()
+                ])
+        
+        # Add camera labels to legend if not already present
+        handles, labels = ax.get_legend_handles_labels()
+        camera_entries = [f"Camera {cam}" for cam in range(1, 5)]
+        
+        # Check if camera entries already exist in legend
+        if not any(label in camera_entries for label in labels):
+            # Add a title for the TESS camera section
+            handles.append(plt.Line2D([], [], color='none'))
+            labels.append("TESS Cameras")
+            
+            # Add camera entries
+            for cam in sorted(set(plot_data["Camera"])):
+                handles.append(plt.Line2D([], [], color=camera_colors[cam], alpha=0.6, 
+                                      marker='s', linestyle='None', markersize=10))
+                labels.append(f"Camera {cam}")
+        
+        # Update the legend
+        if handles and labels:
+            ax.legend(handles, labels, loc='upper right')
+        
+        return ax
+    
+    def filter_bulge_sectors(self):
+        """Return sectors that cover the Galactic bulge region (-10° < l < +10° and -10° < b < +5°)"""
+        # Define approximate bulge region
+        bulge_mask = (abs(self.galactic_df['l']) < 10) & (self.galactic_df['b'] > -10) & (self.galactic_df['b'] < 5)
+        bulge_sectors = sorted(set(self.galactic_df.loc[bulge_mask, 'Sector']))
+        return bulge_sectors
+    
+    def filter_disk_sectors(self):
+        """Return sectors that cover the Galactic disk region (-65° < l < -10° and -2° < b < -10°)"""
+        # VVV disk is approximately -65° < l < -10° and -2° < b < -10°
+        disk_mask = (self.galactic_df['l'] < -10) & (self.galactic_df['l'] > -65) & \
+                   (self.galactic_df['b'] < -2) & (self.galactic_df['b'] > -10)
+        disk_sectors = sorted(set(self.galactic_df.loc[disk_mask, 'Sector']))
+        return disk_sectors
+
+# Function to integrate with existing plot functions
+def add_tess_cycle8_to_plot(ax, focus_region=None, alpha=0.2):
+    """
+    Add TESS Cycle 8 camera footprints to an existing plot
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        The axis to add footprints to
+    focus_region : str or None
+        'bulge', 'disk', or None (for all regions)
+    alpha : float
+        Transparency level for footprints
+    """
+    tess_overlay = TESSCycle8Overlay()
+    
+    if focus_region == 'bulge':
+        sectors = tess_overlay.filter_bulge_sectors()
+        # For bulge, primarily cameras 1-2 cover the central regions
+        cameras = [1, 2]
+    elif focus_region == 'disk':
+        sectors = tess_overlay.filter_disk_sectors()
+        # For disk, primarily cameras 2-3 cover these regions
+        cameras = [2, 3]
+    else:
+        sectors = None  # All sectors
+        cameras = None  # All cameras
+    
+    tess_overlay.add_to_plot(ax, show_labels=True, alpha=alpha, cameras=cameras, sectors=sectors)
+    
+    # Add title annotation about TESS coverage
+    if focus_region:
+        title = f"TESS Cycle 8 {focus_region.title()} Coverage"
+    else:
+        title = "TESS Cycle 8 Coverage"
+    
+    # Add an annotation box with coverage information
+    ax.annotate(
+        title,
+        xy=(0.5, 0.97),
+        xycoords='axes fraction',
+        ha='center',
+        va='top',
+        fontsize=10,
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+    )
+    
+    return ax
+
+def create_tess_sky_coverage_plot(output_file=None, include_cv_data=None):
+    """
+    Create a visualization similar to the TESS website plots showing camera coverage
+    in equatorial coordinates with optional CV data overlay
+    
+    Parameters:
+    -----------
+    output_file : str or None
+        If provided, save the plot to this file path
+    include_cv_data : DataFrame or None
+        Optional DataFrame with CV candidate data to overlay
+    """
+    # Create figure with Mollweide projection
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(111, projection='mollweide')
+    
+    # Define TESS Year 8 data
+    tess_overlay = TESSCycle8Overlay()
+    
+    # Create arrays to store all camera positions for plotting
+    all_ra = []
+    all_dec = []
+    all_cam = []
+    all_sector = []
+    
+    # Extract camera positions
+    for sector in tess_overlay.tess_cycle8_data["Sector"]:
+        idx = sector - 97
+        for cam_num, camera in enumerate(["Camera 1", "Camera 2", "Camera 3", "Camera 4"], 1):
+            ra, dec, _ = tess_overlay.tess_cycle8_data[camera][idx]
+            all_ra.append(ra)
+            all_dec.append(dec)
+            all_cam.append(cam_num)
+            all_sector.append(sector)
+    
+    # Convert RA/Dec to radians for Mollweide projection
+    # Mollweide projection expects longitude in range [-pi, pi]
+    ra_rad = np.radians(np.array(all_ra))
+    ra_rad = np.where(ra_rad > np.pi, ra_rad - 2*np.pi, ra_rad)
+    dec_rad = np.radians(np.array(all_dec))
+    
+    # Create camera footprints (approximate as circles in this visualization)
+    camera_colors = {1: 'blue', 2: 'green', 3: 'orange', 4: 'purple'}
+    for i in range(len(ra_rad)):
+        # Create a circle patch centered at camera position
+        # In Mollweide projection, this is an approximation
+        circle = plt.Circle((ra_rad[i], dec_rad[i]), radius=np.radians(12), 
+                          alpha=0.3, color=camera_colors[all_cam[i]], 
+                          transform=ax.transData)
+        ax.add_patch(circle)
+        
+        # Add sector label
+        ax.text(ra_rad[i], dec_rad[i], str(all_sector[i]), 
+               ha='center', va='center', fontsize=8, fontweight='bold',
+               color='white', path_effects=[path_effects.withStroke(linewidth=2, foreground='black')])
+    
+    # Add CV data if provided
+    if include_cv_data is not None and 'ra' in include_cv_data.columns and 'dec' in include_cv_data.columns:
+        # Convert CV positions to radians
+        cv_ra_rad = np.radians(include_cv_data['ra'].values)
+        cv_ra_rad = np.where(cv_ra_rad > np.pi, cv_ra_rad - 2*np.pi, cv_ra_rad)
+        cv_dec_rad = np.radians(include_cv_data['dec'].values)
+        
+        # Plot CV candidates
+        ax.scatter(cv_ra_rad, cv_dec_rad, s=5, color='red', alpha=0.7, label='CV Candidates')
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    # Set labels
+    ax.set_xticklabels(['0h', '3h', '6h', '9h', '12h', '15h', '18h', '21h'])
+    ax.set_title('TESS Cycle 8 (Year 8) Camera Coverage')
+    
+    # Add legend
+    handles = []
+    labels = []
+    for cam in range(1, 5):
+        handles.append(plt.Line2D([], [], color=camera_colors[cam], marker='o', 
+                               linestyle='None', markersize=10, alpha=0.6))
+        labels.append(f'Camera {cam}')
+    
+    if include_cv_data is not None:
+        handles.append(plt.Line2D([], [], color='red', marker='o', 
+                               linestyle='None', markersize=5, alpha=0.7))
+        labels.append('CV Candidates')
+    
+    ax.legend(handles, labels, loc='upper right')
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        return fig, ax
+
+def create_galactic_coverage_plot(output_file=None, include_cv_data=None):
+    """
+    Create a visualization of TESS Cycle 8 coverage in galactic coordinates
+    with VVV survey regions highlighted
+    
+    Parameters:
+    -----------
+    output_file : str or None
+        If provided, save the plot to this file path
+    include_cv_data : DataFrame or None
+        Optional DataFrame with CV candidate data to overlay
+    """
+    fig = plt.figure(figsize=(14, 8))
+    ax = fig.add_subplot(111)
+    
+    # Add TESS camera footprints
+    tess_overlay = TESSCycle8Overlay()
+    tess_overlay.add_to_plot(ax, alpha=0.3)
+    
+    # Add VVV survey regions
+    # Bulge region: -10° < l < +10° and -10° < b < +5°
+    bulge_x = np.array([-10, -10, 10, 10, -10])
+    bulge_y = np.array([-10, 5, 5, -10, -10])
+    ax.plot(bulge_x, bulge_y, 'r-', linewidth=2, label='VVV Bulge')
+    
+    # Disk region: -65° < l < -10° and -2° < b < -10°
+    disk_x = np.array([-65, -65, -10, -10, -65])
+    disk_y = np.array([-2, -10, -10, -2, -2])
+    ax.plot(disk_x, disk_y, 'r-', linewidth=2, label='VVV Disk')
+    
+    # Add region labels
+    ax.annotate('VVV Bulge', xy=(0, -2.5), xytext=(0, -2.5), ha='center', va='center',
+              fontsize=12, bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.8))
+    
+    ax.annotate('VVV Disk', xy=(-35, -6), xytext=(-35, -6), ha='center', va='center',
+              fontsize=12, bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.8))
+    
+    # Add CV data if provided
+    if include_cv_data is not None and 'l' in include_cv_data.columns and 'b' in include_cv_data.columns:
+        # Center longitude to -180 to 180 range
+        l_centered = np.where(include_cv_data['l'] > 180, 
+                              include_cv_data['l'] - 360, 
+                              include_cv_data['l'])
+        
+        # Plot CV candidates
+        scatter = ax.scatter(l_centered, include_cv_data['b'], 
+                           s=5, alpha=0.7, label='CV Candidates',
+                           c=include_cv_data.get('confidence', 'red'),
+                           cmap='viridis' if 'confidence' in include_cv_data else None)
+        
+        if 'confidence' in include_cv_data:
+            plt.colorbar(scatter, label='Confidence', pad=0.01)
+    
+    # Set labels and title
+    ax.set_xlabel('Galactic Longitude (l) [deg]')
+    ax.set_ylabel('Galactic Latitude (b) [deg]')
+    ax.set_title('TESS Cycle 8 Coverage of VVV Survey Regions')
+    
+    # Set limits to focus on relevant regions
+    ax.set_xlim(-70, 20)
+    ax.set_ylim(-15, 10)
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    # Add legend
+    handles, labels = ax.get_legend_handles_labels()
+    if handles and labels:
+        ax.legend(loc='upper right')
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        return fig, ax
+
+def create_bulge_coverage_detail(output_file=None, include_cv_data=None):
+    """Create detailed plot focusing specifically on the VVV bulge region"""
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111)
+    
+    # Add TESS camera footprints
+    tess_overlay = TESSCycle8Overlay()
+    bulge_sectors = tess_overlay.filter_bulge_sectors()
+    tess_overlay.add_to_plot(ax, alpha=0.25, sectors=bulge_sectors)
+    
+    # Add VVV bulge region boundaries
+    bulge_x = np.array([-10, -10, 10, 10, -10])
+    bulge_y = np.array([-10, 5, 5, -10, -10])
+    ax.plot(bulge_x, bulge_y, 'r-', linewidth=2, label='VVV Bulge')
+    
+    # Add CV data if provided, filtering to bulge region
+    if include_cv_data is not None and 'l' in include_cv_data.columns and 'b' in include_cv_data.columns:
+        # Center longitude to -180 to 180 range
+        l_centered = np.where(include_cv_data['l'] > 180, 
+                              include_cv_data['l'] - 360, 
+                              include_cv_data['l'])
+        
+        # Filter to bulge region
+        bulge_mask = (l_centered >= -10) & (l_centered <= 10) & \
+                    (include_cv_data['b'] >= -10) & (include_cv_data['b'] <= 5)
+        
+        bulge_cv_data = include_cv_data[bulge_mask]
+        bulge_l = l_centered[bulge_mask]
+        
+        # Plot CV candidates
+        if len(bulge_cv_data) > 0:
+            scatter = ax.scatter(bulge_l, bulge_cv_data['b'], 
+                               s=10, alpha=0.7, label='CV Candidates',
+                               c=bulge_cv_data.get('confidence', 'red'),
+                               cmap='viridis' if 'confidence' in bulge_cv_data else None)
+            
+            if 'confidence' in bulge_cv_data:
+                plt.colorbar(scatter, label='Confidence', pad=0.01)
+    
+    # Mark the Galactic center
+    ax.plot(0, 0, 'k+', markersize=10, label='Galactic Center')
+    
+    # Set labels and title
+    ax.set_xlabel('Galactic Longitude (l) [deg]')
+    ax.set_ylabel('Galactic Latitude (b) [deg]')
+    ax.set_title('TESS Cycle 8 Coverage of VVV Bulge Region')
+    
+    # Set limits to focus on bulge
+    ax.set_xlim(-12, 12)
+    ax.set_ylim(-11, 6)
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    # Add legend
+    handles, labels = ax.get_legend_handles_labels()
+    if handles and labels:
+        ax.legend(loc='upper right')
+    
+    # Add annotation with coverage statistics
+    if include_cv_data is not None:
+        bulge_cv_count = bulge_mask.sum()
+        covered_sectors = {}
+        
+        for sector in bulge_sectors:
+            sector_cam_data = tess_overlay.galactic_df[tess_overlay.galactic_df['Sector'] == sector]
+            
+            # Calculate approximate coverage
+            covered_count = 0
+            for _, cam_row in sector_cam_data.iterrows():
+                # Create camera footprint
+                vertices_l, vertices_b = tess_overlay._create_camera_footprint(
+                    cam_row['l'], cam_row['b'], cam_row['roll'])
+                
+                # Create polygon
+                from matplotlib.path import Path
+                poly_path = Path(np.column_stack([vertices_l, vertices_b]))
+                
+                # Check which CVs are inside
+                for i, (l, b) in enumerate(zip(bulge_l, bulge_cv_data['b'])):
+                    if poly_path.contains_point((l, b)):
+                        covered_count += 1
+            
+            # Store coverage percentage
+            if bulge_cv_count > 0:
+                covered_sectors[sector] = {
+                    'count': covered_count,
+                    'percentage': 100 * covered_count / bulge_cv_count
+                }
+        
+        # Add annotation
+        info_text = f"VVV Bulge CV Candidates: {bulge_cv_count}\n\n"
+        
+        for sector, stats in covered_sectors.items():
+            if stats['count'] > 0:
+                info_text += f"Sector {sector}: {stats['count']} CVs ({stats['percentage']:.1f}%)\n"
+        
+        ax.annotate(
+            info_text,
+            xy=(0.02, 0.98),
+            xycoords='axes fraction',
+            ha='left',
+            va='top',
+            fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+        )
+    
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        return fig, ax
+
+# Function to convert CV candidate dataframe to include equatorial coordinates
+def prepare_cv_data_for_plotting(cv_data):
+    """
+    Prepare CV candidate data for plotting by adding equatorial coordinates if needed
+    
+    Parameters:
+    -----------
+    cv_data : DataFrame
+        DataFrame with CV candidate data
+    
+    Returns:
+    --------
+    DataFrame : Enhanced DataFrame with additional coordinate columns
+    """
+    result = cv_data.copy()
+    
+    # Check if we have galactic coordinates but no equatorial
+    if 'l' in result.columns and 'b' in result.columns and ('ra' not in result.columns or 'dec' not in result.columns):
+        # Convert to SkyCoord objects
+        coords = SkyCoord(l=result['l'].values*u.degree, 
+                         b=result['b'].values*u.degree, 
+                         frame=Galactic)
+        
+        # Convert to equatorial
+        equatorial = coords.transform_to(ICRS)
+        
+        # Add to dataframe
+        result['ra'] = equatorial.ra.degree
+        result['dec'] = equatorial.dec.degree
+    
+    # Check if we have equatorial coordinates but no galactic
+    if 'ra' in result.columns and 'dec' in result.columns and ('l' not in result.columns or 'b' not in result.columns):
+        # Convert to SkyCoord objects
+        coords = SkyCoord(ra=result['ra'].values*u.degree, 
+                         dec=result['dec'].values*u.degree, 
+                         frame=ICRS)
+        
+        # Convert to galactic
+        galactic = coords.transform_to(Galactic)
+        
+        # Add to dataframe
+        result['l'] = galactic.l.degree
+        result['b'] = galactic.b.degree
+    
+    # Ensure 'l_centered' column for plotting
+    if 'l' in result.columns and 'l_centered' not in result.columns:
+        result['l_centered'] = np.where(result['l'] > 180, 
+                                       result['l'] - 360, 
+                                       result['l'])
+    
+    return result
+
+
+
+
 
 class PrimvsCVFinder:
     """
@@ -2128,13 +2779,43 @@ class PrimvsCVFinder:
 
 
 
+
+
+
+    def save_candidates(self):
+        """Save the CV candidates to CSV and FITS files."""
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates to save.")
+            return False
+        
+        print(f"Saving {len(self.cv_candidates)} CV candidates...")
+        
+        # Save to CSV
+        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
+        self.cv_candidates.to_csv(csv_path, index=False)
+        print(f"Saved candidates to CSV: {csv_path}")
+        
+        # Save to FITS
+        fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
+        table = Table.from_pandas(self.cv_candidates)
+        table.write(fits_path, overwrite=True)
+        print(f"Saved candidates to FITS: {fits_path}")
+        
+        # Generate summary statistics
+        self.generate_summary()
+        
+        return True
+
+
     def plot_candidates(self):
-        """Generate plots to visualize the CV candidates."""
+        """Generate plots to visualize the CV candidates with TESS Cycle 8 overlay."""
         if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
             print("No CV candidates to plot.")
             return
         
-        print("Generating plots for CV candidates...")
+        #from tess_cycle8_overlay import TESSCycle8Overlay, add_tess_cycle8_to_plot
+        
+        print("Generating plots for CV candidates with TESS Cycle 8 footprints...")
         
         # 1. Period-Amplitude diagram (Bailey diagram)
         plt.figure(figsize=(10, 6))
@@ -2167,8 +2848,9 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(self.output_dir, 'cv_bailey_diagram.png'), dpi=300)
         plt.close()
         
-        # 2. Spatial distribution
+        # 2. Spatial distribution with TESS Cycle 8 overlay
         if all(col in self.cv_candidates.columns for col in ['l', 'b']):
+            # Full Galactic map with TESS Cycle 8 overlay
             plt.figure(figsize=(12, 6))
             
             # Plot all filtered sources as background
@@ -2193,13 +2875,76 @@ class PrimvsCVFinder:
             plt.colorbar(label='Confidence' if 'confidence' in self.cv_candidates else None)
             plt.xlabel('Galactic Longitude (l)')
             plt.ylabel('Galactic Latitude (b)')
-            plt.title('Spatial Distribution of CV Candidates')
-            plt.legend()
+            plt.title('Spatial Distribution of CV Candidates with TESS Cycle 8 Coverage')
             plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.output_dir, 'cv_spatial_distribution.png'), dpi=300)
+            
+            # Add TESS Cycle 8 overlay
+            add_tess_cycle8_to_plot(plt.gca(), focus_region=None, alpha=0.2)
+            
+            plt.savefig(os.path.join(self.output_dir, 'cv_spatial_distribution_tess.png'), dpi=300)
+            plt.close()
+            
+            # 3. Bulge-focused map
+            plt.figure(figsize=(10, 8))
+            
+            # Plot candidates
+            plt.scatter(
+                self.cv_candidates['l'],
+                self.cv_candidates['b'],
+                alpha=0.7, 
+                s=10, 
+                c=self.cv_candidates['confidence'] if 'confidence' in self.cv_candidates else 'red',
+                cmap='viridis',
+                label='CV candidates'
+            )
+            
+            plt.colorbar(label='Confidence' if 'confidence' in self.cv_candidates else None)
+            plt.xlabel('Galactic Longitude (l)')
+            plt.ylabel('Galactic Latitude (b)')
+            plt.title('CV Candidates in Galactic Bulge with TESS Cycle 8 Coverage')
+            plt.grid(True, alpha=0.3)
+            
+            # Focus on bulge region
+            plt.xlim(-12, 12)
+            plt.ylim(-10, 5)
+            
+            # Add TESS Cycle 8 overlay for bulge
+            add_tess_cycle8_to_plot(plt.gca(), focus_region='bulge', alpha=0.2)
+            
+            plt.savefig(os.path.join(self.output_dir, 'cv_bulge_tess.png'), dpi=300)
+            plt.close()
+            
+            # 4. Disk-focused map
+            plt.figure(figsize=(12, 6))
+            
+            # Plot candidates
+            plt.scatter(
+                self.cv_candidates['l'],
+                self.cv_candidates['b'],
+                alpha=0.7, 
+                s=10, 
+                c=self.cv_candidates['confidence'] if 'confidence' in self.cv_candidates else 'red',
+                cmap='viridis',
+                label='CV candidates'
+            )
+            
+            plt.colorbar(label='Confidence' if 'confidence' in self.cv_candidates else None)
+            plt.xlabel('Galactic Longitude (l)')
+            plt.ylabel('Galactic Latitude (b)')
+            plt.title('CV Candidates in Galactic Disk with TESS Cycle 8 Coverage')
+            plt.grid(True, alpha=0.3)
+            
+            # Focus on disk region
+            plt.xlim(-65, -10)
+            plt.ylim(-10, -1)
+            
+            # Add TESS Cycle 8 overlay for disk
+            add_tess_cycle8_to_plot(plt.gca(), focus_region='disk', alpha=0.2)
+            
+            plt.savefig(os.path.join(self.output_dir, 'cv_disk_tess.png'), dpi=300)
             plt.close()
         
-        # 3. Period distribution
+        # 5. Period distribution
         plt.figure(figsize=(10, 6))
         period_hours = self.cv_candidates['true_period'] * 24.0
         
@@ -2216,7 +2961,7 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(self.output_dir, 'cv_period_distribution.png'), dpi=300)
         plt.close()
         
-        # 4. Period-FAP diagram (to identify potentially unreliable periods)
+        # 6. Period-FAP diagram (to identify potentially unreliable periods)
         plt.figure(figsize=(10, 6))
         
         # Scatter plot colored by confidence
@@ -2238,7 +2983,7 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(self.output_dir, 'cv_period_fap.png'), dpi=300)
         plt.close()
         
-        # 5. Color-color diagram (if colors available)
+        # 7. Color-color diagram (if colors available)
         color_cols = ['J-K', 'H-K']
         if all(col in self.cv_candidates.columns for col in color_cols):
             plt.figure(figsize=(10, 6))
@@ -2270,46 +3015,11 @@ class PrimvsCVFinder:
             plt.grid(True, alpha=0.3)
             plt.savefig(os.path.join(self.output_dir, 'cv_color_diagram.png'), dpi=300)
             plt.close()
-    
 
-
-
-
-
-
-
-    def save_candidates(self):
-        """Save the CV candidates to CSV and FITS files."""
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates to save.")
-            return False
-        
-        print(f"Saving {len(self.cv_candidates)} CV candidates...")
-        
-        # Save to CSV
-        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
-        self.cv_candidates.to_csv(csv_path, index=False)
-        print(f"Saved candidates to CSV: {csv_path}")
-        
-        # Save to FITS
-        fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
-        table = Table.from_pandas(self.cv_candidates)
-        table.write(fits_path, overwrite=True)
-        print(f"Saved candidates to FITS: {fits_path}")
-        
-        # Generate summary statistics
-        self.generate_summary()
-        
-        return True
-
-
-
-    
     def visualize_candidate_distributions(self, max_top_candidates=1000):
         """
-        Generate comprehensive visualizations of CV candidate distributions across multiple parameter spaces.
-        This method plots all candidates, known CVs, and top candidates without individual annotations,
-        facilitating analysis of population-level distributions.
+        Generate comprehensive visualizations of CV candidate distributions across multiple parameter spaces,
+        including TESS Cycle 8 coverage overlays.
         
         Parameters:
         -----------
@@ -2319,6 +3029,8 @@ class PrimvsCVFinder:
         if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
             print("No CV candidates available for visualization.")
             return
+        
+        #from tess_cycle8_overlay import TESSCycle8Overlay, add_tess_cycle8_to_plot
         
         print(f"Generating comprehensive distribution visualizations of CV candidates...")
         
@@ -2469,234 +3181,7 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(viz_dir, 'bailey_diagram_distribution.png'), dpi=300)
         plt.close()
         
-        # 2. Embedding space visualization (if available)
-        embedding_features = []
-        cc_embedding_cols = [str(i) for i in range(64)]
-        for col in cc_embedding_cols:
-            if col in self.cv_candidates.columns:
-                embedding_features.append(col)
-        
-        if len(embedding_features) >= 10 and hasattr(self, 'cv_candidates'):
-            # Apply PCA to reduce dimensionality for visualization
-            from sklearn.decomposition import PCA
-            
-            print("Applying PCA to embedding features for visualization...")
-            
-            # Extract embeddings
-            embeddings = self.cv_candidates[embedding_features].values
-            
-            # Apply PCA
-            pca = PCA(n_components=3)
-            embeddings_3d = pca.fit_transform(embeddings)
-            
-            # Add PCA coordinates to candidates dataframe (temporary)
-            temp_candidates = self.cv_candidates.copy()
-            temp_candidates['pca_1'] = embeddings_3d[:, 0]
-            temp_candidates['pca_2'] = embeddings_3d[:, 1]
-            temp_candidates['pca_3'] = embeddings_3d[:, 2]
-            
-            # Split into categories for plotting
-            if has_known_cvs:
-                temp_known_cvs = temp_candidates[temp_candidates['is_known_cv']]
-                temp_other = temp_candidates[~temp_candidates['is_known_cv']]
-            else:
-                temp_other = temp_candidates
-            
-            temp_top = temp_candidates.loc[top_candidates.index]
-            
-            # Explained variance for axis labels
-            explained_variance = pca.explained_variance_ratio_
-            
-            # Create 2D PCA plot
-            plt.figure(figsize=(14, 10))
-            
-            # Plot all candidates
-            plt.scatter(
-                temp_other['pca_1'],
-                temp_other['pca_2'],
-                alpha=0.3,
-                s=5,
-                color='blue',
-                label='All candidates'
-            )
-            
-            # Plot top candidates
-            plt.scatter(
-                temp_top['pca_1'],
-                temp_top['pca_2'],
-                alpha=0.6,
-                s=15,
-                color='red',
-                label=f'Top {len(temp_top)} candidates'
-            )
-            
-            # Plot known CVs if available
-            if has_known_cvs:
-                plt.scatter(
-                    temp_known_cvs['pca_1'],
-                    temp_known_cvs['pca_2'],
-                    alpha=0.8,
-                    s=30,
-                    color='green',
-                    marker='*',
-                    label='Known CVs'
-                )
-            
-            plt.xlabel(f'PCA Component 1 ({explained_variance[0]:.1%} variance)')
-            plt.ylabel(f'PCA Component 2 ({explained_variance[1]:.1%} variance)')
-            plt.title('Contrastive Curves Embedding Space Distribution (PCA Projection)')
-            plt.grid(True, alpha=0.3)
-            plt.legend(loc='upper right')
-            
-            # Add count information
-            plt.figtext(
-                0.02, 0.02, info_text,
-                ha='left',
-                va='bottom',
-                fontsize=10,
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-            )
-            
-            plt.savefig(os.path.join(viz_dir, 'embedding_pca_distribution.png'), dpi=300)
-            plt.close()
-            
-            # Create 3D PCA plot
-            fig = plt.figure(figsize=(14, 10))
-            ax = fig.add_subplot(111, projection='3d')
-            
-            # Plot all candidates
-            ax.scatter(
-                temp_other['pca_1'],
-                temp_other['pca_2'],
-                temp_other['pca_3'],
-                alpha=0.3,
-                s=5,
-                color='blue',
-                label='All candidates'
-            )
-            
-            # Plot top candidates
-            ax.scatter(
-                temp_top['pca_1'],
-                temp_top['pca_2'],
-                temp_top['pca_3'],
-                alpha=0.6,
-                s=15,
-                color='red',
-                label=f'Top {len(temp_top)} candidates'
-            )
-            
-            # Plot known CVs if available
-            if has_known_cvs:
-                ax.scatter(
-                    temp_known_cvs['pca_1'],
-                    temp_known_cvs['pca_2'],
-                    temp_known_cvs['pca_3'],
-                    alpha=0.8,
-                    s=30,
-                    color='green',
-                    marker='*',
-                    label='Known CVs'
-                )
-            
-            ax.set_xlabel(f'PCA 1 ({explained_variance[0]:.1%})')
-            ax.set_ylabel(f'PCA 2 ({explained_variance[1]:.1%})')
-            ax.set_zlabel(f'PCA 3 ({explained_variance[2]:.1%})')
-            ax.set_title('3D Contrastive Curves Embedding Space Distribution')
-            ax.legend(loc='upper right')
-            
-            plt.savefig(os.path.join(viz_dir, 'embedding_pca_3d_distribution.png'), dpi=300)
-            plt.close()
-            
-            # Alternative: Create UMAP visualization if available
-            try:
-                import umap
-                
-                print("Creating UMAP visualization of embedding space...")
-                
-                # Apply UMAP
-                reducer = umap.UMAP(
-                    n_neighbors=15,
-                    min_dist=0.1,
-                    n_components=2,
-                    random_state=42,
-                    metric='euclidean'
-                )
-                
-                # Transform the embeddings
-                embeddings_umap = reducer.fit_transform(embeddings)
-                
-                # Add UMAP coordinates
-                temp_candidates['umap_1'] = embeddings_umap[:, 0]
-                temp_candidates['umap_2'] = embeddings_umap[:, 1]
-                
-                # Split into categories again (using updated dataframe)
-                if has_known_cvs:
-                    temp_known_cvs = temp_candidates[temp_candidates['is_known_cv']]
-                    temp_other = temp_candidates[~temp_candidates['is_known_cv']]
-                else:
-                    temp_other = temp_candidates
-                
-                temp_top = temp_candidates.loc[top_candidates.index]
-                
-                # Create UMAP plot
-                plt.figure(figsize=(14, 10))
-                
-                # Plot all candidates
-                plt.scatter(
-                    temp_other['umap_1'],
-                    temp_other['umap_2'],
-                    alpha=0.3,
-                    s=5,
-                    color='blue',
-                    label='All candidates'
-                )
-                
-                # Plot top candidates
-                plt.scatter(
-                    temp_top['umap_1'],
-                    temp_top['umap_2'],
-                    alpha=0.6,
-                    s=15,
-                    color='red',
-                    label=f'Top {len(temp_top)} candidates'
-                )
-                
-                # Plot known CVs if available
-                if has_known_cvs:
-                    plt.scatter(
-                        temp_known_cvs['umap_1'],
-                        temp_known_cvs['umap_2'],
-                        alpha=0.8,
-                        s=30,
-                        color='green',
-                        marker='*',
-                        label='Known CVs'
-                    )
-                
-                plt.xlabel('UMAP Dimension 1')
-                plt.ylabel('UMAP Dimension 2')
-                plt.title('Contrastive Curves Embedding Space Distribution (UMAP Projection)')
-                plt.grid(True, alpha=0.3)
-                plt.legend(loc='upper right')
-                
-                # Add count information
-                plt.figtext(
-                    0.02, 0.02, info_text,
-                    ha='left',
-                    va='bottom',
-                    fontsize=10,
-                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-                )
-                
-                plt.savefig(os.path.join(viz_dir, 'embedding_umap_distribution.png'), dpi=300)
-                plt.close()
-                
-            except ImportError:
-                print("UMAP not available. Skipping UMAP visualization.")
-
-
-        # 3. Spatial distribution (if galactic coordinates available)
+        # Spatial distribution with TESS Cycle 8 overlay
         plt.figure(figsize=(14, 10))
         
         # Convert longitudes to a more intuitive representation for VVV survey
@@ -2801,7 +3286,9 @@ class PrimvsCVFinder:
         plt.ylabel('Galactic Latitude (b) [deg]')
         plt.title('Spatial Distribution of CV Candidates in Galactic Coordinates (VVV Survey)')
         plt.grid(True, alpha=0.3)
-        plt.legend(loc='upper right')
+        
+        # Add TESS Cycle 8 footprint overlay
+        add_tess_cycle8_to_plot(plt.gca(), focus_region=None, alpha=0.15)
         
         # Set axis limits to focus on the VVV survey regions
         # Find the extremes of the data with some padding
@@ -2829,10 +3316,10 @@ class PrimvsCVFinder:
             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
         )
         
-        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_vvv.png'), dpi=300)
+        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_vvv_tess.png'), dpi=300)
         plt.close()
         
-        # Create heat map of candidate density in Galactic coordinates
+        # Create heat map of candidate density in Galactic coordinates with TESS overlay
         plt.figure(figsize=(14, 10))
         
         # Create 2D histogram using centered coordinates for better visualization
@@ -2889,6 +3376,9 @@ class PrimvsCVFinder:
             bbox=dict(boxstyle="round,pad=0.3", fc="black", ec="white", alpha=0.7)
         )
         
+        # Add TESS Cycle 8 overlay with higher alpha for better visibility on the heatmap
+        add_tess_cycle8_to_plot(plt.gca(), focus_region=None, alpha=0.3)
+        
         # Plot known CVs on top if available
         if has_known_cvs:
             plt.scatter(
@@ -2905,17 +3395,17 @@ class PrimvsCVFinder:
         
         plt.xlabel('Galactic Longitude (l) [deg]')
         plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('Density Distribution of CV Candidates in VVV Survey Region')
+        plt.title('Density Distribution of CV Candidates with TESS Cycle 8 Coverage')
         plt.grid(True, alpha=0.3)
         
         # Use same axis limits as the scatter plot
         plt.xlim(l_min, l_max)
         plt.ylim(b_min, b_max)
         
-        plt.savefig(os.path.join(viz_dir, 'galactic_density_vvv.png'), dpi=300)
+        plt.savefig(os.path.join(viz_dir, 'galactic_density_vvv_tess.png'), dpi=300)
         plt.close()
         
-        # Create separate zoomed plots for bulge and disk regions
+        # Create separate zoomed plots for bulge and disk regions with TESS overlay
         # 1. Bulge region
         plt.figure(figsize=(10, 8))
         
@@ -2960,20 +3450,22 @@ class PrimvsCVFinder:
             label='Galactic Center'
         )
         
+        # Add TESS Cycle 8 overlay for bulge
+        add_tess_cycle8_to_plot(plt.gca(), focus_region='bulge', alpha=0.2)
+        
         plt.xlabel('Galactic Longitude (l) [deg]')
         plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('CV Candidates in VVV Bulge Region')
+        plt.title('CV Candidates in VVV Bulge Region with TESS Cycle 8 Coverage')
         plt.grid(True, alpha=0.3)
-        plt.legend(loc='upper right')
         
         # Set limits to focus on bulge region
         plt.xlim(-12, 12)
         plt.ylim(-10, 5)
         
-        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_bulge.png'), dpi=300)
+        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_bulge_tess.png'), dpi=300)
         plt.close()
         
-        # 2. Disk region
+        # 2. Disk region with TESS overlay
         plt.figure(figsize=(12, 6))
         
         # Plot all candidates in disk region
@@ -3008,119 +3500,24 @@ class PrimvsCVFinder:
                 label='Known CVs'
             )
         
+        # Add TESS Cycle 8 overlay for disk
+        add_tess_cycle8_to_plot(plt.gca(), focus_region='disk', alpha=0.2)
+        
         plt.xlabel('Galactic Longitude (l) [deg]')
         plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('CV Candidates in VVV Disk Region')
+        plt.title('CV Candidates in VVV Disk Region with TESS Cycle 8 Coverage')
         plt.grid(True, alpha=0.3)
-        plt.legend(loc='upper right')
         
         # Set limits to focus on disk region
         plt.xlim(-65, -10)
         plt.ylim(-10, -1)
         
-        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_disk.png'), dpi=300)
+        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_disk_tess.png'), dpi=300)
         plt.close()
-        # 4. Classification confidence distribution (if available)
-        if sort_col is not None and sort_col in self.cv_candidates.columns:
-            plt.figure(figsize=(14, 10))
-            
-            # Create histogram of classification confidence/probability
-            plt.hist(
-                self.cv_candidates[sort_col],
-                bins=50,
-                alpha=0.7,
-                color='blue',
-                label='All candidates'
-            )
-            
-            # Mark top candidates threshold
-            if len(top_candidates) < len(self.cv_candidates):
-                min_top_value = top_candidates[sort_col].min()
-                plt.axvline(
-                    min_top_value,
-                    color='red',
-                    linestyle='--',
-                    linewidth=2,
-                    label=f'Top {len(top_candidates)} threshold: {min_top_value:.4f}'
-                )
-            
-            # Add key thresholds
-            if sort_col != 'best_fap':
-                plt.axvline(0.8, color='green', linestyle='-', alpha=0.7, label='High confidence threshold (0.8)')
-                plt.axvline(0.5, color='orange', linestyle='-', alpha=0.7, label='Medium confidence threshold (0.5)')
-            else:
-                # For FAP, lower is better
-                plt.axvline(0.1, color='green', linestyle='-', alpha=0.7, label='High confidence threshold (0.1)')
-                plt.axvline(0.3, color='orange', linestyle='-', alpha=0.7, label='Medium confidence threshold (0.3)')
-            
-            plt.xlabel(sort_col.replace('_', ' ').title())
-            plt.ylabel('Number of Candidates')
-            plt.title(f'Distribution of {sort_col.replace("_", " ").title()} Values')
-            plt.grid(True, alpha=0.3)
-            plt.legend(loc='upper right')
-            
-            # Add count information
-            plt.figtext(
-                0.02, 0.02, info_text,
-                ha='left',
-                va='bottom',
-                fontsize=10,
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-            )
-            
-            plt.savefig(os.path.join(viz_dir, f'{sort_col}_distribution.png'), dpi=300)
-            plt.close()
-            
-            # Create scatter plot of classification confidence vs period
-            plt.figure(figsize=(14, 10))
-            
-            # Plot all candidates
-            period_hours_all = self.cv_candidates['true_period'] * 24.0
-            plt.scatter(
-                np.log10(period_hours_all),
-                self.cv_candidates[sort_col],
-                alpha=0.3,
-                s=5,
-                color='blue',
-                label='All candidates'
-            )
-            
-            # Plot known CVs if available
-            if has_known_cvs:
-                period_hours_known = known_cvs['true_period'] * 24.0
-                plt.scatter(
-                    np.log10(period_hours_known),
-                    known_cvs[sort_col],
-                    alpha=0.8,
-                    s=30,
-                    color='green',
-                    marker='*',
-                    label='Known CVs'
-                )
-            
-            # Add period gap shaded region
-            plt.axvspan(np.log10(2), np.log10(3), alpha=0.1, color='gray', label='Period gap')
-            
-            # Add thresholds
-            if sort_col != 'best_fap':
-                plt.axhline(0.8, color='green', linestyle='-', alpha=0.7, label='High confidence threshold (0.8)')
-                plt.axhline(0.5, color='orange', linestyle='-', alpha=0.7, label='Medium confidence threshold (0.5)')
-            else:
-                # For FAP, lower is better
-                plt.axhline(0.1, color='green', linestyle='-', alpha=0.7, label='High confidence threshold (0.1)')
-                plt.axhline(0.3, color='orange', linestyle='-', alpha=0.7, label='Medium confidence threshold (0.3)')
-            
-            plt.xlabel('log₁₀(Period) [hours]')
-            plt.ylabel(sort_col.replace('_', ' ').title())
-            plt.title(f'{sort_col.replace("_", " ").title()} vs. Period')
-            plt.grid(True, alpha=0.3)
-            plt.legend(loc='upper right')
-            
-            plt.savefig(os.path.join(viz_dir, f'{sort_col}_vs_period.png'), dpi=300)
-            plt.close()
-        
-        print(f"Distribution visualizations saved to {viz_dir}")
-        return
+
+
+
+
 
 
     def generate_summary(self):
