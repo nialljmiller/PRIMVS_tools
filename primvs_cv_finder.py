@@ -1217,9 +1217,9 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         logger.info("Tuning traditional feature model...")
         param_grid_trad = {
-            'n_estimators': [100, 200],
-            'max_depth': [3, 5],
-            'learning_rate': [0.1, 0.05],
+            'n_estimators': [100, 200, 500],
+            'max_depth': [3, 5, 10],
+            'learning_rate': [0.1, 0.05, 0.01],
         }
         xgb_trad = xgb.XGBClassifier(
             objective='binary:logistic',
@@ -1233,7 +1233,7 @@ class PrimvsCVFinder:
             xgb_trad,
             param_grid_trad,
             scoring='roc_auc',
-            cv=2,
+            cv=3,
             verbose=1
         )
         grid_trad.fit(X_trad_train, y_train)
@@ -1266,14 +1266,14 @@ class PrimvsCVFinder:
             logger.info(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
 
             pca = PCA(n_components=n_components)
-            X_emb_train_pca = pca.fit_transform(X_emb_train)
-            X_emb_val_pca = pca.transform(X_emb_val)
+            X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
+            X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
 
             logger.info("Tuning embedding feature model...")
             param_grid_emb = {
-                'n_estimators': [10, 200],
-                'max_depth': [3, 5],
-                'learning_rate': [0.1, 0.05],
+                'n_estimators': [100, 200, 500],
+                'max_depth': [3, 5, 10, 100],
+                'learning_rate': [0.1, 0.05, 0.01],
             }
             xgb_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
@@ -1287,7 +1287,7 @@ class PrimvsCVFinder:
                 xgb_emb,
                 param_grid_emb,
                 scoring='roc_auc',
-                cv=2,
+                cv=3,
                 verbose=1
             )
             grid_emb.fit(X_emb_train_pca, y_train)
