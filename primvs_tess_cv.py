@@ -474,8 +474,8 @@ class PrimvsTessCrossMatch:
 
 def main():
     cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"
-    output_dir = "./tess_crossmatch_results"
-    cv_prob_threshold = 0.982
+    output_dir = "../PRIMVS/cv_results/tess_crossmatch_results"
+    cv_prob_threshold = 0.984
     search_radius = 5.0  # arcseconds
     tess_mag_limit = 16.0
     
