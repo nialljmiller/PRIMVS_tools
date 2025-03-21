@@ -1283,9 +1283,9 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         print("Tuning traditional feature model...")
         param_grid_trad = {
-            'n_estimators': [10, 100, 500],
-            'max_depth': [5, 10, 100, 200],
-            'learning_rate': [0.1, 0.05, 0.01, 0.001],
+            'n_estimators': [10],#, 100, 500],
+            'max_depth': [5],#, 10, 100, 200],
+            'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
         }
         xgb_trad = xgb.XGBClassifier(
             objective='binary:logistic',
@@ -1337,9 +1337,9 @@ class PrimvsCVFinder:
 
             print("Tuning embedding feature model...")
             param_grid_emb = {
-                'n_estimators': [10, 200, 500],
-                'max_depth': [3, 10, 100, 200],
-                'learning_rate': [0.1, 0.05, 0.01, 0.001],
+                'n_estimators': [10],#, 200, 500],
+                'max_depth': [3],#, 10, 100, 200],
+                'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
             }
             xgb_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
