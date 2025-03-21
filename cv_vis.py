@@ -248,7 +248,7 @@ plt.title('ROC Curve for CV Classifier')
 plt.legend()
 plt.grid(True)
 plt.savefig("../PRIMVS/cv_results/roc_curve.png", dpi=300)
-plt.show()
+#plt.show()
 
 # -------------------------
 # Plot 2: Bailey Diagram (Period vs Amplitude)
@@ -269,7 +269,7 @@ plt.title('Bailey Diagram: Period vs Amplitude')
 plt.legend()
 plt.grid(True)
 plt.savefig("../PRIMVS/cv_results/bailey_diagram.png", dpi=300)
-plt.show()
+#plt.show()
 
 
 # -------------------------
@@ -292,7 +292,7 @@ plt.title('Spatial Distribution (Galactic Coordinates) with TESS Cycle 8 Footpri
 plt.legend()
 plt.grid(True)
 plt.savefig("../PRIMVS/cv_results/spatial_galactic_with_TESS.png", dpi=300)
-plt.show()
+#plt.show()
 
 # -------------------------
 # Plot 3b: Spatial Plot in Equatorial Coordinates with TESS Overlay
@@ -319,4 +319,4 @@ plt.title('Spatial Distribution (Equatorial Coordinates) with TESS Cycle 8 Footp
 plt.legend()
 plt.grid(True)
 plt.savefig("../PRIMVS/cv_results/spatial_equatorial_with_TESS.png", dpi=300)
-plt.show()
+#plt.show()
