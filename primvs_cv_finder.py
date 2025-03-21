@@ -1233,7 +1233,7 @@ class PrimvsCVFinder:
             xgb_trad,
             param_grid_trad,
             scoring='roc_auc',
-            cv=2,
+            cv=3,
             verbose=1
         )
         grid_trad.fit(X_trad_train, y_train)
@@ -1287,7 +1287,7 @@ class PrimvsCVFinder:
                 xgb_emb,
                 param_grid_emb,
                 scoring='roc_auc',
-                cv=2,
+                cv=3,
                 verbose=1
             )
             grid_emb.fit(X_emb_train_pca, y_train)

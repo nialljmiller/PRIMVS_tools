@@ -268,7 +268,7 @@ plt.ylabel('True Amplitude (mag)')
 plt.title('Bailey Diagram: Period vs Amplitude')
 plt.legend()
 plt.grid(True)
-plt.savefig("../PRIMVS/cv_results/bailey_diagram.png", dpi=300)
+plt.savefig("../PRIMVS/cv_results/post_bailey_diagram.png", dpi=300)
 #plt.show()
 
 
