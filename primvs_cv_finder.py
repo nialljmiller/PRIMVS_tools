@@ -1103,6 +1103,145 @@ class PrimvsCVFinder:
         print(f"Processed {len(self.cv_candidates)} sources with classification scores")
         return True
 
+    def select_candidates(self):
+            """
+            Select final CV candidates primarily using XGBoost classification results when available,
+            with embedding proximity as a secondary factor to refine the selection.
+            """
+            if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
+                print("No filtered data available. Call apply_initial_filters() first.")
+                return False
+            
+            print("Selecting final CV candidates...")
+        
+            print("Using XGBoost classifier probabilities for candidate selection")
+            
+            # Identify high confidence candidates
+            high_confidence_threshold = 0.7
+            high_confidence_mask = self.filtered_data['cv_prob'] >= high_confidence_threshold
+            medium_confidence_threshold = 0.5
+            medium_confidence_mask = (self.filtered_data['cv_prob'] >= medium_confidence_threshold) & (self.filtered_data['cv_prob'] < high_confidence_threshold)
+            
+            high_confidence_count = high_confidence_mask.sum()
+            medium_confidence_count = medium_confidence_mask.sum()
+            
+            print(f"Found {high_confidence_count} high confidence candidates (prob >= {high_confidence_threshold})")
+            print(f"Found {medium_confidence_count} medium confidence candidates ({medium_confidence_threshold} <= prob < {high_confidence_threshold})")
+            
+            # Create combined mask for all candidates
+            candidate_mask = self.filtered_data['cv_prob'] >= medium_confidence_threshold
+            
+            # Set candidate flag
+            self.filtered_data['is_cv_candidate'] = candidate_mask
+            
+            # Add confidence level classification
+            self.filtered_data['confidence_level'] = 'low'
+            self.filtered_data.loc[medium_confidence_mask, 'confidence_level'] = 'medium'
+            self.filtered_data.loc[high_confidence_mask, 'confidence_level'] = 'high'
+            
+            # Set confidence directly from classifier probability
+            self.filtered_data['confidence'] = self.filtered_data['cv_prob']
+        
+            self.cv_candidates = self.filtered_data[self.filtered_data['is_cv_candidate']].copy()
+            
+            # If embedding information is available, use it to refine the rankings
+            cc_embedding_cols = [str(i) for i in range(64)]
+            embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
+            
+            if embedding_features and self.known_cv_file is not None and len(embedding_features) >= 10:
+                print("Refining candidate rankings using embedding proximity to known CVs...")
+                
+                # Load known CV IDs
+                known_ids = self.load_known_cvs()
+                
+                if known_ids is not None and len(known_ids) > 0:
+                    # Determine ID column for matching
+                    id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
+                    id_col = None
+                    
+                    for col in id_columns:
+                        if col in self.cv_candidates.columns:
+                            id_col = col
+                            break
+                    
+                    if id_col is not None:
+                        # Flag known CVs in candidates
+                        self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].astype(str).isin(known_ids)
+                        
+                        # Extract embeddings and reduce dimensionality
+                        from sklearn.decomposition import PCA
+                        
+                        # Extract embeddings for candidates and known CVs
+                        all_embeddings = self.cv_candidates[embedding_features].values
+                        
+                        # Apply PCA
+                        pca = PCA(n_components=3)
+                        all_embeddings_3d = pca.fit_transform(all_embeddings)
+                        
+                        # Add PCA dimensions
+                        self.cv_candidates['pca_1'] = all_embeddings_3d[:, 0]
+                        self.cv_candidates['pca_2'] = all_embeddings_3d[:, 1]
+                        self.cv_candidates['pca_3'] = all_embeddings_3d[:, 2]
+                        
+                        # Split known CVs and candidates
+                        known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
+                        candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
+                        
+                        if len(known_cvs) > 0 and len(candidates) > 0:
+                            # Calculate embedding distances
+                            from scipy.spatial.distance import cdist
+                            
+                            known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
+                            candidate_points = candidates[['pca_1', 'pca_2', 'pca_3']].values
+                            
+                            # Calculate minimum distance from each candidate to any known CV
+                            distances = cdist(candidate_points, known_points, 'euclidean')
+                            min_distances = np.min(distances, axis=1)
+                            
+                            # Add distance to nearest known CV
+                            candidates['distance_to_nearest_cv'] = min_distances
+                            
+                            # Normalized distance (0-1 scale, 0 is closest)
+                            max_dist = min_distances.max()
+                            if max_dist > 0:
+                                candidates['norm_distance'] = min_distances / max_dist
+                            else:
+                                candidates['norm_distance'] = 0
+                            
+                            # Compute embedding similarity score (inverse of normalized distance)
+                            candidates['embedding_similarity'] = 1 - candidates['norm_distance']
+                            
+                            # Blend classifier confidence with embedding similarity (weighted average)
+                            # Weight classifier confidence more heavily
+                            classifier_weight = 0.8
+                            embedding_weight = 0.2
+                            
+                            if 'confidence' in candidates.columns:
+                                candidates['blended_score'] = (
+                                    classifier_weight * candidates['confidence'] + 
+                                    embedding_weight * candidates['embedding_similarity']
+                                )
+                            else:
+                                candidates['blended_score'] = candidates['embedding_similarity']
+                            
+                            # Update main candidates dataframe with these scores
+                            self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'distance_to_nearest_cv'] = candidates['distance_to_nearest_cv'].values
+                            self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'embedding_similarity'] = candidates['embedding_similarity'].values
+                            
+                            if 'blended_score' in candidates.columns:
+                                self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'blended_score'] = candidates['blended_score'].values
+                                
+                                # Replace confidence with blended score for ranking, but keep original confidence
+                                self.cv_candidates['original_confidence'] = self.cv_candidates['confidence']
+                                self.cv_candidates['confidence'] = self.cv_candidates['blended_score']
+                            
+                            print(f"Enhanced candidate scoring with embedding proximity information")
+            
+            # Sort by confidence (which may now be the blended score)
+            self.cv_candidates = self.cv_candidates.sort_values('confidence', ascending=False)
+            
+            print(f"Selected {len(self.cv_candidates)} CV candidates")
+            return True
 
 
 
@@ -1244,10 +1383,13 @@ class PrimvsCVFinder:
             'Feature': traditional_features,
             'Importance': best_trad.feature_importances_
         }).sort_values('Importance', ascending=False)
-        print("\nTop 5 traditional features:")
-        for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
+        print("\nTop 10 traditional features:")
+        imp_sum = 0
+        for i, (_, row) in enumerate(trad_importance.head(10).iterrows()):
             print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-
+            imp_sum =+ row['Importance']
+            
+        print('Top 10 features account for :', imp_sum)            
         # --------------------------------------------------------------------------------
         # 7) Stage 2: Embedding Model Tuning (with PCA)
         # --------------------------------------------------------------------------------
