@@ -847,7 +847,7 @@ class PrimvsCVFinder:
         # Save the classifier probability directly
 
         # Only select candidates with probability >= 0.5
-        prob_threshold = 0.7
+        prob_threshold = 0.9
         high_prob_mask = self.filtered_data['cv_prob'] >= prob_threshold
         high_prob_count = high_prob_mask.sum()
         
@@ -861,7 +861,7 @@ class PrimvsCVFinder:
         self.cv_candidates['confidence'] = self.cv_candidates['cv_prob']
                 
         # Use all the filtered data instead of just high confidence candidates
-        self.cv_candidates = self.filtered_data.copy()
+        #self.cv_candidates = self.filtered_data.copy()
         
         # If embedding information is available, add embedding-based features too
         cc_embedding_cols = [str(i) for i in range(64)]
@@ -952,9 +952,9 @@ class PrimvsCVFinder:
         print(f"Saving {len(self.cv_candidates)} CV candidates...")
         
         # Save to CSV
-        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
-        self.cv_candidates.to_csv(csv_path, index=False)
-        print(f"Saved candidates to CSV: {csv_path}")
+        #csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
+        #self.cv_candidates.to_csv(csv_path, index=False)
+        #print(f"Saved candidates to CSV: {csv_path}")
         
         # Save to FITS
         fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
