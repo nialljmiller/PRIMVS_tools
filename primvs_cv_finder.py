@@ -1313,7 +1313,7 @@ class PrimvsCVFinder:
         # Build meta-features from training sets
         trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
         if best_emb is not None:
-            X_emb_train_pca_full = pca.transform(X_emb_train)
+            X_emb_train_pca_full = X_emb_train#pca.transform(X_emb_train)
             emb_probs_train = best_emb.predict_proba(X_emb_train_pca_full)[:, 1]
         else:
             emb_probs_train = np.zeros_like(trad_probs_train)
@@ -1350,7 +1350,7 @@ class PrimvsCVFinder:
         # Get probabilities from both base models on the entire dataset
         trad_probs = best_trad.predict_proba(X_trad)[:, 1]
         if best_emb is not None:
-            X_emb_full_pca = pca.transform(X_emb)
+            X_emb_full_pca = X_emb#pca.transform(X_emb)
             emb_probs = best_emb.predict_proba(X_emb_full_pca)[:, 1]
         else:
             emb_probs = np.zeros_like(trad_probs)
@@ -1378,7 +1378,7 @@ class PrimvsCVFinder:
         joblib.dump(best_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
         if best_emb is not None:
             joblib.dump(best_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-            joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
+            #joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
         joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
 
         # --------------------------------------------------------------------------------
