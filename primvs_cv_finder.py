@@ -1090,9 +1090,9 @@ class PrimvsCVFinder:
         print(f"Saving {len(self.cv_candidates)} CV candidates...")
         
         # Save to CSV
-        #csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
-        #self.cv_candidates.to_csv(csv_path, index=False)
-        #print(f"Saved candidates to CSV: {csv_path}")
+        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
+        self.cv_candidates.to_csv(csv_path, index=False)
+        print(f"Saved candidates to CSV: {csv_path}")
         
         # Save to FITS
         fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
