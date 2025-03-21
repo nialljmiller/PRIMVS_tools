@@ -1147,7 +1147,7 @@ class PrimvsCVFinder:
             logger.error("No features available. Call extract_features() first.")
             return False
         
-        logger.info("Training two-stage CV classifier...")
+        print("Training two-stage CV classifier...")
 
         # --------------------------------------------------------------------------------
         # 2) Load known CV IDs
@@ -1170,12 +1170,12 @@ class PrimvsCVFinder:
             logger.error("No suitable identifier column found in candidate data.")
             return False
         
-        logger.info(f"Using identifier column '{id_col}' for matching")
+        print(f"Using identifier column '{id_col}' for matching")
         candidate_ids = self.filtered_data[id_col].astype(str)
         
         y = candidate_ids.isin(known_ids).astype(int)
         positive_count = y.sum()
-        logger.info(f"Found {positive_count} matches between known CVs and candidate sources")
+        print(f"Found {positive_count} matches between known CVs and candidate sources")
         
         if positive_count < 10:
             logger.warning(f"Very few positive examples ({positive_count}). Classification may be unreliable.")
@@ -1190,8 +1190,8 @@ class PrimvsCVFinder:
         embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
         traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
         
-        logger.info(f"Traditional features: {len(traditional_features)}")
-        logger.info(f"Embedding features: {len(embedding_features)}")
+        print(f"Traditional features: {len(traditional_features)}")
+        print(f"Embedding features: {len(embedding_features)}")
 
         X_trad = self.scaled_features[traditional_features].values
         X_emb = self.scaled_features[embedding_features].values if embedding_features else None
@@ -1215,7 +1215,7 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         # 6) Stage 1: Traditional Model Tuning
         # --------------------------------------------------------------------------------
-        logger.info("Tuning traditional feature model...")
+        print("Tuning traditional feature model...")
         param_grid_trad = {
             'n_estimators': [100, 200, 500],
             'max_depth': [3, 5, 10],
@@ -1238,12 +1238,12 @@ class PrimvsCVFinder:
         )
         grid_trad.fit(X_trad_train, y_train)
         best_trad = grid_trad.best_estimator_
-        logger.info(f"Best traditional model params: {grid_trad.best_params_}")
+        print(f"Best traditional model params: {grid_trad.best_params_}")
 
         # Evaluate on validation
         y_pred_trad = best_trad.predict(X_trad_val)
         prob_trad = best_trad.predict_proba(X_trad_val)[:, 1]
-        logger.info("\nTraditional Feature Model Performance:")
+        print("\nTraditional Feature Model Performance:")
         print(classification_report(y_val, y_pred_trad))
 
         # Optional: feature importance
@@ -1251,25 +1251,25 @@ class PrimvsCVFinder:
             'Feature': traditional_features,
             'Importance': best_trad.feature_importances_
         }).sort_values('Importance', ascending=False)
-        logger.info("\nTop 5 traditional features:")
+        print("\nTop 5 traditional features:")
         for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
-            logger.info(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
+            print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
 
         # --------------------------------------------------------------------------------
         # 7) Stage 2: Embedding Model Tuning (with PCA)
         # --------------------------------------------------------------------------------
         if X_emb is not None and len(embedding_features) > 0:
-            logger.info("Reducing embedding dimensionality via PCA to capture ~90% variance...")
+            print("Reducing embedding dimensionality via PCA to capture ~90% variance...")
             pca_full = PCA().fit(X_emb_train)
             explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
             n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-            logger.info(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
+            print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
 
             pca = PCA(n_components=n_components)
             X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
             X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
 
-            logger.info("Tuning embedding feature model...")
+            print("Tuning embedding feature model...")
             param_grid_emb = {
                 'n_estimators': [100, 200, 500],
                 'max_depth': [3, 5, 10, 100],
@@ -1292,11 +1292,11 @@ class PrimvsCVFinder:
             )
             grid_emb.fit(X_emb_train_pca, y_train)
             best_emb = grid_emb.best_estimator_
-            logger.info(f"Best embedding model params: {grid_emb.best_params_}")
+            print(f"Best embedding model params: {grid_emb.best_params_}")
 
             y_pred_emb = best_emb.predict(X_emb_val_pca)
             prob_emb = best_emb.predict_proba(X_emb_val_pca)[:, 1]
-            logger.info("\nEmbedding Feature Model Performance:")
+            print("\nEmbedding Feature Model Performance:")
             print(classification_report(y_val, y_pred_emb))
 
         else:
@@ -1308,7 +1308,7 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         # 8) Stage 3: Meta-Model (Stacking)
         # --------------------------------------------------------------------------------
-        logger.info("Training meta-model to blend predictions...")
+        print("Training meta-model to blend predictions...")
 
         # Build meta-features from training sets
         trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
@@ -1335,17 +1335,17 @@ class PrimvsCVFinder:
 
         # Evaluate meta-model
         y_pred_meta = meta_model.predict(meta_features_val)
-        logger.info("\nMeta-Model Performance:")
+        print("\nMeta-Model Performance:")
         print(classification_report(y_val, y_pred_meta))
 
         # Check how it's weighting the two base models
         blend_weights = meta_model.feature_importances_
-        logger.info(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
+        print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
 
         # --------------------------------------------------------------------------------
         # 9) Apply to Full Dataset
         # --------------------------------------------------------------------------------
-        logger.info("Applying two-stage classifier to all data...")
+        print("Applying two-stage classifier to all data...")
 
         # Get probabilities from both base models on the entire dataset
         trad_probs = best_trad.predict_proba(X_trad)[:, 1]
@@ -1397,7 +1397,7 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
         plt.close()
 
-        logger.info("Two-stage classifier training complete.")
+        print("Two-stage classifier training complete.")
         return True
 
 
