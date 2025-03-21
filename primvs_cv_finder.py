@@ -849,7 +849,7 @@ class PrimvsCVFinder:
             
             if hasattr(self, 'pca') and self.pca is not None and X_emb is not None:
                 print("Applying PCA transformation to embedding features")
-                X_emb_pca = self.pca.transform(X_emb)
+                X_emb_pca = X_emb#self.pca.transform(X_emb)
                 emb_probs = self.model_emb.predict_proba(X_emb_pca)[:, 1]
             else:
                 emb_probs = self.model_emb.predict_proba(X_emb)[:, 1]
@@ -885,6 +885,12 @@ class PrimvsCVFinder:
         return True
 
 
+
+
+
+    def pca_ify(self, n_components, x):
+        pca = PCA(n_components=n_components)    
+        return pca.fit_transform(x)
 
 
 
@@ -1029,268 +1035,6 @@ class PrimvsCVFinder:
         
         print(f"Selected {len(self.cv_candidates)} CV candidates")
         return True
-
-
-
-
-    def train_two_stage_classifier(self):
-        """
-        Train a two-stage classifier combining traditional feature-based models with
-        embedding-based models for optimal CV candidate selection.
-        
-        This approach maintains interpretability while leveraging the representational
-        power of contrastive curve embeddings through an ensemble methodology.
-        """
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return False
-        
-        print("Training two-stage CV classifier...")
-        
-        # Retrieve known CV identifiers
-        known_ids = self.load_known_cvs()
-        
-        if known_ids is None or len(known_ids) == 0:
-            print("Error: No known CVs available for training. Classifier aborted.")
-            return False
-        
-        # Determine candidate identifier column
-        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-        id_col = None
-        
-        for col in id_columns:
-            if col in self.filtered_data.columns:
-                id_col = col
-                break
-        
-        if id_col is None:
-            print("Error: No suitable identifier column found in candidate data.")
-            return False
-        
-        print(f"Using identifier column '{id_col}' for matching")
-        
-        # Convert both known IDs and candidate IDs to strings for consistent matching
-        candidate_ids = self.filtered_data[id_col].astype(str)
-        
-        # Create binary classification labels
-        y = candidate_ids.isin(known_ids).astype(int)
-        positive_count = y.sum()
-        
-        print(f"Found {positive_count} matches between known CVs and candidate sources")
-        
-        if positive_count < 10:
-            print(f"Warning: Very few positive examples ({positive_count}). Classification may be unreliable.")
-            if positive_count < 3:
-                print("Error: Insufficient positive examples for training. Aborting classifier.")
-                return False
-        
-        # Split features into traditional and embedding sets
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
-        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-        
-        print(f"Traditional features: {len(traditional_features)}")
-        print(f"Embedding features: {len(embedding_features)}")
-        
-        # Extract feature sets as numpy arrays to avoid indexing issues
-        X_trad = self.scaled_features[traditional_features].values
-        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
-        
-        # Split data for training and validation using indices
-        # We'll use array indexing rather than DataFrame iloc to avoid the observed error
-        X_indices = np.arange(len(X_trad))
-        train_indices, val_indices = train_test_split(
-            X_indices, test_size=0.25, random_state=42, stratify=y
-        )
-        
-        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
-        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        
-        if X_emb is not None:
-            X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
-        
-        # Create class weights to handle imbalance
-        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
-        
-        # STAGE 1: Train model with traditional features
-        print("\nStage 1: Training model with traditional features...")
-        
-        model_trad = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        model_trad.fit(
-            X_trad_train, y_train,
-            #eval_set=[(X_trad_val, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=20,
-            #verbose=False
-        )
-        
-        # Evaluate traditional model
-        y_pred_trad = model_trad.predict(X_trad_val)
-        prob_trad = model_trad.predict_proba(X_trad_val)[:, 1]
-        
-        print("\nTraditional Feature Model Performance:")
-        print(classification_report(y_val, y_pred_trad))
-        
-        # Get feature importance for traditional model
-        trad_importance = pd.DataFrame({
-            'Feature': traditional_features,
-            'Importance': model_trad.feature_importances_
-        }).sort_values('Importance', ascending=False)
-        
-        print("\nTop 5 traditional features:")
-        for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
-            print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-        
-
-        print("\nStage 2: Training model with embedding features...")
-        
-        # Apply PCA to reduce dimensionality of embeddings while preserving variance
-        from sklearn.decomposition import PCA
-        
-        # Determine optimal number of components (explaining ~90% variance)
-        pca = PCA().fit(X_emb_train)
-        explained_variance = np.cumsum(pca.explained_variance_ratio_)
-        n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-        print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-        
-        # Apply PCA transformation
-        pca = PCA(n_components=n_components)
-        X_emb_train_pca = pca.fit_transform(X_emb_train)
-        X_emb_val_pca = pca.transform(X_emb_val)
-        
-        # Train embedding model
-        model_emb = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        model_emb.fit(
-            X_emb_train_pca, y_train,
-            #eval_set=[(X_emb_val_pca, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=20,
-            #verbose=False
-        )
-        
-        # Evaluate embedding model
-        y_pred_emb = model_emb.predict(X_emb_val_pca)
-        prob_emb = model_emb.predict_proba(X_emb_val_pca)[:, 1]
-        
-        print("\nEmbedding Feature Model Performance:")
-        print(classification_report(y_val, y_pred_emb))
-        
-        # STAGE 3: Train meta-model (stacking)
-        print("\nStage 3: Training meta-model to combine predictions...")
-        
-        # Create meta-features (predictions from base models)
-        meta_features_train = np.column_stack([
-            model_trad.predict_proba(X_trad_train)[:, 1],
-            model_emb.predict_proba(X_emb_train_pca)[:, 1]
-        ])
-        
-        meta_features_val = np.column_stack([
-            prob_trad,
-            prob_emb
-        ])
-        
-        # Train meta-model
-        meta_model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=2,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        meta_model.fit(
-            meta_features_train, y_train,
-            #eval_set=[(meta_features_val, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=10,
-            #verbose=False
-        )
-        
-        # Evaluate meta-model
-        y_pred_meta = meta_model.predict(meta_features_val)
-        
-        print("\nMeta-Model Performance:")
-        print(classification_report(y_val, y_pred_meta))
-        
-        # Calculate blend weights
-        blend_weights = meta_model.feature_importances_
-        print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-        
-        # STAGE 4: Apply to all data
-        print("\nApplying two-stage classifier to all data...")
-        
-        # Prepare PCA for full dataset
-        X_emb_full_pca = pca.transform(X_emb) if X_emb is not None else None
-        
-        # Get predictions from both models
-        trad_probs = model_trad.predict_proba(X_trad)[:, 1]
-        emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-        
-        # Combine using meta-model
-        meta_features_full = np.column_stack([trad_probs, emb_probs])
-        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-        
-        # Store models for later use
-        self.model_trad = model_trad
-        self.model_emb = model_emb
-        self.model_meta = meta_model
-        self.pca = pca
-        
-        # Add predictions to filtered data
-        self.filtered_data['cv_prob_trad'] = trad_probs
-        self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = final_probs
-        
-        # Save traditional feature names for later interpretation
-        self.traditional_features = traditional_features
-        
-        # Save models
-        joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-        joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-        
-        # Set the ensemble as the primary model
-        self.model = meta_model
-        
-
-            
-        # Plot probability distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
-        plt.yscale('log')  # Set y-axis to log scale
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
-
 
 
 
@@ -1443,9 +1187,8 @@ class PrimvsCVFinder:
             n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
             print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
 
-            pca = PCA(n_components=n_components)
-            X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
-            X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
+            X_emb_train_pca = self.pca_ify(n_components, X_emb_train)
+            X_emb_val_pca = self.pca_ify(n_components, X_emb_val)
 
             print("Tuning embedding feature model...")
             param_grid_emb = {
