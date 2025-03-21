@@ -19,27 +19,19 @@ class PrimvsTessCrossMatch:
     
     def __init__(self, cv_candidates_file, output_dir='./tess_crossmatch', 
                  search_radius=3.0, cv_prob_threshold=0.5, tess_mag_limit=16.0):
-        """
-        Initialize the cross-matcher with input files and parameters.
-        """
         self.cv_candidates_file = cv_candidates_file
         self.output_dir = output_dir
         self.search_radius = search_radius
         self.cv_prob_threshold = cv_prob_threshold
         self.tess_mag_limit = tess_mag_limit
         
-        # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
-        # Initialize data containers
         self.cv_candidates = None
         self.filtered_candidates = None
         self.crossmatch_results = None
     
     def load_cv_candidates(self):
-        """
-        Load CV candidates and apply probability threshold filtering.
-        """
         try:
             if self.cv_candidates_file.endswith('.fits'):
                 candidates = Table.read(self.cv_candidates_file).to_pandas()
@@ -51,7 +43,6 @@ class PrimvsTessCrossMatch:
             self.cv_candidates = candidates
             print(f"Loaded {len(candidates)} total CV candidates")
             
-            # Apply probability-based filtering
             if 'cv_prob' in candidates.columns:
                 self.filtered_candidates = candidates[candidates['cv_prob'] >= self.cv_prob_threshold].copy()
                 print(f"Filtered to {len(self.filtered_candidates)} candidates with cv_prob >= {self.cv_prob_threshold}")
@@ -65,7 +56,6 @@ class PrimvsTessCrossMatch:
                 print("Warning: No CV probability column found. Using all candidates.")
                 self.filtered_candidates = candidates.copy()
             
-            # Save the filtered candidates
             filtered_path = os.path.join(self.output_dir, 'filtered_candidates.csv')
             self.filtered_candidates.to_csv(filtered_path, index=False)
             print(f"Saved filtered candidates to: {filtered_path}")
@@ -76,16 +66,12 @@ class PrimvsTessCrossMatch:
             return False
     
     def perform_crossmatch(self):
-        """
-        Cross-match filtered CV candidates with the TESS Input Catalog (TIC).
-        """
         if self.filtered_candidates is None:
             print("No filtered candidates available. Call load_cv_candidates() first.")
             return False
         
         print("Cross-matching with TESS Input Catalog...")
         
-        # Determine which RA/Dec columns to use
         if 'ra' in self.filtered_candidates.columns and 'dec' in self.filtered_candidates.columns:
             ra_col, dec_col = 'ra', 'dec'
         elif 'RAJ2000' in self.filtered_candidates.columns and 'DEJ2000' in self.filtered_candidates.columns:
@@ -94,11 +80,9 @@ class PrimvsTessCrossMatch:
             print("Error: Could not find RA/Dec columns in the candidates file")
             return False
         
-        # Create SkyCoord object for candidates
         coords = SkyCoord(ra=self.filtered_candidates[ra_col].values * u.degree, 
                           dec=self.filtered_candidates[dec_col].values * u.degree)
         
-        # Initialize results dataframe with new columns
         results = self.filtered_candidates.copy()
         results['in_tic'] = False
         results['tic_id'] = np.nan
@@ -111,20 +95,17 @@ class PrimvsTessCrossMatch:
         print(f"Cross-matching {len(coords)} filtered candidates...")
         for i, (idx, coord) in enumerate(tqdm(zip(results.index, coords), total=len(coords))):
             try:
-                # Query TIC around the candidate position
                 tic_result = Catalogs.query_region(coord, radius=self.search_radius * u.arcsec, catalog="TIC")
                 
                 if len(tic_result) > 0:
                     tic_result.sort('dstArcSec')
                     best_match = tic_result[0]
                     
-                    # Update results
                     results.loc[idx, 'in_tic'] = True
                     results.loc[idx, 'tic_id'] = int(best_match['ID'])
                     results.loc[idx, 'tic_tmag'] = best_match['Tmag']
                     results.loc[idx, 'separation_arcsec'] = best_match['dstArcSec']
                     
-                    # Query for TESS observations using TIC coordinates
                     try:
                         tic_id = str(int(best_match['ID']))
                         obs = Observations.query_criteria(target_name=f"TIC {tic_id}", obs_collection='TESS')
@@ -138,10 +119,9 @@ class PrimvsTessCrossMatch:
                     except Exception as obs_err:
                         print(f"  Warning: Error querying observations for TIC {best_match['ID']}: {obs_err}")
                 else:
-                    # Not in TIC: determine reason using Ks magnitude if available
                     if 'mag_avg' in results.columns:
                         ks_mag = results.loc[idx, 'mag_avg']
-                        est_tmag = ks_mag + 0.5  # Rough conversion from Ks to TESS magnitude
+                        est_tmag = ks_mag + 0.5
                         if est_tmag > self.tess_mag_limit:
                             results.loc[idx, 'not_in_tic_reason'] = 'below_limit'
                         else:
@@ -153,7 +133,6 @@ class PrimvsTessCrossMatch:
                                 results.loc[idx, 'not_in_tic_reason'] = 'unknown'
                     else:
                         results.loc[idx, 'not_in_tic_reason'] = 'unknown'
-            
             except Exception as e:
                 print(f"Error processing candidate {i}: {e}")
         
@@ -176,10 +155,6 @@ class PrimvsTessCrossMatch:
         return True
 
     def download_tess_lightcurves(self):
-        """
-        Download ALL TESS timeseries data for matched sources.
-        This version runs serially.
-        """
         if self.crossmatch_results is None:
             print("No cross-match results available. Call perform_crossmatch() first.")
             return False
@@ -201,7 +176,6 @@ class PrimvsTessCrossMatch:
             target_dir = os.path.join(data_dir, f"TIC{tic_id}")
             os.makedirs(target_dir, exist_ok=True)
 
-            # Get coordinates (supporting different column names)
             if 'ra' in row and 'dec' in row:
                 ra_val = row['ra']
                 dec_val = row['dec']
@@ -259,24 +233,20 @@ class PrimvsTessCrossMatch:
         
         print("Generating target list for TESS proposal...")
         
-        # Only select sources that are in TIC
         target_mask = self.crossmatch_results['in_tic']
         target_list = self.crossmatch_results[target_mask].copy()
         
-        # Add a priority column (higher for sources with strong CV characteristics)
         target_list['priority'] = 0
         if 'cv_prob' in target_list.columns:
             target_list.loc[target_list['cv_prob'] >= 0.9, 'priority'] = 3
             target_list.loc[(target_list['cv_prob'] < 0.9) & (target_list['cv_prob'] >= 0.7), 'priority'] = 2
             target_list.loc[(target_list['cv_prob'] < 0.7) & (target_list['cv_prob'] >= 0.5), 'priority'] = 1
         
-        # Sort by priority and CV probability
         if 'cv_prob' in target_list.columns:
             target_list = target_list.sort_values(['priority', 'cv_prob'], ascending=[False, False])
         else:
             target_list = target_list.sort_values('priority', ascending=False)
         
-        # Save the target list
         target_list_path = os.path.join(self.output_dir, 'tess_targets.csv')
         target_list.to_csv(target_list_path, index=False)
         print(f"Generated target list with {len(target_list)} sources")
@@ -284,9 +254,6 @@ class PrimvsTessCrossMatch:
         return target_list
 
     def _generate_tess_proposal_format(self, targets):
-        """
-        Generate a target list in the format required for TESS proposal submission.
-        """
         tess_format = pd.DataFrame()
         if 'tic_id' in targets.columns:
             tess_format['target'] = targets['tic_id'].apply(lambda x: f"TIC {x}" if pd.notnull(x) else "")
@@ -335,32 +302,7 @@ class PrimvsTessCrossMatch:
         
         return tess_format
 
-    def run_pipeline(self):
-        """Run the complete TESS cross-match pipeline."""
-        start_time = time.time()
-        
-        print("\n" + "="*80)
-        print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
-        print("="*80 + "\n")
-        
-        self.load_cv_candidates()
-        self.perform_crossmatch()
-        self.download_tess_lightcurves()
-        self.generate_target_list()
-        self.generate_summary_plots()
-        
-        end_time = time.time()
-        runtime = end_time - start_time
-        
-        print("\n" + "="*80)
-        print(f"PIPELINE COMPLETED in {time.strftime('%H:%M:%S', time.gmtime(runtime))}")
-        print(f"Results saved to: {self.output_dir}")
-        print("="*80 + "\n")
-        
-        return True
-
     def generate_summary_plots(self):
-        """Generate publication-quality summary plots for the cross-match results."""
         if self.crossmatch_results is None:
             print("No cross-match results available. Call perform_crossmatch() first.")
             return False
@@ -404,7 +346,6 @@ class PrimvsTessCrossMatch:
                     edgecolor='none'
                 )
                 plt.colorbar(scatter, label='In TIC')
-            
             ax.set_xlabel('Galactic Longitude (deg)')
             ax.set_ylabel('Galactic Latitude (deg)')
             ax.set_title('Distribution of CV Candidates in Galactic Coordinates')
@@ -471,6 +412,56 @@ class PrimvsTessCrossMatch:
         print(f"Generated publication-quality summary plots in {plots_dir}")
         return True
 
+    def report_tess_data_details(self):
+        """
+        For every candidate with a TIC match, query MAST for TESS observations and
+        report all details found. This conclusively shows what TESS data (if any) exists.
+        """
+        if self.crossmatch_results is None:
+            print("No cross-match results available. Run perform_crossmatch() first.")
+            return
+        
+        tic_results = self.crossmatch_results[self.crossmatch_results['in_tic'] == True]
+        print("\n--- Detailed TESS Data Report for TIC-matched Candidates ---\n")
+        for idx, row in tic_results.iterrows():
+            tic_id = int(row['tic_id'])
+            print(f"TIC ID: {tic_id}")
+            print(f"  TIC Tmag: {row['tic_tmag']}")
+            print(f"  Separation: {row['separation_arcsec']} arcsec")
+            try:
+                obs = Observations.query_criteria(target_name=f"TIC {tic_id}", obs_collection='TESS')
+                print(f"  Number of TESS observations found: {len(obs)}")
+                if len(obs) > 0:
+                    print("  Observations:")
+                    print(obs)
+                else:
+                    print("  No TESS lightcurve data available for this TIC.")
+            except Exception as e:
+                print(f"  Error querying TESS data: {e}")
+            print("-" * 80)
+    
+    def run_pipeline(self):
+        start_time = time.time()
+        
+        print("\n" + "="*80)
+        print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
+        print("="*80 + "\n")
+        
+        self.load_cv_candidates()
+        self.perform_crossmatch()
+        self.download_tess_lightcurves()
+        self.generate_target_list()
+        self.generate_summary_plots()
+        
+        end_time = time.time()
+        runtime = end_time - start_time
+        
+        print("\n" + "="*80)
+        print(f"PIPELINE COMPLETED in {time.strftime('%H:%M:%S', time.gmtime(runtime))}")
+        print(f"Results saved to: {self.output_dir}")
+        print("="*80 + "\n")
+        
+        return True
 
 def main():
     cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"
@@ -496,6 +487,9 @@ def main():
     
     crossmatcher.run_pipeline()
     print("Cross-matching pipeline completed successfully.")
+    
+    # Now report detailed TESS data for each TIC candidate.
+    crossmatcher.report_tess_data_details()
 
 if __name__ == "__main__":
     main()
