@@ -1222,8 +1222,6 @@ class PrimvsCVFinder:
         }
 
 
-
-        }
         xgb_trad = xgb.XGBClassifier(
             objective='binary:logistic',
             scale_pos_weight=pos_weight,
