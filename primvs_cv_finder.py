@@ -594,68 +594,207 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(self.output_dir, 'period_gap_analysis.png'), dpi=300)
 
 
-    def analyze_metallicity_effects(self):
-        """Analyze CV distribution along bulge metallicity gradient"""
+
+
+
+
+
+    def analyze_galactic_regions(self):
+        """
+        Analyze CV period distribution across different Galactic regions (bulge and disk)
+        with statistical comparison between each region and the overall distribution.
+        """
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from scipy import stats
+        import os
         
         if 'l' not in self.cv_candidates.columns or 'b' not in self.cv_candidates.columns:
+            print("Galactic coordinates not found in data. Analysis skipped.")
             return
         
-        # Define metallicity regions based on Galactic position (approximate)
+        if 'true_period' not in self.cv_candidates.columns:
+            print("Period information not found in data. Analysis skipped.")
+            return
+        
+        print("Analyzing CV distribution across Galactic regions...")
+        
+        # Define regions based on Galactic position
         self.cv_candidates['region'] = 'Other'
         
-        # Central bulge (metal-rich)
+        # 1. Central Bulge
         central_mask = (self.cv_candidates['l'] > -5) & (self.cv_candidates['l'] < 5) & \
                        (self.cv_candidates['b'] > -5) & (self.cv_candidates['b'] < 5)
-        self.cv_candidates.loc[central_mask, 'region'] = 'Central_Bulge'
-        self.cv_candidates.loc[central_mask, 'metallicity'] = 0.3  # [Fe/H] ~ +0.3
+        self.cv_candidates.loc[central_mask, 'region'] = 'Central Bulge'
         
-        # Inner bulge
+        # 2. Inner Bulge
         inner_mask = (self.cv_candidates['l'] > -10) & (self.cv_candidates['l'] < 10) & \
                      (self.cv_candidates['b'] > -10) & (self.cv_candidates['b'] < 10) & \
                      ~central_mask
-        self.cv_candidates.loc[inner_mask, 'region'] = 'Inner_Bulge'
-        self.cv_candidates.loc[inner_mask, 'metallicity'] = 0.1  # [Fe/H] ~ +0.1
+        self.cv_candidates.loc[inner_mask, 'region'] = 'Inner Bulge'
         
-        # Outer bulge
+        # 3. Outer Bulge
         outer_mask = (self.cv_candidates['l'] > -20) & (self.cv_candidates['l'] < 20) & \
                      (self.cv_candidates['b'] > -15) & (self.cv_candidates['b'] < 15) & \
                      ~central_mask & ~inner_mask
-        self.cv_candidates.loc[outer_mask, 'region'] = 'Outer_Bulge'
-        self.cv_candidates.loc[outer_mask, 'metallicity'] = -0.1  # [Fe/H] ~ -0.1
+        self.cv_candidates.loc[outer_mask, 'region'] = 'Outer Bulge'
         
-        # Bulge-halo interface
-        interface_mask = ~central_mask & ~inner_mask & ~outer_mask
-        self.cv_candidates.loc[interface_mask, 'region'] = 'Bulge_Halo_Interface'
-        self.cv_candidates.loc[interface_mask, 'metallicity'] = -0.4  # [Fe/H] ~ -0.4
+        # 4. Inner Disk
+        inner_disk_mask = ((np.abs(self.cv_candidates['l']) >= 20) & (np.abs(self.cv_candidates['l']) < 60)) & \
+                          (np.abs(self.cv_candidates['b']) < 5)
+        self.cv_candidates.loc[inner_disk_mask, 'region'] = 'Inner Disk'
         
-        # Analyze period gap by metallicity
-        plt.figure(figsize=(12, 8))
+        # 5. Outer Disk
+        outer_disk_mask = (np.abs(self.cv_candidates['l']) >= 60) & \
+                          (np.abs(self.cv_candidates['b']) < 5)
+        self.cv_candidates.loc[outer_disk_mask, 'region'] = 'Outer Disk'
         
-        for i, region in enumerate(['Central_Bulge', 'Inner_Bulge', 'Outer_Bulge', 'Bulge_Halo_Interface']):
-            mask = self.cv_candidates['region'] == region
-            if mask.sum() < 5:
+        # 6. High Latitude
+        high_lat_mask = (np.abs(self.cv_candidates['b']) >= 5)
+        self.cv_candidates.loc[high_lat_mask, 'region'] = 'High Latitude'
+        
+        # Prepare figure for period distribution analysis
+        fig, axs = plt.subplots(3, 2, figsize=(15, 18))
+        axs = axs.flatten()
+        
+        # Calculate overall period distribution (in hours) for reference
+        all_periods = self.cv_candidates['true_period'] * 24.0  # Convert to hours
+        log_all_periods = np.log10(all_periods)
+        valid_log_periods = log_all_periods[~np.isnan(log_all_periods) & ~np.isinf(log_all_periods)]
+        
+        # Define regions to analyze
+        regions = ['Central Bulge', 'Inner Bulge', 'Outer Bulge', 
+                   'Inner Disk', 'Outer Disk', 'High Latitude']
+        
+        # Color map for visual distinction
+        colors = ['#E63946', '#F1C453', '#A8DADC', '#457B9D', '#1D3557', '#6A994E']
+        
+        region_stats = {}
+        
+        # Analyze each region
+        for i, region in enumerate(regions):
+            region_mask = self.cv_candidates['region'] == region
+            count = region_mask.sum()
+            
+            if count < 5:
+                axs[i].text(0.5, 0.5, f"Insufficient data for {region}\n(n={count})", 
+                           ha='center', va='center', transform=axs[i].transAxes, fontsize=14)
+                axs[i].set_title(f"{region}", fontsize=16)
                 continue
-                
-            period_hours = self.cv_candidates.loc[mask, 'true_period'] * 24.0
-            plt.subplot(2, 2, i+1)
-            plt.hist(np.log10(period_hours), bins=20, alpha=0.7)
-            plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='red', label='Period Gap')
-            plt.title(f"{region} ([Fe/H]={self.cv_candidates.loc[mask, 'metallicity'].iloc[0]})")
-            plt.xlabel('log(Period [hours])')
-            plt.ylabel('Count')
-            plt.legend()
+            
+            # Extract period data for this region
+            period_hours = self.cv_candidates.loc[region_mask, 'true_period'] * 24.0
+            log_period = np.log10(period_hours)
+            valid_log_period = log_period[~np.isnan(log_period) & ~np.isinf(log_period)]
+            
+            # Perform Kolmogorov-Smirnov test against the overall distribution
+            ks_stat, p_value = stats.ks_2samp(valid_log_period, valid_log_periods)
+            region_stats[region] = {
+                'count': count,
+                'ks_statistic': ks_stat,
+                'p_value': p_value,
+                'median_period': np.median(period_hours)
+            }
+            
+            # Create histogram for this region
+            n, bins, _ = axs[i].hist(valid_log_period, bins=25, alpha=0.7, color=colors[i],
+                                    label=f'{region} (n={count})')
+            
+            # Plot the overall distribution as a step function for comparison
+            if len(valid_log_periods) > 0:
+                hist_all, bins_all = np.histogram(valid_log_periods, bins=bins, density=True)
+                hist_region, _ = np.histogram(valid_log_period, bins=bins, density=True)
+                scale_factor = n.max() / hist_all.max() if hist_all.max() > 0 else 1
+                axs[i].step(bins_all[:-1], hist_all * scale_factor, where='post', 
+                           color='black', linestyle='--', linewidth=2, 
+                           label='Overall Distribution (scaled)')
+            
+            # Highlight the period gap
+            axs[i].axvspan(np.log10(2), np.log10(3), alpha=0.2, color='red', label='Period Gap (2-3h)')
+            
+            # Add statistical information
+            stat_text = f"KS test: p={p_value:.4f}\n"
+            stat_text += f"Median period: {np.median(period_hours):.2f}h"
+            axs[i].text(0.02, 0.95, stat_text, transform=axs[i].transAxes, 
+                       va='top', fontsize=11, bbox=dict(facecolor='white', alpha=0.8))
+            
+            # Setup axis labels and title
+            axs[i].set_xlabel('log₁₀(Period) [hours]', fontsize=12)
+            axs[i].set_ylabel('Count', fontsize=12)
+            axs[i].set_title(f"{region}", fontsize=16)
+            axs[i].legend(loc='upper right', fontsize=10)
+            axs[i].grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'metallicity_period_analysis.png'), dpi=300)
-
-
-
-
-
-
-
-
-
+        plt.savefig(os.path.join(self.output_dir, 'galactic_regions_period_analysis.png'), dpi=300)
+        plt.close()
+        
+        # Create a spatial plot showing the distribution of CVs by region
+        plt.figure(figsize=(14, 10))
+        
+        # Define the colormap for consistency with the histogram plots
+        region_colors = {region: color for region, color in zip(regions, colors)}
+        
+        # Plot each region with its respective color
+        for region, color in region_colors.items():
+            mask = self.cv_candidates['region'] == region
+            if mask.sum() > 0:
+                plt.scatter(self.cv_candidates.loc[mask, 'l'], 
+                           self.cv_candidates.loc[mask, 'b'],
+                           c=color, label=f"{region} (n={mask.sum()})", 
+                           alpha=0.7, s=15, edgecolors='none')
+        
+        # Add visual guides for the region boundaries
+        plt.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+        plt.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+        
+        # Central Bulge
+        plt.plot([-5, 5, 5, -5, -5], [-5, -5, 5, 5, -5], 'k-', alpha=0.3)
+        
+        # Inner Bulge
+        plt.plot([-10, 10, 10, -10, -10], [-10, -10, 10, 10, -10], 'k-', alpha=0.3)
+        
+        # Outer Bulge
+        plt.plot([-20, 20, 20, -20, -20], [-15, -15, 15, 15, -15], 'k-', alpha=0.3)
+        
+        # Inner & Outer Disk + High Latitude boundaries (simplified visualization)
+        plt.axhline(y=5, color='k', linestyle='-', alpha=0.3)
+        plt.axhline(y=-5, color='k', linestyle='-', alpha=0.3)
+        plt.axvline(x=20, color='k', linestyle='-', alpha=0.3)
+        plt.axvline(x=-20, color='k', linestyle='-', alpha=0.3)
+        plt.axvline(x=60, color='k', linestyle='-', alpha=0.3)
+        plt.axvline(x=-60, color='k', linestyle='-', alpha=0.3)
+        
+        plt.xlabel('Galactic Longitude (l) [deg]', fontsize=14)
+        plt.ylabel('Galactic Latitude (b) [deg]', fontsize=14)
+        plt.title('Spatial Distribution of CV Candidates by Galactic Region', fontsize=16)
+        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.axis('equal')
+        
+        # Create a summary table of regional statistics
+        stats_table = plt.figtext(0.5, -0.05, "", ha='center', va='center', fontsize=12)
+        
+        table_text = "Regional Period Statistics:\n\n"
+        table_text += f"{'Region':<15} {'Count':<8} {'KS p-value':<12} {'Median Period (h)':<18}\n"
+        table_text += "-" * 60 + "\n"
+        
+        for region in regions:
+            if region in region_stats:
+                stats = region_stats[region]
+                table_text += f"{region:<15} {stats['count']:<8} {stats['p_value']:.4f}{' ':8} {stats['median_period']:.2f}{' ':14}\n"
+        
+        stats_table.set_text(table_text)
+        
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.2)  # Make room for the table
+        plt.savefig(os.path.join(self.output_dir, 'galactic_regions_spatial.png'), dpi=300)
+        plt.close()
+        
+        print(f"Galactic region analysis complete. Results saved to {self.output_dir}.")
+        
+        # Return statistics for potential further analysis
+        return region_stats
 
 
 
@@ -1446,7 +1585,7 @@ class PrimvsCVFinder:
         
         self.post_processing_plots()
         self.analyze_period_gap_distribution()
-        self.analyze_metallicity_effects()
+        self.analyze_galactic_regions()
 
         end_time = time.time()
         runtime = end_time - start_time
