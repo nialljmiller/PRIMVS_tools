@@ -55,222 +55,6 @@ from matplotlib.patches import Polygon
 import matplotlib.patheffects as path_effects
 from matplotlib.transforms import Affine2D
 import matplotlib as mpl
-# TESS Cycle 8 Camera Footprints for CV Visualization
-# Add to top of cv_finder.py
-
-import numpy as np
-from matplotlib.patches import Polygon
-import matplotlib.patheffects as path_effects
-
-
-# TESS Cycle 8 Camera Footprints for CV Visualization
-# Add to top of cv_finder.py
-
-import numpy as np
-from matplotlib.patches import Polygon
-import matplotlib.patheffects as path_effects
-
-class TESSCycle8Overlay:
-    """TESS Cycle 8 camera footprint visualization for CV candidates"""
-    
-    def __init__(self):
-        # TESS Year 8 camera positions (RA, Dec, Roll) in degrees
-        self.camera_positions = {
-            # Format: Sector: [(Camera1), (Camera2), (Camera3), (Camera4)]
-            # Each camera: (RA, Dec, Roll)
-            97: [
-                (24.13, -9.32, 292.44),
-                (34.60, -31.26, 296.14),
-                (51.45, -51.83, 127.55),
-                (90.00, -66.56, 161.25)
-            ],
-            98: [
-                (76.26, 4.75, 275.70),
-                (78.71, -19.13, 276.02),
-                (82.05, -42.96, 97.78),
-                (90.00, -66.56, 104.42)
-            ],
-            99: [
-                (136.70, -10.03, 296.66),
-                (149.01, -31.13, 301.08),
-                (168.24, -50.40, 133.88),
-                (206.58, -62.97, 166.47)
-            ],
-            100: [
-                (160.77, -19.40, 290.79),
-                (171.88, -41.46, 296.53),
-                (194.15, -61.36, 134.29),
-                (251.44, -70.27, 187.40)
-            ],
-            101: [
-                (184.53, -29.77, 289.32),
-                (197.12, -51.89, 297.73),
-                (231.12, -70.22, 148.05),
-                (303.95, -68.82, 217.35)
-            ],
-            102: [
-                (210.05, -39.39, 292.95),
-                (228.76, -60.37, 307.55),
-                (284.10, -72.46, 179.13),
-                (340.57, -60.80, 231.85)
-            ],
-            103: [
-                (239.66, -46.44, 302.50),
-                (269.50, -63.95, 327.47),
-                (328.67, -66.46, 202.01),
-                (5.45, -50.96, 234.00)
-            ],
-            104: [
-                (273.80, -48.76, 317.02),
-                (310.89, -60.43, 347.75),
-                (357.50, -56.84, 208.16),
-                (26.00, -41.28, 230.08)
-            ],
-            105: [
-                (308.41, -45.00, 331.21),
-                (343.49, -51.67, 357.83),
-                (19.73, -46.57, 205.65),
-                (45.61, -32.84, 222.47)
-            ],
-            106: [
-                (338.92, -36.33, 339.59),
-                (9.24, -40.96, 358.81),
-                (39.96, -37.24, 198.48),
-                (65.56, -26.76, 212.26)
-            ],
-            107: [
-                (5.23, -25.55, 341.34),
-                (31.87, -30.75, 354.10),
-                (59.79, -30.20, 188.47),
-                (85.93, -24.07, 200.58)
-            ]
-        }
-        
-        # Convert to galactic coordinates
-        self.galactic_positions = self._convert_to_galactic()
-    
-    def _convert_to_galactic(self):
-        """Convert equatorial to galactic coordinates"""
-        from astropy.coordinates import SkyCoord
-        import astropy.units as u
-        
-        galactic_positions = {}
-        
-        for sector, cameras in self.camera_positions.items():
-            galactic_positions[sector] = []
-            
-            for i, (ra, dec, roll) in enumerate(cameras):
-                try:
-                    # Convert coordinates
-                    coords = SkyCoord(ra=ra*u.degree, dec=dec*u.degree, frame='icrs')
-                    gal = coords.galactic
-                    
-                    # Convert l to -180 to 180 range for better visualization
-                    l_deg = gal.l.degree
-                    if l_deg > 180:
-                        l_deg -= 360
-                    
-                    galactic_positions[sector].append((l_deg, gal.b.degree, roll))
-                except:
-                    # Use placeholder if conversion fails
-                    galactic_positions[sector].append((0, 0, 0))
-        
-        return galactic_positions
-    
-    def add_to_plot(self, ax, focus_region=None, alpha=0.2):
-        """
-        Add TESS Cycle 8 camera footprints to plot
-        
-        Parameters:
-        -----------
-        ax : matplotlib.axes.Axes
-            The axis to add footprints to
-        focus_region : str or None
-            'bulge', 'disk', or None (for all regions)
-        alpha : float
-            Transparency for footprints
-        """
-        # Define colors for cameras
-        camera_colors = ['red', 'purple', 'blue', 'green']
-        
-        # Select sectors based on region focus
-        if focus_region == 'bulge':
-            # Bulge sectors (mainly 103-105) with cameras 1-2
-            sectors = [103, 104, 105]
-            camera_indices = [0, 1]  # Cameras 1 and 2
-        elif focus_region == 'disk':
-            # Disk sectors (mainly 102-103) with cameras 2-3
-            sectors = [102, 103] 
-            camera_indices = [1, 2]  # Cameras 2 and 3
-        else:
-            # All sectors and cameras
-            sectors = list(self.galactic_positions.keys())
-            camera_indices = [0, 1, 2, 3]  # All cameras
-        
-        # Add camera footprints
-        for sector in sectors:
-            for i in camera_indices:
-                if i >= len(self.galactic_positions[sector]):
-                    continue
-                    
-                l, b, roll = self.galactic_positions[sector][i]
-                
-                # Create camera footprint (24°×24° square with rotation)
-                self._add_camera_footprint(
-                    ax, l, b, roll, 
-                    color=camera_colors[i],
-                    alpha=alpha,
-                    label=f"Camera {i+1}" if f"Camera {i+1}" not in [p.get_label() for p in ax.get_children() if hasattr(p, 'get_label')] else "",
-                    sector=sector
-                )
-        
-        # Add legend for cameras
-        handles = []
-        labels = []
-        for i, color in enumerate(camera_colors):
-            if i in camera_indices:
-                handles.append(plt.Line2D([], [], color=color, marker='s', 
-                                      linestyle='None', markersize=10, alpha=0.6))
-                labels.append(f'Camera {i+1}')
-        
-        if handles and labels:
-            ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
-        
-        return ax
-    
-    def _add_camera_footprint(self, ax, l, b, roll, color='red', alpha=0.2, label="", sector=None, size=12):
-        """Add a single camera footprint"""
-        # Create square vertices (before rotation)
-        vertices_l = np.array([-size, size, size, -size, -size])
-        vertices_b = np.array([-size, -size, size, size, -size])
-        
-        # Apply rotation for camera orientation
-        roll_rad = np.radians(roll-90)
-        rotated_l = vertices_l * np.cos(roll_rad) - vertices_b * np.sin(roll_rad)
-        rotated_b = vertices_l * np.sin(roll_rad) + vertices_b * np.cos(roll_rad)
-        
-        # Translate to camera center
-        vertices_l = l + rotated_l
-        vertices_b = b + rotated_b
-        
-        # Add polygon to plot
-        polygon = Polygon(
-            np.column_stack([vertices_l, vertices_b]),
-            alpha=alpha,
-            color=color,
-            closed=True,
-            label=label
-        )
-        ax.add_patch(polygon)
-        
-        # Add sector label
-        if sector:
-            text = ax.text(l, b, str(sector), fontsize=8, ha='center', va='center',
-                     color='white', fontweight='bold')
-            text.set_path_effects([
-                path_effects.Stroke(linewidth=2, foreground='black'),
-                path_effects.Normal()
-            ])
 
 
 
@@ -343,6 +127,354 @@ class PrimvsCVFinder:
         self.cv_candidates = None
         self.model = None
     
+
+
+    def post_processing_plots(self, max_top_candidates=20):
+        """
+        A condensed post-processing routine that:
+          1) Computes PCA on embeddings (if present) and stores pca_1, pca_2, pca_3.
+          2) Creates a 3D PCA scatter colored by classification confidence.
+          3) Creates a 2D PCA scatter colored by classification confidence.
+          4) Highlights known CVs in the same PCA plane (if 'is_known_cv' is present).
+          5) If two-stage classification (cv_prob_trad, cv_prob_emb), makes a hexbin comparison.
+          6) Generates a Bailey diagram (Period vs. Amplitude) if data are present.
+          7) Creates a galactic spatial plot (l, b) with TESS overlay if data are present.
+          8) Writes a short summary text (similar to 'generate_summary').
+
+        Parameters
+        ----------
+        max_top_candidates : int
+            Number of top candidates to show in the summary listing (default: 20).
+        """
+        import os
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from astropy.table import Table
+        import pandas as pd
+
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates available for post-processing plots.")
+            return
+
+        df = self.cv_candidates
+
+        # ---------------------------
+        # 1) Prepare or reuse PCA columns from embeddings
+        # ---------------------------
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in df.columns]
+        
+        # Only do PCA if we actually have a decent chunk of embedding features
+        if len(embedding_features) >= 3:
+            # Check if pca_1 already exists
+            if 'pca_1' not in df.columns or 'pca_2' not in df.columns or 'pca_3' not in df.columns:
+                print("Computing PCA on contrastive embeddings...")
+                from sklearn.decomposition import PCA
+                pca = PCA(n_components=3)
+                emb_values = df[embedding_features].values
+                emb_3d = pca.fit_transform(emb_values)
+                df['pca_1'] = emb_3d[:, 0]
+                df['pca_2'] = emb_3d[:, 1]
+                df['pca_3'] = emb_3d[:, 2]
+            else:
+                print("Reusing existing pca_1, pca_2, pca_3 columns.")
+        else:
+            print("No or insufficient embedding features found. Skipping PCA-based plots.")
+        
+        # For convenience in referencing columns
+        # If user has some column named 'confidence', use it; else fallback to 'cv_prob' or 0.5
+        if 'confidence' in df.columns:
+            conf_col = 'confidence'
+        elif 'cv_prob' in df.columns:
+            conf_col = 'cv_prob'
+        else:
+            df['temp_conf'] = 0.5
+            conf_col = 'temp_conf'
+
+        # Check for two-stage classification
+        has_two_stage = ('cv_prob_trad' in df.columns) and ('cv_prob_emb' in df.columns)
+
+        # Check for known CV flags
+        has_known_cvs = ('is_known_cv' in df.columns) and df['is_known_cv'].any()
+
+        # Create output directory if needed
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # ---------------------------
+        # 2) 3D PCA scatter colored by confidence
+        # ---------------------------
+        if 'pca_1' in df.columns and 'pca_2' in df.columns and 'pca_3' in df.columns:
+            from mpl_toolkits.mplot3d import Axes3D  # noqa
+            fig = plt.figure(figsize=(10, 8))
+            ax = fig.add_subplot(111, projection='3d')
+            sc = ax.scatter(
+                df['pca_1'],
+                df['pca_2'],
+                df['pca_3'],
+                c=df[conf_col],
+                cmap='viridis',
+                alpha=0.7,
+                s=15
+            )
+            cbar = plt.colorbar(sc, ax=ax, pad=0.1)
+            cbar.set_label(f'{conf_col}')
+            ax.set_xlabel('PCA 1')
+            ax.set_ylabel('PCA 2')
+            ax.set_zlabel('PCA 3')
+            ax.set_title('3D PCA of Embeddings (colored by confidence)')
+            plt.savefig(os.path.join(self.output_dir, 'embeddings_3d.png'), dpi=300)
+            plt.close()
+
+            # ---------------------------
+            # 3) 2D PCA scatter colored by confidence
+            # ---------------------------
+            plt.figure(figsize=(10, 8))
+            sc = plt.scatter(
+                df['pca_1'],
+                df['pca_2'],
+                c=df[conf_col],
+                cmap='viridis',
+                alpha=0.7,
+                s=15
+            )
+            plt.colorbar(sc, label=f'{conf_col}')
+            plt.xlabel('PCA 1')
+            plt.ylabel('PCA 2')
+            plt.title('2D PCA of Embeddings (colored by confidence)')
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.output_dir, 'embeddings_2d.png'), dpi=300)
+            plt.close()
+
+            # ---------------------------
+            # 4) Highlight known CVs in 2D PCA (if present)
+            # ---------------------------
+            if has_known_cvs:
+                known = df[df['is_known_cv']]
+                unknown = df[~df['is_known_cv']]
+
+                plt.figure(figsize=(10, 8))
+                # Plot unknown as background
+                plt.scatter(
+                    unknown['pca_1'],
+                    unknown['pca_2'],
+                    alpha=0.3,
+                    s=10,
+                    color='gray',
+                    label='Unknown Candidates'
+                )
+                # Plot known in color
+                plt.scatter(
+                    known['pca_1'],
+                    known['pca_2'],
+                    alpha=1.0,
+                    s=40,
+                    color='red',
+                    marker='*',
+                    edgecolors='black',
+                    linewidths=0.5,
+                    label='Known CVs'
+                )
+                plt.xlabel('PCA 1')
+                plt.ylabel('PCA 2')
+                plt.title('Embedding Space: Known CVs vs. Unknown')
+                plt.grid(True, alpha=0.3)
+                plt.legend()
+                plt.savefig(os.path.join(self.output_dir, 'known_vs_unknown_pca2d.png'), dpi=300)
+                plt.close()
+
+        # ---------------------------
+        # 5) Hexbin of cv_prob_trad vs cv_prob_emb (two-stage only)
+        # ---------------------------
+        if has_two_stage:
+            plt.figure(figsize=(8, 6))
+            hb = plt.hexbin(
+                df['cv_prob_trad'], df['cv_prob_emb'],
+                gridsize=30,
+                cmap='viridis',
+                bins='log'
+            )
+            plt.colorbar(hb, label='log10(count)')
+            plt.plot([0,1], [0,1], 'r--', alpha=0.7, label='Perfect Agreement')
+            plt.axvline(0.5, color='gray', linestyle='--', alpha=0.5)
+            plt.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
+            plt.text(0.25, 0.75, "Trad: No\nEmb: Yes", ha='center', va='center',
+                     bbox=dict(facecolor='white', alpha=0.5))
+            plt.text(0.75, 0.75, "Both: Yes", ha='center', va='center',
+                     bbox=dict(facecolor='white', alpha=0.5))
+            plt.text(0.25, 0.25, "Both: No", ha='center', va='center',
+                     bbox=dict(facecolor='white', alpha=0.5))
+            plt.text(0.75, 0.25, "Trad: Yes\nEmb: No", ha='center', va='center',
+                     bbox=dict(facecolor='white', alpha=0.5))
+            plt.xlabel('Traditional Probability')
+            plt.ylabel('Embedding Probability')
+            plt.title('Two-Stage Classification: Probabilities Comparison')
+            plt.legend(loc='upper left')
+            plt.axis('square')
+            plt.xlim(0, 1)
+            plt.ylim(0, 1)
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.output_dir, 'prob_trad_vs_emb_hexbin.png'), dpi=300)
+            plt.close()
+
+        # ---------------------------
+        # 6) Bailey diagram (Period vs. Amplitude)
+        # ---------------------------
+        if 'true_period' in df.columns and 'true_amplitude' in df.columns:
+            # Convert period to hours & take log
+            period_hours = df['true_period'] * 24.0
+            log_period = np.log10(period_hours)
+            
+            plt.figure(figsize=(10, 6))
+            if conf_col in df.columns:
+                sc = plt.scatter(
+                    log_period,
+                    df['true_amplitude'],
+                    c=df[conf_col],
+                    cmap='viridis',
+                    alpha=0.7,
+                    s=15
+                )
+                plt.colorbar(sc, label=f'{conf_col}')
+            else:
+                plt.scatter(
+                    log_period,
+                    df['true_amplitude'],
+                    alpha=0.7,
+                    s=15,
+                    color='blue'
+                )
+            # Mark the period gap
+            plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='gray', label='Period Gap (2-3h)')
+            plt.xlabel('log₁₀(Period) [hours]')
+            plt.ylabel('Amplitude [mag]')
+            plt.title('Bailey Diagram')
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.savefig(os.path.join(self.output_dir, 'bailey_diagram.png'), dpi=300)
+            plt.close()
+
+        # ---------------------------
+        # 7) Galactic spatial plot (l, b) with TESS overlay
+        # ---------------------------
+        if 'l' in df.columns and 'b' in df.columns:
+            # Because TESS overlay uses -180..+180, shift your data similarly
+            l_centered = np.where(df['l'] > 180, df['l'] - 360, df['l'])
+            
+            plt.figure(figsize=(12, 8))
+            if conf_col in df.columns:
+                sc = plt.scatter(
+                    l_centered,
+                    df['b'],
+                    c=df[conf_col],
+                    cmap='viridis',
+                    alpha=0.7,
+                    s=15
+                )
+                plt.colorbar(sc, label=f'{conf_col}')
+            else:
+                plt.scatter(
+                    l_centered,
+                    df['b'],
+                    alpha=0.7,
+                    s=15,
+                    color='red'
+                )
+            # TESS overlay
+            if 'TESSCycle8Overlay' in globals():
+                tess_overlay = TESSCycle8Overlay()
+                tess_overlay.add_to_plot(plt.gca())
+            
+            plt.xlabel('Galactic Longitude (shifted) [deg]')
+            plt.ylabel('Galactic Latitude [deg]')
+            plt.title('Galactic Spatial Distribution with TESS Overlay')
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(self.output_dir, 'spatial_galactic_tess.png'), dpi=300)
+            plt.close()
+
+        # ---------------------------
+        # 8) Short summary text + top candidates
+        # ---------------------------
+        summary_path = os.path.join(self.output_dir, 'cv_summary_condensed.txt')
+        with open(summary_path, 'w') as f:
+            f.write("Condensed CV Candidate Summary\n")
+            f.write("====================================\n\n")
+            f.write(f"Total candidates: {len(df)}\n\n")
+
+            # Quick period stats if we have period
+            if 'true_period' in df.columns:
+                period_hours = df['true_period'] * 24.0
+                f.write("Period (hrs) Stats:\n")
+                f.write(f"  Min: {period_hours.min():.2f}\n")
+                f.write(f"  Median: {period_hours.median():.2f}\n")
+                f.write(f"  Max: {period_hours.max():.2f}\n\n")
+
+            # Quick amplitude stats
+            if 'true_amplitude' in df.columns:
+                f.write("Amplitude (mag) Stats:\n")
+                f.write(f"  Min: {df['true_amplitude'].min():.2f}\n")
+                f.write(f"  Median: {df['true_amplitude'].median():.2f}\n")
+                f.write(f"  Max: {df['true_amplitude'].max():.2f}\n\n")
+
+            # If we have a classifier probability
+            sort_col = None
+            # Choose from a few likely columns
+            for col in ['cv_prob', 'confidence', 'blended_score']:
+                if col in df.columns:
+                    sort_col = col
+                    break
+            if sort_col is None and 'best_fap' in df.columns:
+                sort_col = 'best_fap'
+            
+            # Get top N
+            if sort_col is not None:
+                ascending = (sort_col == 'best_fap')  # For FAP, lower is better
+                top_candidates = df.sort_values(sort_col, ascending=ascending).head(max_top_candidates)
+                f.write(f"Top {max_top_candidates} candidates sorted by '{sort_col}':\n")
+                f.write("------------------------------------------------\n")
+                id_col = 'sourceid' if 'sourceid' in df.columns else 'primvs_id'
+                for i, row in top_candidates.iterrows():
+                    pid = str(row.get(id_col, '???'))
+                    if 'true_period' in row and 'true_amplitude' in row:
+                        per_hrs = row['true_period'] * 24.0
+                        amp = row['true_amplitude']
+                    else:
+                        per_hrs, amp = -1, -1
+                    val = row.get(sort_col, -1)
+                    f.write(f"  {pid:15s}  Per={per_hrs:.2f}h  Amp={amp:.2f}  {sort_col}={val:.3f}\n")
+            else:
+                f.write("No recognized sort column found for top candidates.\n")
+        
+        print(f"Condensed post-processing complete. Summary written to: {summary_path}")
+
+
+
+
+    def save_candidates(self):
+        """Save the CV candidates to CSV and FITS files."""
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates to save.")
+            return False
+        
+        print(f"Saving {len(self.cv_candidates)} CV candidates...")
+        
+        # Save to CSV
+        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
+        self.cv_candidates.to_csv(csv_path, index=False)
+        print(f"Saved candidates to CSV: {csv_path}")
+        
+        # Save to FITS
+        fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
+        table = Table.from_pandas(self.cv_candidates)
+        table.write(fits_path, overwrite=True)
+        print(f"Saved candidates to FITS: {fits_path}")
+
+        return True
+
+
+
+
+
+
     def load_primvs_data(self):
         """Load data from the PRIMVS FITS file."""
         print(f"Loading PRIMVS data from {self.primvs_file}...")
@@ -398,6 +530,7 @@ class PrimvsCVFinder:
             print(f"Error loading PRIMVS data: {str(e)}")
             return False
     
+
     def apply_initial_filters(self):
         """
         Apply initial loose filters to select potential CV candidates.
@@ -439,6 +572,7 @@ class PrimvsCVFinder:
         
         self.filtered_data = filtered_data
         return True
+
 
 
     def extract_features(self):
@@ -488,10 +622,6 @@ class PrimvsCVFinder:
         self.feature_names = available_features
         
         return X_scaled
-
-
-
-
 
 
 
@@ -548,341 +678,6 @@ class PrimvsCVFinder:
 
 
 
-
-
-    def train_two_stage_classifier(self):
-        """
-        Train a two-stage classifier that integrates traditional astronomical features with 
-        contrastive curve embeddings for robust CV identification in time-domain survey data.
-        
-        This implementation utilizes the complete known CV dataset structure for comprehensive 
-        training, properly handling feature alignment between training and candidate sets.
-        """
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return False
-        
-        print("Training two-stage CV classifier...")
-        
-        # Load the complete known CV dataset
-        if self.known_cv_file is None:
-            print("Error: No known CV file provided. Classifier aborted.")
-            return False
-        
-        try:
-            # Load complete known CV dataset with appropriate format handling
-            if self.known_cv_file.endswith('.fits'):
-                with fits.open(self.known_cv_file) as hdul:
-                    known_cv_data = Table(hdul[1].data).to_pandas()
-            elif self.known_cv_file.endswith('.csv'):
-                known_cv_data = pd.read_csv(self.known_cv_file)
-            else:
-                print(f"Unsupported file format: {self.known_cv_file}")
-                return False
-            
-            print(f"Loaded {len(known_cv_data)} known CV records for training")
-            
-            # Identify feature categories
-            cc_embedding_cols = [str(i) for i in range(64)]
-            embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
-            traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-            
-            print(f"Traditional features: {len(traditional_features)}")
-            print(f"Embedding features: {len(embedding_features)}")
-            
-            # Prepare training and validation datasets
-            
-            # Ensure necessary columns exist in both datasets
-            required_features = traditional_features + embedding_features
-            known_cv_features = [f for f in required_features if f in known_cv_data.columns]
-            
-            # Extract common features between datasets
-            candidate_features = self.scaled_features[known_cv_features].copy()
-            known_cv_subset = known_cv_data[known_cv_features].copy()
-            
-            # Handle missing values in known CV dataset
-            for col in known_cv_subset.columns:
-                if known_cv_subset[col].isnull().any():
-                    if known_cv_subset[col].dtype in [np.float64, np.int64]:
-                        known_cv_subset[col] = known_cv_subset[col].fillna(known_cv_subset[col].median())
-                    else:
-                        known_cv_subset[col] = known_cv_subset[col].fillna(
-                            known_cv_subset[col].mode()[0] if len(known_cv_subset[col].mode()) > 0 else 0
-                        )
-            
-            # Scale known CV features using the same scaler as candidates
-            for col in traditional_features:
-                if col in known_cv_subset.columns:
-                    # Reshape for scikit-learn compatibility
-                    values = known_cv_subset[col].values.reshape(-1, 1)
-                    scaled_values = self.scaler.transform(values)
-                    known_cv_subset[col] = scaled_values.flatten()
-            
-            # Create positive examples (known CVs) and negative examples (candidates)
-            X_positive = known_cv_subset.values
-            y_positive = np.ones(len(X_positive))
-            
-            # For negative examples, use all filtered data (or a representative sample if too large)
-            max_neg_samples = min(len(candidate_features), len(X_positive) * 5)  # Cap negative examples
-            if len(candidate_features) > max_neg_samples:
-                # Random sampling without replacement
-                neg_indices = np.random.choice(len(candidate_features), max_neg_samples, replace=False)
-                X_negative = candidate_features.values[neg_indices]
-            else:
-                X_negative = candidate_features.values
-            y_negative = np.zeros(len(X_negative))
-            
-            # Combine datasets
-            X_combined = np.vstack([X_positive, X_negative])
-            y_combined = np.concatenate([y_positive, y_negative])
-            
-            print(f"Training dataset constructed: {len(y_positive)} positive examples, {len(y_negative)} negative examples")
-            
-            # Split into training and validation sets
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_combined, y_combined, test_size=0.25, random_state=42, stratify=y_combined
-            )
-            
-            # Create class weights to account for potential imbalance
-            pos_weight = (len(y_train) - np.sum(y_train)) / np.sum(y_train) if np.sum(y_train) > 0 else 1.0
-            
-            # Separate features by type
-            trad_indices = [i for i, col in enumerate(known_cv_features) if col in traditional_features]
-            emb_indices = [i for i, col in enumerate(known_cv_features) if col in embedding_features]
-            
-            # Extract feature subsets for two-stage classification
-            X_trad_train = X_train[:, trad_indices] if trad_indices else None
-            X_trad_val = X_val[:, trad_indices] if trad_indices else None
-            
-            X_emb_train = X_train[:, emb_indices] if emb_indices else None
-            X_emb_val = X_val[:, emb_indices] if emb_indices else None
-            
-            # STAGE 1: Train model with traditional features
-            print("\nStage 1: Training model with traditional features...")
-            
-            if X_trad_train is not None and X_trad_train.shape[1] > 0:
-                model_trad = xgb.XGBClassifier(
-                    n_estimators=200,
-                    max_depth=3,
-                    learning_rate=0.1,
-                    objective='binary:logistic',
-                    scale_pos_weight=pos_weight,
-                    n_jobs=-1,
-                    random_state=42
-                )
-                
-                model_trad.fit(X_trad_train, y_train)
-                
-                # Evaluate traditional model
-                y_pred_trad = model_trad.predict(X_trad_val)
-                prob_trad = model_trad.predict_proba(X_trad_val)[:, 1]
-                
-                print("\nTraditional Feature Model Performance:")
-                print(classification_report(y_val, y_pred_trad))
-                
-                # Get feature importance for traditional model
-                trad_feature_names = [known_cv_features[i] for i in trad_indices]
-                trad_importance = pd.DataFrame({
-                    'Feature': trad_feature_names,
-                    'Importance': model_trad.feature_importances_
-                }).sort_values('Importance', ascending=False)
-                
-                print("\nTop traditional features by importance:")
-                for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
-                    print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-            else:
-                print("Insufficient traditional features available. Skipping this stage.")
-                model_trad = None
-            
-            # STAGE 2: Train model with embedding features if available
-            if X_emb_train is not None and X_emb_train.shape[1] > 0:
-                print("\nStage 2: Training model with embedding features...")
-                
-                # Apply PCA to reduce dimensionality of embeddings while preserving variance
-                from sklearn.decomposition import PCA
-                
-                # Determine optimal number of components (explaining ~90% variance)
-                pca = PCA().fit(X_emb_train)
-                explained_variance = np.cumsum(pca.explained_variance_ratio_)
-                n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-                print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-                
-                # Apply PCA transformation
-                pca = PCA(n_components=n_components)
-                X_emb_train_pca = pca.fit_transform(X_emb_train)
-                X_emb_val_pca = pca.transform(X_emb_val)
-                
-                # Train embedding model
-                model_emb = xgb.XGBClassifier(
-                    n_estimators=200,
-                    max_depth=3,
-                    learning_rate=0.1,
-                    objective='binary:logistic',
-                    scale_pos_weight=pos_weight,
-                    n_jobs=-1,
-                    random_state=42
-                )
-                
-                model_emb.fit(X_emb_train_pca, y_train)
-                
-                # Evaluate embedding model
-                y_pred_emb = model_emb.predict(X_emb_val_pca)
-                prob_emb = model_emb.predict_proba(X_emb_val_pca)[:, 1]
-                
-                print("\nEmbedding Feature Model Performance:")
-                print(classification_report(y_val, y_pred_emb))
-                
-                # STAGE 3: Train meta-model (stacking) if both models available
-                if model_trad is not None:
-                    print("\nStage 3: Training meta-model to combine predictions...")
-                    
-                    # Create meta-features (predictions from base models)
-                    meta_features_train = np.column_stack([
-                        model_trad.predict_proba(X_trad_train)[:, 1],
-                        model_emb.predict_proba(X_emb_train_pca)[:, 1]
-                    ])
-                    
-                    meta_features_val = np.column_stack([
-                        prob_trad,
-                        prob_emb
-                    ])
-                    
-                    # Train meta-model
-                    meta_model = xgb.XGBClassifier(
-                        n_estimators=100,
-                        max_depth=2,
-                        learning_rate=0.1,
-                        objective='binary:logistic',
-                        scale_pos_weight=pos_weight,
-                        n_jobs=-1,
-                        random_state=42
-                    )
-                    
-                    meta_model.fit(meta_features_train, y_train)
-                    
-                    # Evaluate meta-model
-                    y_pred_meta = meta_model.predict(meta_features_val)
-                    
-                    print("\nMeta-Model Performance:")
-                    print(classification_report(y_val, y_pred_meta))
-                    
-                    # Calculate blend weights
-                    blend_weights = meta_model.feature_importances_
-                    print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-                    
-                    # STAGE 4: Apply ensemble model to all candidate data
-                    print("\nApplying ensemble classifier to all candidate data...")
-                    
-                    # Extract features from all candidates in the same order as training
-                    X_trad_full = self.scaled_features[[known_cv_features[i] for i in trad_indices]].values
-                    X_emb_full = self.scaled_features[[known_cv_features[i] for i in emb_indices]].values
-                    
-                    # Apply PCA to full embedding dataset
-                    X_emb_full_pca = pca.transform(X_emb_full)
-                    
-                    # Get predictions from both models
-                    trad_probs = model_trad.predict_proba(X_trad_full)[:, 1]
-                    emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-                    
-                    # Combine using meta-model
-                    meta_features_full = np.column_stack([trad_probs, emb_probs])
-                    final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-                    
-                    # Store models for later use
-                    self.model_trad = model_trad
-                    self.model_emb = model_emb
-                    self.model_meta = meta_model
-                    self.pca = pca
-                    
-                    # Add predictions to filtered data
-                    self.filtered_data['cv_prob_trad'] = trad_probs
-                    self.filtered_data['cv_prob_emb'] = emb_probs
-                    self.filtered_data['cv_prob'] = final_probs
-                    
-                    # Store feature names for later interpretation
-                    self.trad_feature_names = [known_cv_features[i] for i in trad_indices]
-                    self.emb_feature_names = [known_cv_features[i] for i in emb_indices]
-                    
-                    # Save models
-                    joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-                    joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-                    joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-                    joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-                    
-                    # Set the ensemble as the primary model
-                    self.model = meta_model
-                else:
-                    # Only embedding model available
-                    print("\nUsing only embedding-based model (no traditional features available)")
-                    
-                    # Get predictions for all data
-                    X_emb_full = self.scaled_features[[known_cv_features[i] for i in emb_indices]].values
-                    X_emb_full_pca = pca.transform(X_emb_full)
-                    emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-                    
-                    # Add predictions to filtered data
-                    self.filtered_data['cv_prob'] = emb_probs
-                    
-                    # Store feature names for later interpretation
-                    self.emb_feature_names = [known_cv_features[i] for i in emb_indices]
-                    
-                    # Save model
-                    joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-                    joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-                    
-                    # Set as primary model
-                    self.model = model_emb
-                    self.pca = pca
-            elif model_trad is not None:
-                # Only traditional model available
-                print("\nUsing only traditional-feature model (no embedding features available)")
-                
-                # Get predictions for all data
-                X_trad_full = self.scaled_features[[known_cv_features[i] for i in trad_indices]].values
-                trad_probs = model_trad.predict_proba(X_trad_full)[:, 1]
-                
-                # Add predictions to filtered data
-                self.filtered_data['cv_prob'] = trad_probs
-                
-                # Store feature names for later interpretation
-                self.trad_feature_names = [known_cv_features[i] for i in trad_indices]
-                
-                # Save model
-                joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-                
-                # Set as primary model
-                self.model = model_trad
-            else:
-                print("Error: Neither traditional nor embedding features could be processed. Classification failed.")
-                return False
-            
-            # Generate visualization of probability distribution
-            plt.figure(figsize=(10, 6))
-            plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
-            plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-            plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-            plt.xlabel('CV Probability')
-            plt.ylabel('Number of Sources')
-            plt.title('Distribution of CV Probabilities')
-            plt.yscale('log')  # Log scale for better visualization of distribution
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
-            plt.close()
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error in two-stage classifier training: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-
-
-
-
-    
     def run_classifier(self):
         """
         Run the trained classifier on all filtered data to identify CV candidates.
@@ -916,6 +711,7 @@ class PrimvsCVFinder:
         return True
     
 
+
     def select_candidates(self):
         """
         Select final CV candidates primarily using XGBoost classification results when available,
@@ -926,91 +722,35 @@ class PrimvsCVFinder:
             return False
         
         print("Selecting final CV candidates...")
+    
+        print("Using XGBoost classifier probabilities for candidate selection")
         
-        # Define selection criteria prioritizing XGBoost classification
-        # Check if XGBoost classifier probabilities are available
-        if 'cv_prob' in self.filtered_data.columns:
-            print("Using XGBoost classifier probabilities for candidate selection")
-            
-            # Identify high confidence candidates
-            high_confidence_threshold = 0.7
-            high_confidence_mask = self.filtered_data['cv_prob'] >= high_confidence_threshold
-            medium_confidence_threshold = 0.5
-            medium_confidence_mask = (self.filtered_data['cv_prob'] >= medium_confidence_threshold) & (self.filtered_data['cv_prob'] < high_confidence_threshold)
-            
-            high_confidence_count = high_confidence_mask.sum()
-            medium_confidence_count = medium_confidence_mask.sum()
-            
-            print(f"Found {high_confidence_count} high confidence candidates (prob >= {high_confidence_threshold})")
-            print(f"Found {medium_confidence_count} medium confidence candidates ({medium_confidence_threshold} <= prob < {high_confidence_threshold})")
-            
-            # Create combined mask for all candidates
-            candidate_mask = self.filtered_data['cv_prob'] >= medium_confidence_threshold
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = candidate_mask
-            
-            # Add confidence level classification
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[medium_confidence_mask, 'confidence_level'] = 'medium'
-            self.filtered_data.loc[high_confidence_mask, 'confidence_level'] = 'high'
-            
-            # Set confidence directly from classifier probability
-            self.filtered_data['confidence'] = self.filtered_data['cv_prob']
-            
-        # If XGBoost results not available, try anomaly detection
-        elif 'is_anomaly' in self.filtered_data.columns:
-            print("No classifier results available. Using anomaly detection results.")
-            
-            anomaly_mask = self.filtered_data['is_anomaly']
-            anomaly_count = anomaly_mask.sum()
-            
-            print(f"Found {anomaly_count} candidates using anomaly detection")
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = anomaly_mask
-            
-            # Default medium confidence for anomaly-detected candidates
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[anomaly_mask, 'confidence_level'] = 'medium'
-            self.filtered_data['confidence'] = 0.5  # Default medium confidence
-            
-        # If neither is available, use domain-knowledge score as fallback
-        elif 'cv_score' in self.filtered_data.columns:
-            print("Using domain-knowledge CV score for candidate selection")
-            
-            high_score_threshold = 0.7
-            medium_score_threshold = 0.5
-            
-            high_score_mask = self.filtered_data['cv_score'] >= high_score_threshold
-            medium_score_mask = (self.filtered_data['cv_score'] >= medium_score_threshold) & (self.filtered_data['cv_score'] < high_score_threshold)
-            
-            high_score_count = high_score_mask.sum()
-            medium_score_count = medium_score_mask.sum()
-            
-            print(f"Found {high_score_count} high score candidates (score >= {high_score_threshold})")
-            print(f"Found {medium_score_count} medium score candidates ({medium_score_threshold} <= score < {high_score_threshold})")
-            
-            # Create combined mask for all candidates
-            candidate_mask = self.filtered_data['cv_score'] >= medium_score_threshold
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = candidate_mask
-            
-            # Add confidence level classification
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[medium_score_mask, 'confidence_level'] = 'medium'
-            self.filtered_data.loc[high_score_mask, 'confidence_level'] = 'high'
-            
-            # Set confidence directly from cv_score
-            self.filtered_data['confidence'] = self.filtered_data['cv_score']
-            
-        # If none of the above are available, use simplified method
-        else:
-            print("No advanced selection criteria available. Using simplified selection.")
-            return self.select_candidates_simple()
+        # Identify high confidence candidates
+        high_confidence_threshold = 0.7
+        high_confidence_mask = self.filtered_data['cv_prob'] >= high_confidence_threshold
+        medium_confidence_threshold = 0.5
+        medium_confidence_mask = (self.filtered_data['cv_prob'] >= medium_confidence_threshold) & (self.filtered_data['cv_prob'] < high_confidence_threshold)
         
-        # Create final candidate set
+        high_confidence_count = high_confidence_mask.sum()
+        medium_confidence_count = medium_confidence_mask.sum()
+        
+        print(f"Found {high_confidence_count} high confidence candidates (prob >= {high_confidence_threshold})")
+        print(f"Found {medium_confidence_count} medium confidence candidates ({medium_confidence_threshold} <= prob < {high_confidence_threshold})")
+        
+        # Create combined mask for all candidates
+        candidate_mask = self.filtered_data['cv_prob'] >= medium_confidence_threshold
+        
+        # Set candidate flag
+        self.filtered_data['is_cv_candidate'] = candidate_mask
+        
+        # Add confidence level classification
+        self.filtered_data['confidence_level'] = 'low'
+        self.filtered_data.loc[medium_confidence_mask, 'confidence_level'] = 'medium'
+        self.filtered_data.loc[high_confidence_mask, 'confidence_level'] = 'high'
+        
+        # Set confidence directly from classifier probability
+        self.filtered_data['confidence'] = self.filtered_data['cv_prob']
+    
         self.cv_candidates = self.filtered_data[self.filtered_data['is_cv_candidate']].copy()
         
         # If embedding information is available, use it to refine the rankings
@@ -1376,6 +1116,298 @@ class PrimvsCVFinder:
 
 
 
+
+
+
+    def train_two_stage_classifier(self):
+        """
+        Train a two-stage classifier combining traditional feature-based models with
+        embedding-based models for optimal CV candidate selection.
+        
+        This approach maintains interpretability while leveraging the representational
+        power of contrastive curve embeddings through an ensemble methodology.
+        """
+        import logging
+        import numpy as np
+        import pandas as pd
+        import xgboost as xgb
+        from sklearn.model_selection import train_test_split, GridSearchCV
+        from sklearn.metrics import classification_report
+        from sklearn.decomposition import PCA
+        import joblib
+        import matplotlib.pyplot as plt
+        
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+
+        # --------------------------------------------------------------------------------
+        # 1) Check for features
+        # --------------------------------------------------------------------------------
+        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
+            logger.error("No features available. Call extract_features() first.")
+            return False
+        
+        logger.info("Training two-stage CV classifier...")
+
+        # --------------------------------------------------------------------------------
+        # 2) Load known CV IDs
+        # --------------------------------------------------------------------------------
+        known_ids = self.load_known_cvs()
+        if known_ids is None or len(known_ids) == 0:
+            logger.error("No known CVs available for training. Classifier aborted.")
+            return False
+        
+        # --------------------------------------------------------------------------------
+        # 3) Identify ID column and create binary labels
+        # --------------------------------------------------------------------------------
+        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
+        id_col = None
+        for col in id_columns:
+            if col in self.filtered_data.columns:
+                id_col = col
+                break
+        if id_col is None:
+            logger.error("No suitable identifier column found in candidate data.")
+            return False
+        
+        logger.info(f"Using identifier column '{id_col}' for matching")
+        candidate_ids = self.filtered_data[id_col].astype(str)
+        
+        y = candidate_ids.isin(known_ids).astype(int)
+        positive_count = y.sum()
+        logger.info(f"Found {positive_count} matches between known CVs and candidate sources")
+        
+        if positive_count < 10:
+            logger.warning(f"Very few positive examples ({positive_count}). Classification may be unreliable.")
+            if positive_count < 3:
+                logger.error("Insufficient positive examples for training. Aborting classifier.")
+                return False
+
+        # --------------------------------------------------------------------------------
+        # 4) Separate Traditional and Embedding features
+        # --------------------------------------------------------------------------------
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
+        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+        
+        logger.info(f"Traditional features: {len(traditional_features)}")
+        logger.info(f"Embedding features: {len(embedding_features)}")
+
+        X_trad = self.scaled_features[traditional_features].values
+        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
+
+        # --------------------------------------------------------------------------------
+        # 5) Train-test split
+        # --------------------------------------------------------------------------------
+        X_indices = np.arange(len(X_trad))
+        train_indices, val_indices = train_test_split(
+            X_indices, test_size=0.25, random_state=42, stratify=y
+        )
+        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
+        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
+        
+        if X_emb is not None:
+            X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
+
+        # Handle class imbalance with XGBoost's built-in scale_pos_weight
+        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
+
+        # --------------------------------------------------------------------------------
+        # 6) Stage 1: Traditional Model Tuning
+        # --------------------------------------------------------------------------------
+        logger.info("Tuning traditional feature model...")
+        param_grid_trad = {
+            'n_estimators': [100, 200],
+            'max_depth': [3, 5],
+            'learning_rate': [0.1, 0.05],
+        }
+        xgb_trad = xgb.XGBClassifier(
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42,
+            use_label_encoder=False,
+            eval_metric='auc'
+        )
+        grid_trad = GridSearchCV(
+            xgb_trad,
+            param_grid_trad,
+            scoring='roc_auc',
+            cv=2,
+            verbose=1
+        )
+        grid_trad.fit(X_trad_train, y_train)
+        best_trad = grid_trad.best_estimator_
+        logger.info(f"Best traditional model params: {grid_trad.best_params_}")
+
+        # Evaluate on validation
+        y_pred_trad = best_trad.predict(X_trad_val)
+        prob_trad = best_trad.predict_proba(X_trad_val)[:, 1]
+        logger.info("\nTraditional Feature Model Performance:")
+        print(classification_report(y_val, y_pred_trad))
+
+        # Optional: feature importance
+        trad_importance = pd.DataFrame({
+            'Feature': traditional_features,
+            'Importance': best_trad.feature_importances_
+        }).sort_values('Importance', ascending=False)
+        logger.info("\nTop 5 traditional features:")
+        for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
+            logger.info(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
+
+        # --------------------------------------------------------------------------------
+        # 7) Stage 2: Embedding Model Tuning (with PCA)
+        # --------------------------------------------------------------------------------
+        if X_emb is not None and len(embedding_features) > 0:
+            logger.info("Reducing embedding dimensionality via PCA to capture ~90% variance...")
+            pca_full = PCA().fit(X_emb_train)
+            explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
+            n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
+            logger.info(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
+
+            pca = PCA(n_components=n_components)
+            X_emb_train_pca = pca.fit_transform(X_emb_train)
+            X_emb_val_pca = pca.transform(X_emb_val)
+
+            logger.info("Tuning embedding feature model...")
+            param_grid_emb = {
+                'n_estimators': [10, 200],
+                'max_depth': [3, 5],
+                'learning_rate': [0.1, 0.05],
+            }
+            xgb_emb = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42,
+                use_label_encoder=False,
+                eval_metric='auc'
+            )
+            grid_emb = GridSearchCV(
+                xgb_emb,
+                param_grid_emb,
+                scoring='roc_auc',
+                cv=2,
+                verbose=1
+            )
+            grid_emb.fit(X_emb_train_pca, y_train)
+            best_emb = grid_emb.best_estimator_
+            logger.info(f"Best embedding model params: {grid_emb.best_params_}")
+
+            y_pred_emb = best_emb.predict(X_emb_val_pca)
+            prob_emb = best_emb.predict_proba(X_emb_val_pca)[:, 1]
+            logger.info("\nEmbedding Feature Model Performance:")
+            print(classification_report(y_val, y_pred_emb))
+
+        else:
+            # If no embeddings, default to zeros
+            pca = None
+            best_emb = None
+            prob_emb = np.zeros_like(prob_trad)
+
+        # --------------------------------------------------------------------------------
+        # 8) Stage 3: Meta-Model (Stacking)
+        # --------------------------------------------------------------------------------
+        logger.info("Training meta-model to blend predictions...")
+
+        # Build meta-features from training sets
+        trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
+        if best_emb is not None:
+            X_emb_train_pca_full = pca.transform(X_emb_train)
+            emb_probs_train = best_emb.predict_proba(X_emb_train_pca_full)[:, 1]
+        else:
+            emb_probs_train = np.zeros_like(trad_probs_train)
+
+        meta_features_train = np.column_stack([trad_probs_train, emb_probs_train])
+        meta_features_val = np.column_stack([prob_trad, prob_emb])
+
+        meta_model = xgb.XGBClassifier(
+            n_estimators=100,
+            max_depth=2,
+            learning_rate=0.1,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42,
+            eval_metric='auc'
+        )
+        meta_model.fit(meta_features_train, y_train)
+
+        # Evaluate meta-model
+        y_pred_meta = meta_model.predict(meta_features_val)
+        logger.info("\nMeta-Model Performance:")
+        print(classification_report(y_val, y_pred_meta))
+
+        # Check how it's weighting the two base models
+        blend_weights = meta_model.feature_importances_
+        logger.info(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
+
+        # --------------------------------------------------------------------------------
+        # 9) Apply to Full Dataset
+        # --------------------------------------------------------------------------------
+        logger.info("Applying two-stage classifier to all data...")
+
+        # Get probabilities from both base models on the entire dataset
+        trad_probs = best_trad.predict_proba(X_trad)[:, 1]
+        if best_emb is not None:
+            X_emb_full_pca = pca.transform(X_emb)
+            emb_probs = best_emb.predict_proba(X_emb_full_pca)[:, 1]
+        else:
+            emb_probs = np.zeros_like(trad_probs)
+
+        # Combine using the meta-model
+        meta_features_full = np.column_stack([trad_probs, emb_probs])
+        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
+
+        # Store references
+        self.model_trad = best_trad
+        self.model_emb = best_emb
+        self.model_meta = meta_model
+        self.pca = pca
+
+        # Add predictions to self.filtered_data
+        self.filtered_data['cv_prob_trad'] = trad_probs
+        self.filtered_data['cv_prob_emb'] = emb_probs
+        self.filtered_data['cv_prob'] = final_probs
+
+        # --------------------------------------------------------------------------------
+        # 10) Save Models
+        # --------------------------------------------------------------------------------
+        import os
+        os.makedirs(self.output_dir, exist_ok=True)
+        joblib.dump(best_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
+        if best_emb is not None:
+            joblib.dump(best_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
+            joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
+        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
+
+        # --------------------------------------------------------------------------------
+        # 11) Plot Probability Distribution
+        # --------------------------------------------------------------------------------
+        plt.figure(figsize=(10, 6))
+        plt.hist(final_probs, bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+        plt.xlabel('CV Probability')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
+        plt.yscale('log')  # Log scale for better visibility
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
+        plt.close()
+
+        logger.info("Two-stage classifier training complete.")
+        return True
+
+
+
+
+
+
+
+
+
     def run_pipeline(self):
         """Run the complete CV finder pipeline with two-stage classification."""
         start_time = time.time()
@@ -1385,66 +1417,21 @@ class PrimvsCVFinder:
         print("="*80 + "\n")
         
         # Step 1: Load PRIMVS data
-        if not self.load_primvs_data():
-            print("Failed to load PRIMVS data. Aborting.")
-            return False
+        self.load_primvs_data()
         
         # Step 2: Apply initial filters
-        if not self.apply_initial_filters():
-            print("Failed to apply initial filters. Aborting.")
-            return False
-        
+        self.apply_initial_filters()
+
         # Step 3: Extract features for classification
-        if self.extract_features() is None:
-            print("Failed to extract features. Aborting.")
-            return False
-        
-        # Step 4: Calculate CV score using domain knowledge
-        if not self.calculate_cv_score():
-            print("Failed to calculate CV scores. Continuing with limited features.")
-        
-        # Step 5: Detect anomalies
-        #if not self.detect_anomalies():
-        #    print("Anomaly detection failed or found no anomalies. Continuing without anomaly features.")
-        
-        # Step 6: Train two-stage classifier if known CVs are available
-        if self.known_cv_file is not None:
-            if not self.train_two_stage_classifier():
-                print("Two-stage classifier training failed. Falling back to heuristic selection.")
-            else:
-                # Step 7: Visualize two-stage classification results
-                self.visualize_two_stage_classification()
-        
-        # Step 8: Select final candidates
-        if not self.select_candidates():
-            print("Failed to select candidates. Aborting.")
-            return False
-        
-        # Step 9: Plot candidates
-        self.plot_candidates()
+        self.extract_features()
 
+        self.train_two_stage_classifier()
 
-        # Step 10: Create embedding-specific visualizations
-        print("\nGenerating embedding-specific visualizations...")
+        self.select_candidates()
         
-        # Step 10a: Visualize embeddings in reduced dimensional space
-        self.visualize_embeddings()
-        
-        # Step 10b: Compare candidates with known CVs in embedding space
-        self.compare_candidates_with_known_cvs()
-        
-        # Step 10c: Comprehensive visualization of classification in embedding space
-        self.visualize_classification_in_embedding_space()
-        
+        self.save_candidates()
+        self.post_processing_plots()
 
-
-
-        
-        # Step 10: Save candidates
-        if not self.save_candidates():
-            print("Failed to save candidates.")
-            return False
-        
         end_time = time.time()
         runtime = end_time - start_time
         
@@ -1455,1970 +1442,6 @@ class PrimvsCVFinder:
         print("="*80 + "\n")
         
         return True
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def detect_anomalies(self):
-        """Use Isolation Forest to identify anomalous sources that might be CVs."""
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return None
-        
-        print("Detecting anomalous sources with Isolation Forest...")
-        
-        # Initialize Isolation Forest
-        iso_forest = IsolationForest(
-            n_estimators=200,
-            contamination=0.05,  # Expect 5% of sources to be unusual
-            random_state=42,
-            n_jobs=-1  # Use all processors
-        )
-        
-        # Fit and predict
-        anomaly_scores = iso_forest.fit_predict(self.scaled_features)
-        
-        # Get anomaly scores (decision function)
-        decision_scores = iso_forest.decision_function(self.scaled_features)
-        
-        # Add anomaly scores to filtered data
-        self.filtered_data['anomaly_score'] = decision_scores
-        
-        # Mark anomalies (where prediction is -1)
-        anomaly_mask = anomaly_scores == -1
-        self.filtered_data['is_anomaly'] = anomaly_mask
-        
-        n_anomalies = anomaly_mask.sum()
-        anomaly_percent = 100 * n_anomalies / len(self.filtered_data)
-        print(f"Identified {n_anomalies} anomalous sources ({anomaly_percent:.2f}%)")
-        
-        return n_anomalies > 0
-    
-    def calculate_cv_score(self):
-        """
-        Calculate a CV score based on domain knowledge of CV characteristics.
-        This combines multiple heuristics based on CV properties.
-        """
-        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
-            print("No filtered data available. Call apply_initial_filters() first.")
-            return False
-        
-        print("Calculating CV scores based on domain knowledge...")
-        
-        # Make a copy of the filtered data
-        data = self.filtered_data.copy()
-        
-        # 1. Period-based score: Higher for shorter periods
-        # CVs typically have periods in the hours range
-        data['period_score'] = np.clip(1.0 - np.log10(data['true_period']) / 2.0, 0, 1)
-        
-        # 2. Amplitude-based score: Higher for larger amplitudes
-        # Scale to 0-1 using a sigmoid function centered at 0.5 mag
-        data['amplitude_score'] = 1 / (1 + np.exp(-2 * (data['true_amplitude'] - 0.5)))
-        
-        # 3. Skewness-based score: CV light curves often show asymmetry
-        if 'skew' in data.columns:
-            # Absolute skewness matters (positive or negative)
-            data['skew_score'] = np.clip(np.abs(data['skew']) / 2.0, 0, 1)
-        else:
-            data['skew_score'] = 0.5  # Default if not available
-        
-        # 4. Color-based score: CVs often have colors compatible with hot components
-        if all(col in data.columns for col in ['J-K', 'H-K']):
-            # This is a simplified approximation - would need refinement
-            # Most CVs have relatively blue colors
-            data['color_score'] = 1 - np.clip((data['J-K'] + data['H-K']) / 2, 0, 1)
-        else:
-            data['color_score'] = 0.5  # Default if colors not available
-        
-        # 5. Periodicity quality: Higher for more reliable periods
-        data['fap_score'] = 1 - np.clip(data['best_fap'], 0, 1)
-        
-        # Combine scores with different weights
-        data['cv_score'] = (
-            0.30 * data['period_score'] +
-            0.30 * data['amplitude_score'] +
-            0.15 * data['skew_score'] +
-            0.15 * data['color_score'] +
-            0.10 * data['fap_score']
-        )
-        
-        # Update the filtered data
-        self.filtered_data = data
-        
-        # Create a histogram of the scores to help set thresholds
-        plt.figure(figsize=(10, 6))
-        plt.hist(data['cv_score'], bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.7, color='g', linestyle='--', label='High confidence threshold (0.7)')
-        plt.xlabel('CV Score')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Scores')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_score_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
-            
-
-
-
-
-
-
-    def visualize_embeddings(self):
-        """Visualize the contrastive curves embeddings in relation to CV classification."""
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates to visualize.")
-            return
-        
-        # Check if embeddings are available
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
-        
-        if len(embedding_features) < 10:
-            print("Insufficient embedding features for visualization.")
-            return
-            
-        print("Generating embedding visualizations...")
-        
-        # Extract embeddings
-        embeddings = self.cv_candidates[embedding_features].values
-        
-        # Apply PCA for dimensionality reduction
-        from sklearn.decomposition import PCA
-        pca = PCA(n_components=3)
-        embeddings_3d = pca.fit_transform(embeddings)
-        
-        # Add PCA dimensions to candidates dataframe
-        self.cv_candidates['pca_1'] = embeddings_3d[:, 0]
-        self.cv_candidates['pca_2'] = embeddings_3d[:, 1]
-        self.cv_candidates['pca_3'] = embeddings_3d[:, 2]
-        
-        # Create visualization
-        fig = plt.figure(figsize=(12, 10))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        # Color by confidence if available
-        if 'confidence' in self.cv_candidates.columns:
-            sc = ax.scatter(
-                self.cv_candidates['pca_1'],
-                self.cv_candidates['pca_2'],
-                self.cv_candidates['pca_3'],
-                c=self.cv_candidates['confidence'],
-                cmap='viridis',
-                alpha=0.7,
-                s=10
-            )
-            plt.colorbar(sc, label='Confidence')
-        else:
-            ax.scatter(
-                self.cv_candidates['pca_1'],
-                self.cv_candidates['pca_2'],
-                self.cv_candidates['pca_3'],
-                alpha=0.7,
-                s=10
-            )
-        
-        ax.set_xlabel('PCA Component 1')
-        ax.set_ylabel('PCA Component 2')
-        ax.set_zlabel('PCA Component 3')
-        plt.title('Contrastive Curves Embedding Space for CV Candidates')
-        
-        plt.savefig(os.path.join(self.output_dir, 'cv_embeddings_3d.png'), dpi=300)
-        plt.close()
-        
-        # Create 2D visualization of first two components
-        plt.figure(figsize=(10, 8))
-        
-        if 'confidence' in self.cv_candidates.columns:
-            sc = plt.scatter(
-                self.cv_candidates['pca_1'],
-                self.cv_candidates['pca_2'],
-                c=self.cv_candidates['confidence'],
-                cmap='viridis',
-                alpha=0.7,
-                s=10
-            )
-            plt.colorbar(sc, label='Confidence')
-        else:
-            plt.scatter(
-                self.cv_candidates['pca_1'],
-                self.cv_candidates['pca_2'],
-                alpha=0.7,
-                s=10
-            )
-        
-        plt.xlabel('PCA Component 1')
-        plt.ylabel('PCA Component 2')
-        plt.title('2D Projection of Contrastive Curves Embedding Space')
-        plt.grid(True, alpha=0.3)
-        
-        plt.savefig(os.path.join(self.output_dir, 'cv_embeddings_2d.png'), dpi=300)
-        plt.close()
-
-
-
-    def compare_candidates_with_known_cvs(self):
-        """
-        Compare CV candidates with known CVs in the contrastive curves embedding space
-        to evaluate classification performance and identify potential new CV members.
-        
-        This method generates comprehensive visualizations illustrating the spatial 
-        relationships between known CVs and candidate sources in the embedding space.
-        """
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates available for comparison.")
-            return
-        
-        # Load complete known CV dataset rather than just IDs
-        if self.known_cv_file is None:
-            print("No known CV file provided for comparison.")
-            return
-        
-        try:
-            # Load complete known CV dataset
-            if self.known_cv_file.endswith('.fits'):
-                with fits.open(self.known_cv_file) as hdul:
-                    known_cv_data = Table(hdul[1].data).to_pandas()
-            elif self.known_cv_file.endswith('.csv'):
-                known_cv_data = pd.read_csv(self.known_cv_file)
-            else:
-                print(f"Unsupported file format: {self.known_cv_file}")
-                return
-            
-            print(f"Loaded {len(known_cv_data)} known CV records for comparison")
-            
-            # Identify the ID column for matching
-            id_columns = ['sourceid', 'primvs_id', 'id', 'source_id', 'ID']
-            id_col = None
-            
-            for col in id_columns:
-                if col in known_cv_data.columns and col in self.cv_candidates.columns:
-                    id_col = col
-                    break
-            
-            if id_col is None:
-                print("Warning: Could not identify common ID column between known CVs and candidates.")
-                print("Available columns in known CVs:", known_cv_data.columns.tolist())
-                print("Available columns in candidates:", self.cv_candidates.columns.tolist())
-                return
-            
-            print(f"Using '{id_col}' as identifier column for matching")
-            
-            # Extract embedding features
-            cc_embedding_cols = [str(i) for i in range(64)]
-            embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
-            
-            if len(embedding_features) < 3:
-                print("Insufficient embedding features for dimensional reduction and visualization.")
-                return
-            
-            # Mark known CVs in the candidate dataset
-            cv_ids = set(known_cv_data[id_col].astype(str))
-            self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].astype(str).isin(cv_ids)
-            known_count = self.cv_candidates['is_known_cv'].sum()
-            
-            print(f"Identified {known_count} known CVs among the candidates")
-            
-            # Proceed only if we have known CVs in the candidates
-            if known_count == 0:
-                print("No known CVs found among the candidates. Visualization skipped.")
-                return
-            
-            # Extract embeddings for dimension reduction
-            print("Applying dimensional reduction to embedding space...")
-            from sklearn.decomposition import PCA
-            
-            # Extract embeddings from candidates
-            candidate_embeddings = self.cv_candidates[embedding_features].values
-            
-            # Apply PCA for dimensional reduction
-            pca = PCA(n_components=3)
-            embeddings_3d = pca.fit_transform(candidate_embeddings)
-            
-            # Add reduced dimensions to candidate dataframe
-            self.cv_candidates['pca_1'] = embeddings_3d[:, 0]
-            self.cv_candidates['pca_2'] = embeddings_3d[:, 1]
-            self.cv_candidates['pca_3'] = embeddings_3d[:, 2]
-            
-            # Calculate explained variance
-            explained_variance = pca.explained_variance_ratio_
-            print(f"PCA explained variance: {explained_variance[0]:.2%}, {explained_variance[1]:.2%}, {explained_variance[2]:.2%}")
-            
-            # Separate known CVs from candidates
-            known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
-            unknown_candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
-            
-            # 1. Create 3D visualization of known CVs vs candidates
-            fig = plt.figure(figsize=(12, 10))
-            ax = fig.add_subplot(111, projection='3d')
-            
-            # Plot candidates with low opacity
-            ax.scatter(
-                unknown_candidates['pca_1'],
-                unknown_candidates['pca_2'],
-                unknown_candidates['pca_3'],
-                color='blue',
-                alpha=0.3,
-                s=10,
-                label='CV Candidates'
-            )
-            
-            # Plot known CVs with high visibility
-            ax.scatter(
-                known_cvs['pca_1'],
-                known_cvs['pca_2'],
-                known_cvs['pca_3'],
-                color='red',
-                marker='*',
-                s=50,
-                alpha=1.0,
-                label='Known CVs'
-            )
-            
-            ax.set_xlabel(f'PC1 ({explained_variance[0]:.2%})')
-            ax.set_ylabel(f'PC2 ({explained_variance[1]:.2%})')
-            ax.set_zlabel(f'PC3 ({explained_variance[2]:.2%})')
-            ax.set_title('Known CVs vs. Candidates in Embedding Space')
-            plt.legend()
-            
-            plt.savefig(os.path.join(self.output_dir, 'known_vs_candidates_3d.png'), dpi=300)
-            plt.close()
-            
-            # 2. Calculate distances to find closest candidates to known CVs
-            from scipy.spatial.distance import cdist
-            
-            # Calculate pairwise distances between known CVs and candidates
-            known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
-            candidate_points = unknown_candidates[['pca_1', 'pca_2', 'pca_3']].values
-            
-            # Calculate distances
-            distances = cdist(known_points, candidate_points, 'euclidean')
-            
-            # Initialize list to store nearest neighbors
-            nearest_neighbors = []
-            
-            # Find k nearest neighbors for each known CV
-            k_neighbors = min(5, len(candidate_points))
-            
-            for i, (idx, known_cv) in enumerate(known_cvs.iterrows()):
-                # Get indices of k nearest candidates
-                nearest_indices = np.argsort(distances[i])[:k_neighbors]
-                
-                # Record these neighbors
-                for rank, neighbor_idx in enumerate(nearest_indices):
-                    candidate_idx = unknown_candidates.iloc[neighbor_idx].name
-                    candidate = unknown_candidates.iloc[neighbor_idx]
-                    
-                    nearest_neighbors.append({
-                        'known_cv_id': known_cv[id_col],
-                        'candidate_id': candidate[id_col],
-                        'distance': distances[i, neighbor_idx],
-                        'rank': rank + 1,
-                        'confidence': candidate.get('confidence', candidate.get('cv_prob', 0.0)),
-                        'period_hours': candidate['true_period'] * 24.0 if 'true_period' in candidate else 0.0,
-                        'amplitude': candidate.get('true_amplitude', 0.0),
-                        'pca_1': candidate['pca_1'],
-                        'pca_2': candidate['pca_2'],
-                        'pca_3': candidate['pca_3']
-                    })
-            
-            # Create DataFrame of nearest neighbors
-            nn_df = pd.DataFrame(nearest_neighbors)
-            
-            # Save to CSV
-            nn_file = os.path.join(self.output_dir, 'nearest_neighbors_to_known_cvs.csv')
-            nn_df.to_csv(nn_file, index=False)
-            
-            print(f"Saved {len(nn_df)} nearest neighbors to {nn_file}")
-            
-            # 3. Create 2D visualization with density contours
-            plt.figure(figsize=(12, 10))
-            
-            # Create contour of density for all candidates
-            from scipy.stats import gaussian_kde
-            
-            # Compute density estimate
-            x = self.cv_candidates['pca_1']
-            y = self.cv_candidates['pca_2']
-            xy = np.vstack([x, y])
-            kde = gaussian_kde(xy)
-            
-            # Create grid for contour plot
-            x_grid = np.linspace(x.min(), x.max(), 100)
-            y_grid = np.linspace(y.min(), y.max(), 100)
-            X, Y = np.meshgrid(x_grid, y_grid)
-            positions = np.vstack([X.ravel(), Y.ravel()])
-            Z = kde(positions).reshape(X.shape)
-            
-            # Plot density contours
-            plt.contourf(X, Y, Z, levels=10, cmap='Blues', alpha=0.6)
-            
-            # Plot candidates
-            plt.scatter(
-                unknown_candidates['pca_1'],
-                unknown_candidates['pca_2'],
-                color='blue',
-                alpha=0.5,
-                s=15,
-                label='CV Candidates'
-            )
-            
-            # Plot known CVs
-            plt.scatter(
-                known_cvs['pca_1'],
-                known_cvs['pca_2'],
-                color='red',
-                marker='*',
-                s=100,
-                edgecolors='black',
-                label='Known CVs'
-            )
-            
-            # Highlight top nearest neighbors (closest to any known CV)
-            top_neighbors = nn_df.sort_values('distance').head(10)
-            if len(top_neighbors) > 0:
-                # Get candidate IDs
-                top_ids = top_neighbors['candidate_id'].astype(str).tolist()
-                
-                # Find these candidates
-                top_candidates = unknown_candidates[unknown_candidates[id_col].astype(str).isin(top_ids)]
-                
-                # Plot them
-                plt.scatter(
-                    top_candidates['pca_1'],
-                    top_candidates['pca_2'],
-                    color='green',
-                    marker='o',
-                    s=80,
-                    facecolors='none',
-                    edgecolors='green',
-                    linewidth=2,
-                    label='Top CV Candidates'
-                )
-            
-            plt.xlabel(f'PC1 ({explained_variance[0]:.2%})')
-            plt.ylabel(f'PC2 ({explained_variance[1]:.2%})')
-            plt.title('Known CVs and Candidates in Principal Component Space')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            
-            plt.savefig(os.path.join(self.output_dir, 'known_vs_candidates_2d.png'), dpi=300)
-            plt.close()
-            
-            # 4. Bailey diagram comparing known CVs and closest candidates
-            if 'true_period' in self.cv_candidates.columns and 'true_amplitude' in self.cv_candidates.columns:
-                plt.figure(figsize=(12, 8))
-                
-                # Convert periods to hours and take log for better visualization
-                known_cvs['log_period_hours'] = np.log10(known_cvs['true_period'] * 24.0)
-                unknown_candidates['log_period_hours'] = np.log10(unknown_candidates['true_period'] * 24.0)
-                
-                # Plot candidates
-                plt.scatter(
-                    unknown_candidates['log_period_hours'],
-                    unknown_candidates['true_amplitude'],
-                    color='blue',
-                    alpha=0.3,
-                    s=10,
-                    label='CV Candidates'
-                )
-                
-                # Plot known CVs
-                plt.scatter(
-                    known_cvs['log_period_hours'],
-                    known_cvs['true_amplitude'],
-                    color='red',
-                    marker='*',
-                    s=100,
-                    edgecolors='black',
-                    label='Known CVs'
-                )
-                
-                # Highlight top nearest neighbors
-                if len(top_neighbors) > 0:
-                    top_candidates['log_period_hours'] = np.log10(top_candidates['true_period'] * 24.0)
-                    
-                    plt.scatter(
-                        top_candidates['log_period_hours'],
-                        top_candidates['true_amplitude'],
-                        color='green',
-                        marker='o',
-                        s=80,
-                        facecolors='none',
-                        edgecolors='green',
-                        linewidth=2,
-                        label='Top CV Candidates'
-                    )
-                
-                plt.xlabel('log₁₀(Period) [hours]')
-                plt.ylabel('Amplitude [mag]')
-                plt.title('Bailey Diagram: Known CVs vs. Candidates')
-                plt.grid(True, alpha=0.3)
-                plt.legend()
-                
-                plt.savefig(os.path.join(self.output_dir, 'bailey_known_vs_candidates.png'), dpi=300)
-                plt.close()
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error in CV comparison: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-
-    def visualize_classification_in_embedding_space(self):
-        """
-        Generate comprehensive visualizations of classification results in embedding space
-        to evaluate model efficacy and examine the alignment between traditional feature-based 
-        and embedding-based classifications within the two-stage framework.
-        
-        This analysis provides insight into the semantic structure captured by contrastive 
-        curve embeddings and their relationship to domain-specific classification criteria.
-        """
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates available for visualization.")
-            return False
-        
-        print("Generating embedding space classification visualizations...")
-        
-        try:
-            # Extract embedding features
-            cc_embedding_cols = [str(i) for i in range(64)]
-            embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
-            
-            if len(embedding_features) < 3:
-                print("Insufficient embedding features for visualization. Minimum of 3 required.")
-                return False
-            
-            # Determine classification confidence metric
-            confidence_metrics = ['confidence', 'cv_prob', 'cv_prob_trad', 'cv_prob_emb', 'cv_score', 'probability']
-            confidence_col = None
-            for col in confidence_metrics:
-                if col in self.cv_candidates.columns:
-                    confidence_col = col
-                    break
-            
-            if confidence_col is None:
-                print("No classification confidence metric found in candidates.")
-                confidence_col = 'confidence'  # Default placeholder
-                self.cv_candidates[confidence_col] = 0.5  # Default value
-            
-            print(f"Using '{confidence_col}' as classification confidence metric")
-            
-            # Check if we have both traditional and embedding probabilities
-            has_two_stage = all(col in self.cv_candidates.columns for col in ['cv_prob_trad', 'cv_prob_emb'])
-            
-            # Apply PCA to reduce dimensionality of embeddings
-            from sklearn.decomposition import PCA
-            
-            # Extract embeddings
-            embeddings = self.cv_candidates[embedding_features].values
-            
-            # Apply PCA
-            pca = PCA(n_components=3)
-            embeddings_3d = pca.fit_transform(embeddings)
-            
-            # Add PCA dimensions to candidates dataframe
-            self.cv_candidates['pca_1'] = embeddings_3d[:, 0]
-            self.cv_candidates['pca_2'] = embeddings_3d[:, 1]
-            self.cv_candidates['pca_3'] = embeddings_3d[:, 2]
-            
-            # Calculate explained variance for labels
-            explained_variance = pca.explained_variance_ratio_
-            
-            # 1. Generate 3D scatter plot colored by classification confidence
-            fig = plt.figure(figsize=(12, 10))
-            ax = fig.add_subplot(111, projection='3d')
-            
-            # Create scatter plot with color based on confidence
-            sc = ax.scatter(
-                self.cv_candidates['pca_1'], 
-                self.cv_candidates['pca_2'], 
-                self.cv_candidates['pca_3'],
-                c=self.cv_candidates[confidence_col],
-                cmap='viridis',
-                alpha=0.7,
-                s=20
-            )
-            
-            # Add colorbar
-            cbar = plt.colorbar(sc, ax=ax, pad=0.1)
-            cbar.set_label(f'{confidence_col.replace("_", " ").title()}')
-            
-            # Set axis labels with explained variance
-            ax.set_xlabel(f'PC1 ({explained_variance[0]:.2%})')
-            ax.set_ylabel(f'PC2 ({explained_variance[1]:.2%})')
-            ax.set_zlabel(f'PC3 ({explained_variance[2]:.2%})')
-            
-            plt.title('CV Classification Confidence in Embedding Space')
-            
-            # Save figure
-            plt.savefig(os.path.join(self.output_dir, 'classification_confidence_3d.png'), dpi=300)
-            plt.close()
-            
-            # 2. Generate 2D scatter plot with high confidence candidates highlighted
-            plt.figure(figsize=(12, 10))
-            
-            # Plot density contours for all candidates
-            from scipy.stats import gaussian_kde
-            
-            # Compute KDE for density estimation
-            x = self.cv_candidates['pca_1']
-            y = self.cv_candidates['pca_2']
-            xy = np.vstack([x, y])
-            
-            # Only compute KDE if we have sufficient points
-            if len(x) > 10:
-                try:
-                    kde = gaussian_kde(xy)
-                    
-                    # Create grid
-                    x_grid = np.linspace(x.min(), x.max(), 100)
-                    y_grid = np.linspace(y.min(), y.max(), 100)
-                    X, Y = np.meshgrid(x_grid, y_grid)
-                    positions = np.vstack([X.ravel(), Y.ravel()])
-                    
-                    # Compute density and reshape
-                    Z = kde(positions).reshape(X.shape)
-                    
-                    # Plot contours
-                    plt.contourf(X, Y, Z, levels=10, cmap='Blues', alpha=0.4)
-                except Exception as e:
-                    print(f"Warning: Could not compute density contours: {str(e)}")
-            
-            # Plot all candidates with low opacity
-            plt.scatter(
-                self.cv_candidates['pca_1'],
-                self.cv_candidates['pca_2'],
-                c='gray',
-                alpha=0.3,
-                s=10,
-                label='All Candidates'
-            )
-            
-            # Plot high confidence candidates
-            threshold = 0.8
-            high_conf = self.cv_candidates[self.cv_candidates[confidence_col] > threshold]
-            
-            if len(high_conf) > 0:
-                plt.scatter(
-                    high_conf['pca_1'],
-                    high_conf['pca_2'],
-                    c=high_conf[confidence_col],
-                    cmap='viridis',
-                    alpha=1.0,
-                    s=40,
-                    edgecolors='black',
-                    linewidths=0.5,
-                    label=f'High Confidence (>{threshold})'
-                )
-                
-                plt.colorbar(label=f'{confidence_col.replace("_", " ").title()}')
-            
-            plt.xlabel(f'PC1 ({explained_variance[0]:.2%})')
-            plt.ylabel(f'PC2 ({explained_variance[1]:.2%})')
-            plt.title('High Confidence CV Candidates in Principal Component Space')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            
-            plt.savefig(os.path.join(self.output_dir, 'high_confidence_candidates_2d.png'), dpi=300)
-            plt.close()
-            
-            # 3. If two-stage classification is available, visualize agreement between models
-            if has_two_stage:
-                print("Generating two-stage classification agreement visualizations...")
-                
-                # Calculate agreement between traditional and embedding models
-                self.cv_candidates['model_agreement'] = 1.0 - np.abs(
-                    self.cv_candidates['cv_prob_trad'] - self.cv_candidates['cv_prob_emb']
-                )
-                
-                # Create 2D scatter plot colored by agreement
-                plt.figure(figsize=(12, 10))
-                
-                # Plot all candidates colored by model agreement
-                sc = plt.scatter(
-                    self.cv_candidates['pca_1'],
-                    self.cv_candidates['pca_2'],
-                    c=self.cv_candidates['model_agreement'],
-                    cmap='RdYlGn',  # Red to Yellow to Green
-                    alpha=0.7,
-                    s=30,
-                    edgecolors='black',
-                    linewidths=0.5
-                )
-                
-                plt.colorbar(sc, label='Model Agreement (Traditional vs. Embedding)')
-                
-                # Mark high agreement, high confidence candidates
-                high_agreement = (self.cv_candidates['model_agreement'] > 0.9) & (self.cv_candidates['cv_prob'] > 0.8)
-                high_agreement_candidates = self.cv_candidates[high_agreement]
-                
-                if len(high_agreement_candidates) > 0:
-                    plt.scatter(
-                        high_agreement_candidates['pca_1'],
-                        high_agreement_candidates['pca_2'],
-                        marker='*',
-                        s=100,
-                        color='white',
-                        edgecolors='black',
-                        linewidths=1.0,
-                        label='High Agreement, High Confidence'
-                    )
-                
-                plt.xlabel(f'PC1 ({explained_variance[0]:.2%})')
-                plt.ylabel(f'PC2 ({explained_variance[1]:.2%})')
-                plt.title('Two-Stage Classification Agreement in Embedding Space')
-                plt.grid(True, alpha=0.3)
-                plt.legend()
-                
-                plt.savefig(os.path.join(self.output_dir, 'model_agreement_2d.png'), dpi=300)
-                plt.close()
-
-
-                # Create scatter plot of traditional vs. embedding probabilities with hexagonal binning
-                plt.figure(figsize=(10, 8))
-
-                # Use hexbin for density visualization
-                hb = plt.hexbin(
-                    self.cv_candidates['cv_prob_trad'].values,
-                    self.cv_candidates['cv_prob_emb'].values,
-                    gridsize=30,
-                    cmap='viridis',
-                    mincnt=1,
-                    bins='log',  # Logarithmic binning for better dynamic range
-                    alpha=0.8
-                )
-
-                plt.colorbar(hb, label='log10(N)')
-
-                # Add diagonal line for perfect agreement
-                plt.plot([0, 1], [0, 1], 'r--', alpha=0.7, label='Perfect Agreement')
-
-                # Add decision boundaries
-                plt.axvline(0.5, color='gray', linestyle='--', alpha=0.5)
-                plt.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
-
-                # Annotate quadrants
-                plt.text(0.25, 0.75, "Traditional: No\nEmbedding: Yes", 
-                        ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-                plt.text(0.75, 0.75, "Both: Yes", 
-                        ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-                plt.text(0.25, 0.25, "Both: No", 
-                        ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-                plt.text(0.75, 0.25, "Traditional: Yes\nEmbedding: No", 
-                        ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-
-                plt.xlabel('Traditional Features Probability')
-                plt.ylabel('Embedding Features Probability')
-                plt.title('Comparison of CV Probabilities: Traditional vs. Embedding Models')
-                plt.grid(True, alpha=0.3)
-                plt.legend(loc='upper left')
-                plt.axis('square')
-                plt.xlim(0, 1)
-                plt.ylim(0, 1)
-
-                plt.savefig(os.path.join(self.output_dir, 'traditional_vs_embedding_probabilities.png'), dpi=300)
-                plt.close()
-
-
-                try:
-                    # Create histogram of ensemble probabilities colored by agreement
-                    plt.figure(figsize=(10, 6))
-                    
-                    # Define color mapping based on agreement
-                    agreement = self.cv_candidates['model_agreement']
-                    colors = plt.cm.RdYlGn(agreement)  # Red to Yellow to Green
-                    
-                    # Sort by agreement for better visualization
-                    sort_idx = agreement.argsort()
-                    
-                    # Plot histogram with color based on agreement
-                    for i in sort_idx:
-                        plt.bar(
-                            self.cv_candidates['cv_prob'].iloc[i], 
-                            1, 
-                            width=0.02, 
-                            color=colors[i],
-                            alpha=0.7
-                        )
-                    
-                    plt.axvline(0.5, color='black', linestyle='--', alpha=0.7, label='Decision Threshold')
-                    
-                    # Create a custom colorbar
-                    sm = plt.cm.ScalarMappable(cmap=plt.cm.RdYlGn, norm=plt.Normalize(0, 1))
-                    sm.set_array([])
-                    plt.colorbar(sm, label='Model Agreement')
-                    
-                    plt.xlabel('Ensemble CV Probability')
-                    plt.ylabel('Count')
-                    plt.title('Distribution of Ensemble Probabilities by Model Agreement')
-                    plt.grid(True, alpha=0.3)
-                    plt.legend()
-                    
-                    plt.savefig(os.path.join(self.output_dir, 'ensemble_probability_distribution.png'), dpi=300)
-                    plt.close()
-                except:
-                    pass
-            
-            # 4. Try to create UMAP visualization if available
-            try:
-                import umap
-                
-                print("Creating UMAP visualization of embedding space...")
-                
-                # Apply UMAP for non-linear dimensionality reduction
-                reducer = umap.UMAP(
-                    n_neighbors=15,
-                    min_dist=0.1,
-                    n_components=2,
-                    metric='euclidean',
-                    random_state=42
-                )
-                
-                embedding_umap = reducer.fit_transform(embeddings)
-                
-                # Add UMAP coordinates to DataFrame
-                self.cv_candidates['umap_1'] = embedding_umap[:, 0]
-                self.cv_candidates['umap_2'] = embedding_umap[:, 1]
-                
-                # Create scatter plot
-                plt.figure(figsize=(12, 10))
-                
-                # Plot all candidates with color based on confidence
-                sc = plt.scatter(
-                    self.cv_candidates['umap_1'],
-                    self.cv_candidates['umap_2'],
-                    c=self.cv_candidates[confidence_col],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=30
-                )
-                
-                plt.colorbar(sc, label=f'{confidence_col.replace("_", " ").title()}')
-                plt.xlabel('UMAP Dimension 1')
-                plt.ylabel('UMAP Dimension 2')
-                plt.title('UMAP Projection of Contrastive Curves Embedding Space')
-                plt.grid(True, alpha=0.3)
-                
-                plt.savefig(os.path.join(self.output_dir, 'umap_visualization.png'), dpi=300)
-                plt.close()
-                
-                # If two-stage classification is available, create UMAP colored by agreement
-                if has_two_stage:
-                    plt.figure(figsize=(12, 10))
-                    
-                    # Plot all candidates with color based on model agreement
-                    sc = plt.scatter(
-                        self.cv_candidates['umap_1'],
-                        self.cv_candidates['umap_2'],
-                        c=self.cv_candidates['model_agreement'],
-                        cmap='RdYlGn',
-                        alpha=0.7,
-                        s=30
-                    )
-                    
-                    plt.colorbar(sc, label='Model Agreement')
-                    plt.xlabel('UMAP Dimension 1')
-                    plt.ylabel('UMAP Dimension 2')
-                    plt.title('Model Agreement in UMAP Space')
-                    plt.grid(True, alpha=0.3)
-                    
-                    plt.savefig(os.path.join(self.output_dir, 'umap_model_agreement.png'), dpi=300)
-                    plt.close()
-                
-                print("UMAP visualization completed successfully")
-                
-            except ImportError:
-                print("UMAP package not available. Skipping UMAP visualization.")
-            except Exception as e:
-                print(f"Error in UMAP visualization: {str(e)}")
-            
-            # 5. Save the DataFrame with embedding coordinates for further analysis
-            embedding_file = os.path.join(self.output_dir, 'cv_candidates_with_embeddings.csv')
-            self.cv_candidates.to_csv(embedding_file, index=False)
-            print(f"Saved candidates with embedding coordinates to {embedding_file}")
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error in classification visualization: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-
-
-
-
-
-
-
-    def save_candidates(self):
-        """Save the CV candidates to CSV and FITS files."""
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates to save.")
-            return False
-        
-        print(f"Saving {len(self.cv_candidates)} CV candidates...")
-        
-        # Save to CSV
-        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
-        self.cv_candidates.to_csv(csv_path, index=False)
-        print(f"Saved candidates to CSV: {csv_path}")
-        
-        # Save to FITS
-        fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
-        table = Table.from_pandas(self.cv_candidates)
-        table.write(fits_path, overwrite=True)
-        print(f"Saved candidates to FITS: {fits_path}")
-        
-        # Generate summary statistics
-        self.generate_summary()
-        
-        return True
-
-    def plot_candidates(self):
-        """Generate plots to visualize the CV candidates with TESS Cycle 8 overlay."""
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates to plot.")
-            return
-        
-        # 1. Spatial distribution with TESS Cycle 8 overlay
-        if all(col in self.cv_candidates.columns for col in ['l', 'b']):
-            plt.figure(figsize=(12, 8))
-            
-            # Ensure l is in -180 to 180 range
-            l_values = self.cv_candidates['l'].values
-            l_centered = np.where(l_values > 180, l_values - 360, l_values)
-            
-            # Plot candidates
-            if 'confidence' in self.cv_candidates.columns:
-                sc = plt.scatter(
-                    l_centered, 
-                    self.cv_candidates['b'],
-                    c=self.cv_candidates['confidence'],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=10
-                )
-                plt.colorbar(sc, label='Confidence')
-            else:
-                plt.scatter(
-                    l_centered, 
-                    self.cv_candidates['b'],
-                    alpha=0.7,
-                    s=10,
-                    color='red',
-                    label='CV candidates'
-                )
-            
-            # Add VVV survey boundaries
-            # Bulge region: -10° < l < +10° and -10° < b < +5°
-            bulge_x = np.array([-10, -10, 10, 10, -10])
-            bulge_y = np.array([-10, 5, 5, -10, -10])
-            plt.plot(bulge_x, bulge_y, 'r-', linewidth=2, label='VVV Bulge')
-            
-            # Disk region: -65° < l < -10° and -2° < b < -10°
-            disk_x = np.array([-65, -65, -10, -10, -65])
-            disk_y = np.array([-2, -10, -10, -2, -2])
-            plt.plot(disk_x, disk_y, 'r-', linewidth=2, label='VVV Disk')
-            
-            # Add TESS Cycle 8 overlay
-            tess_overlay = TESSCycle8Overlay()
-            tess_overlay.add_to_plot(plt.gca())
-            
-            plt.xlabel('Galactic Longitude (l) [deg]')
-            plt.ylabel('Galactic Latitude (b) [deg]')
-            plt.title('Spatial Distribution of CV Candidates with TESS Cycle 8 Coverage')
-            plt.grid(True, alpha=0.3)
-            
-            # Set limits to focus on relevant regions
-            plt.xlim(-70, 20)
-            plt.ylim(-15, 10)
-            
-            plt.savefig(os.path.join(self.output_dir, 'cv_spatial_distribution_tess.png'), dpi=300)
-            plt.close()
-            
-            # 3. Bulge-focused map
-            plt.figure(figsize=(10, 8))
-            
-            # Plot candidates
-            if 'confidence' in self.cv_candidates.columns:
-                sc = plt.scatter(
-                    l_centered, 
-                    self.cv_candidates['b'],
-                    c=self.cv_candidates['confidence'],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=10
-                )
-                plt.colorbar(sc, label='Confidence')
-            else:
-                plt.scatter(
-                    l_centered, 
-                    self.cv_candidates['b'],
-                    alpha=0.7,
-                    s=10,
-                    color='red',
-                    label='CV candidates'
-                )
-            
-            # Add bulge boundary
-            plt.plot(bulge_x, bulge_y, 'r-', linewidth=2, label='VVV Bulge')
-            
-            # Add TESS Cycle 8 overlay for bulge
-            tess_overlay.add_to_plot(plt.gca(), focus_region='bulge')
-            
-            plt.xlabel('Galactic Longitude (l) [deg]')
-            plt.ylabel('Galactic Latitude (b) [deg]')
-            plt.title('CV Candidates in Galactic Bulge with TESS Cycle 8 Coverage')
-            plt.grid(True, alpha=0.3)
-            
-            # Focus on bulge region
-            plt.xlim(-12, 12)
-            plt.ylim(-10, 5)
-            
-            plt.savefig(os.path.join(self.output_dir, 'cv_bulge_tess.png'), dpi=300)
-            plt.close()
-            
-            # 4. Disk-focused map
-            plt.figure(figsize=(12, 6))
-            
-            # Plot candidates
-            if 'confidence' in self.cv_candidates.columns:
-                sc = plt.scatter(
-                    l_centered, 
-                    self.cv_candidates['b'],
-                    c=self.cv_candidates['confidence'],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=10
-                )
-                plt.colorbar(sc, label='Confidence')
-            else:
-                plt.scatter(
-                    l_centered, 
-                    self.cv_candidates['b'],
-                    alpha=0.7,
-                    s=10,
-                    color='red',
-                    label='CV candidates'
-                )
-            
-            # Add disk boundary
-            plt.plot(disk_x, disk_y, 'r-', linewidth=2, label='VVV Disk')
-            
-            # Add TESS Cycle 8 overlay for disk
-            tess_overlay.add_to_plot(plt.gca(), focus_region='disk')
-            
-            plt.xlabel('Galactic Longitude (l) [deg]')
-            plt.ylabel('Galactic Latitude (b) [deg]')
-            plt.title('CV Candidates in Galactic Disk with TESS Cycle 8 Coverage')
-            plt.grid(True, alpha=0.3)
-            
-            # Focus on disk region
-            plt.xlim(-65, -10)
-            plt.ylim(-10, -1)
-            
-            plt.savefig(os.path.join(self.output_dir, 'cv_disk_tess.png'), dpi=300)
-            plt.close()
-        
-        # 5. Bailey diagram (Period-Amplitude)
-        if all(col in self.cv_candidates.columns for col in ['true_period', 'true_amplitude']):
-            plt.figure(figsize=(10, 6))
-            
-            # Convert period to hours and take log
-            period_hours = self.cv_candidates['true_period'] * 24.0
-            log_period = np.log10(period_hours)
-            
-            # Plot candidates
-            if 'confidence' in self.cv_candidates.columns:
-                sc = plt.scatter(
-                    log_period, 
-                    self.cv_candidates['true_amplitude'],
-                    c=self.cv_candidates['confidence'],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=10
-                )
-                plt.colorbar(sc, label='Confidence')
-            else:
-                plt.scatter(
-                    log_period, 
-                    self.cv_candidates['true_amplitude'],
-                    alpha=0.7,
-                    s=10,
-                    color='red',
-                    label='CV candidates'
-                )
-            
-            # Add period gap reference
-            plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='gray', label='Period Gap (2-3h)')
-            
-            plt.xlabel('log₁₀(Period) [hours]')
-            plt.ylabel('Amplitude [mag]')
-            plt.title('Bailey Diagram of CV Candidates')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            
-            # Set reasonable limits
-            plt.xlim(-1, 2.5)  # -1 to 2.5 corresponds to ~0.1h to ~300h
-            plt.ylim(0, min(3, self.cv_candidates['true_amplitude'].max() * 1.1))
-            
-            plt.savefig(os.path.join(self.output_dir, 'cv_bailey_diagram.png'), dpi=300)
-            plt.close()
-
-
-
-    def visualize_candidate_distributions(self, max_top_candidates=1000):
-        """
-        Generate comprehensive visualizations of CV candidate distributions across multiple parameter spaces,
-        including TESS Cycle 8 coverage overlays.
-        
-        Parameters:
-        -----------
-        max_top_candidates : int
-            Maximum number of top candidates to highlight (default: 1000)
-        """
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates available for visualization.")
-            return
-        
-        #from tess_cycle8_overlay import TESSCycle8Overlay, add_tess_cycle8_to_plot
-        
-        print(f"Generating comprehensive distribution visualizations of CV candidates...")
-        
-        # Create visualization directory
-        viz_dir = os.path.join(self.output_dir, 'distributions')
-        os.makedirs(viz_dir, exist_ok=True)
-        
-        # Determine ID column
-        id_col = 'sourceid' if 'sourceid' in self.cv_candidates.columns else 'primvs_id'
-        
-        # Determine sorting column for top candidates
-        sort_col = None
-        for col in ['cv_prob', 'blended_score', 'confidence']:
-            if col in self.cv_candidates.columns:
-                sort_col = col
-                break
-        
-        if sort_col is None:
-            # Fall back to using FAP (lower is better)
-            sort_col = 'best_fap'
-            top_candidates = self.cv_candidates.sort_values(sort_col, ascending=True).head(max_top_candidates)
-        else:
-            # Higher values are better for probability/confidence metrics
-            top_candidates = self.cv_candidates.sort_values(sort_col, ascending=False).head(max_top_candidates)
-        
-        # Check if we have known CV information
-        has_known_cvs = 'is_known_cv' in self.cv_candidates.columns and any(self.cv_candidates['is_known_cv'])
-        if has_known_cvs:
-            known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
-            other_candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
-        else:
-            other_candidates = self.cv_candidates
-        
-        print(f"Preparing to visualize distributions with:")
-        print(f"  - {len(self.cv_candidates)} total candidates")
-        print(f"  - {len(top_candidates)} top candidates (based on {sort_col})")
-        if has_known_cvs:
-            print(f"  - {len(known_cvs)} known CVs")
-        
-        # 1. Bailey diagram (Period-Amplitude space)
-        plt.figure(figsize=(14, 10))
-        
-        # Plot all filtered sources if available (as background context)
-        if hasattr(self, 'filtered_data'):
-            period_hours_filtered = self.filtered_data['true_period'] * 24.0
-            plt.scatter(
-                np.log10(period_hours_filtered),
-                self.filtered_data['true_amplitude'],
-                alpha=0.05,
-                s=1,
-                color='lightgray',
-                label='All filtered sources'
-            )
-        
-        # Plot all candidates
-        period_hours_all = other_candidates['true_period'] * 24.0
-        plt.scatter(
-            np.log10(period_hours_all),
-            other_candidates['true_amplitude'],
-            alpha=0.3,
-            s=5,
-            color='blue',
-            label='All candidates'
-        )
-        
-        # Plot top candidates
-        period_hours_top = top_candidates['true_period'] * 24.0
-        plt.scatter(
-            np.log10(period_hours_top),
-            top_candidates['true_amplitude'],
-            alpha=0.6,
-            s=15,
-            color='red',
-            label=f'Top {len(top_candidates)} candidates'
-        )
-        
-        # Plot known CVs if available
-        if has_known_cvs:
-            period_hours_known = known_cvs['true_period'] * 24.0
-            plt.scatter(
-                np.log10(period_hours_known),
-                known_cvs['true_amplitude'],
-                alpha=0.8,
-                s=30,
-                color='green',
-                marker='*',
-                label='Known CVs'
-            )
-        
-        # Add period gap shaded region
-        plt.axvspan(np.log10(2), np.log10(3), alpha=0.1, color='gray', label='Period gap')
-        
-        # Add descriptive annotations for key regions
-        plt.annotate(
-            'Period Gap\n(2-3 hrs)',
-            xy=(np.log10(2.5), 0.8),
-            xytext=(np.log10(2.5), 0.8),
-            ha='center',
-            va='center',
-            fontsize=12,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        # Short-period CVs region
-        plt.annotate(
-            'Short-period CVs',
-            xy=(np.log10(1.5), 0.3),
-            xytext=(np.log10(1.5), 0.3),
-            ha='center',
-            va='center',
-            fontsize=12,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        # Long-period CVs region
-        plt.annotate(
-            'Long-period CVs',
-            xy=(np.log10(5), 1.0),
-            xytext=(np.log10(5), 1.0),
-            ha='center',
-            va='center',
-            fontsize=12,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        plt.xlabel('log₁₀(Period) [hours]')
-        plt.ylabel('Amplitude [mag]')
-        plt.title('Bailey Diagram of CV Candidates')
-        plt.grid(True, alpha=0.3)
-        plt.xlim(-1, 2.5)  # Limit x-axis to reasonable range for CVs
-        plt.ylim(0, 2)     # Limit y-axis to reasonable amplitude range
-        plt.legend(loc='upper right')
-        
-        # Add count information in text box
-        info_text = f"Total candidates: {len(self.cv_candidates)}\n"
-        info_text += f"Top candidates: {len(top_candidates)}\n"
-        if has_known_cvs:
-            info_text += f"Known CVs: {len(known_cvs)}"
-        
-        plt.figtext(
-            0.02, 0.02, info_text,
-            ha='left',
-            va='bottom',
-            fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        plt.savefig(os.path.join(viz_dir, 'bailey_diagram_distribution.png'), dpi=300)
-        plt.close()
-        
-        # Spatial distribution with TESS Cycle 8 overlay
-        plt.figure(figsize=(14, 10))
-        
-        # Convert longitudes to a more intuitive representation for VVV survey
-        # VVV primarily covers regions around l≈0° (bulge) and l≈295°-350° (disk)
-        # Convert to centered coordinate system (-180° to +180°) for better visualization
-        other_candidates_centered = other_candidates.copy()
-        other_candidates_centered['l_centered'] = np.where(
-            other_candidates['l'] > 180, 
-            other_candidates['l'] - 360, 
-            other_candidates['l']
-        )
-        
-        top_candidates_centered = top_candidates.copy()
-        top_candidates_centered['l_centered'] = np.where(
-            top_candidates['l'] > 180, 
-            top_candidates['l'] - 360, 
-            top_candidates['l']
-        )
-        
-        if has_known_cvs:
-            known_cvs_centered = known_cvs.copy()
-            known_cvs_centered['l_centered'] = np.where(
-                known_cvs['l'] > 180, 
-                known_cvs['l'] - 360, 
-                known_cvs['l']
-            )
-        
-        # Plot all candidates using centered coordinates
-        plt.scatter(
-            other_candidates_centered['l_centered'],
-            other_candidates_centered['b'],
-            alpha=0.3,
-            s=5,
-            color='blue',
-            label='All candidates'
-        )
-        
-        # Plot top candidates
-        plt.scatter(
-            top_candidates_centered['l_centered'],
-            top_candidates_centered['b'],
-            alpha=0.6,
-            s=15,
-            color='red',
-            label=f'Top {len(top_candidates)} candidates'
-        )
-        
-        # Plot known CVs if available
-        if has_known_cvs:
-            plt.scatter(
-                known_cvs_centered['l_centered'],
-                known_cvs_centered['b'],
-                alpha=0.8,
-                s=30,
-                color='green',
-                marker='*',
-                label='Known CVs'
-            )
-        
-        # Mark the Galactic center
-        plt.scatter(
-            0, 0,
-            marker='+',
-            s=100,
-            color='black',
-            label='Galactic Center'
-        )
-        
-        # Add VVV survey boundary outlines (approximate)
-        # Bulge region: -10° < l < +10° and -10° < b < +5°
-        bulge_x = np.array([-10, -10, 10, 10, -10])
-        bulge_y = np.array([-10, 5, 5, -10, -10])
-        plt.plot(bulge_x, bulge_y, 'k--', alpha=0.5, linewidth=1)
-        
-        # Disk region: -65° < l < -10° and -2° < b < -10°
-        disk_x = np.array([-65, -65, -10, -10, -65])
-        disk_y = np.array([-2, -10, -10, -2, -2])
-        plt.plot(disk_x, disk_y, 'k--', alpha=0.5, linewidth=1)
-        
-        # Add region labels
-        plt.annotate(
-            'VVV Bulge',
-            xy=(0, -2.5),
-            xytext=(0, -2.5),
-            ha='center',
-            va='center',
-            fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        plt.annotate(
-            'VVV Disk',
-            xy=(-35, -5),
-            xytext=(-35, -5),
-            ha='center',
-            va='center',
-            fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        plt.xlabel('Galactic Longitude (l) [deg]')
-        plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('Spatial Distribution of CV Candidates in Galactic Coordinates (VVV Survey)')
-        plt.grid(True, alpha=0.3)
-        
-        # Add TESS Cycle 8 footprint overlay
-        tess_overlay.add_to_plot(plt.gca())
-
-        # Set axis limits to focus on the VVV survey regions
-        # Find the extremes of the data with some padding
-        l_values_centered = np.where(
-            self.cv_candidates['l'] > 180,
-            self.cv_candidates['l'] - 360,
-            self.cv_candidates['l']
-        )
-        
-        # Determine appropriate limits based on data distribution
-        l_min = np.percentile(l_values_centered, 0.1) - 5
-        l_max = np.percentile(l_values_centered, 99.9) + 5
-        b_min = np.percentile(self.cv_candidates['b'], 0.1) - 1
-        b_max = np.percentile(self.cv_candidates['b'], 99.9) + 1
-        
-        plt.xlim(l_min, l_max)
-        plt.ylim(b_min, b_max)
-        
-        # Add count information
-        plt.figtext(
-            0.02, 0.02, info_text,
-            ha='left',
-            va='bottom',
-            fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
-        )
-        
-        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_vvv_tess.png'), dpi=300)
-        plt.close()
-        
-        # Create heat map of candidate density in Galactic coordinates with TESS overlay
-        plt.figure(figsize=(14, 10))
-        
-        # Create 2D histogram using centered coordinates for better visualization
-        l_bins = np.linspace(l_min, l_max, 100)
-        b_bins = np.linspace(b_min, b_max, 50)
-        
-        H, xedges, yedges = np.histogram2d(
-            l_values_centered,
-            self.cv_candidates['b'],
-            bins=[l_bins, b_bins]
-        )
-        
-        # Use logarithmic color scale for better visualization
-        from matplotlib.colors import LogNorm
-        
-        # Smooth the histogram for better visualization
-        from scipy.ndimage import gaussian_filter
-        H_smooth = gaussian_filter(H, sigma=1.0)
-        
-        # Plot heatmap
-        plt.pcolormesh(
-            xedges, yedges, H_smooth.T,
-            norm=LogNorm(vmin=0.1, vmax=H_smooth.max()),
-            cmap='inferno',
-            alpha=0.7
-        )
-        
-        plt.colorbar(label='Candidate Density (log scale)')
-        
-        # Add VVV survey boundary lines
-        plt.plot(bulge_x, bulge_y, 'w--', alpha=0.8, linewidth=1.5)
-        plt.plot(disk_x, disk_y, 'w--', alpha=0.8, linewidth=1.5)
-        
-        # Annotate VVV survey regions
-        plt.annotate(
-            'VVV Bulge',
-            xy=(0, -2.5),
-            xytext=(0, -2.5),
-            ha='center',
-            va='center',
-            fontsize=10,
-            color='white',
-            bbox=dict(boxstyle="round,pad=0.3", fc="black", ec="white", alpha=0.7)
-        )
-        
-        plt.annotate(
-            'VVV Disk',
-            xy=(-35, -5),
-            xytext=(-35, -5),
-            ha='center',
-            va='center',
-            fontsize=10,
-            color='white',
-            bbox=dict(boxstyle="round,pad=0.3", fc="black", ec="white", alpha=0.7)
-        )
-        
-        # Add TESS Cycle 8 overlay with higher alpha for better visibility on the heatmap
-        add_tess_cycle8_to_plot(plt.gca(), focus_region=None, alpha=0.3)
-        
-        # Plot known CVs on top if available
-        if has_known_cvs:
-            plt.scatter(
-                known_cvs_centered['l_centered'],
-                known_cvs_centered['b'],
-                alpha=0.8,
-                s=30,
-                color='lime',
-                marker='*',
-                edgecolors='black',
-                label='Known CVs'
-            )
-            plt.legend(loc='upper right')
-        
-        plt.xlabel('Galactic Longitude (l) [deg]')
-        plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('Density Distribution of CV Candidates with TESS Cycle 8 Coverage')
-        plt.grid(True, alpha=0.3)
-        
-        # Use same axis limits as the scatter plot
-        plt.xlim(l_min, l_max)
-        plt.ylim(b_min, b_max)
-        
-        plt.savefig(os.path.join(viz_dir, 'galactic_density_vvv_tess.png'), dpi=300)
-        plt.close()
-        
-        # Create separate zoomed plots for bulge and disk regions with TESS overlay
-        # 1. Bulge region
-        plt.figure(figsize=(10, 8))
-        
-        # Plot all candidates in bulge region
-        plt.scatter(
-            other_candidates_centered['l_centered'],
-            other_candidates_centered['b'],
-            alpha=0.3,
-            s=5,
-            color='blue',
-            label='All candidates'
-        )
-        
-        # Plot top candidates
-        plt.scatter(
-            top_candidates_centered['l_centered'],
-            top_candidates_centered['b'],
-            alpha=0.6,
-            s=15,
-            color='red',
-            label=f'Top {len(top_candidates)} candidates'
-        )
-        
-        # Plot known CVs if available
-        if has_known_cvs:
-            plt.scatter(
-                known_cvs_centered['l_centered'],
-                known_cvs_centered['b'],
-                alpha=0.8,
-                s=30,
-                color='green',
-                marker='*',
-                label='Known CVs'
-            )
-        
-        # Mark the Galactic center
-        plt.scatter(
-            0, 0,
-            marker='+',
-            s=100,
-            color='black',
-            label='Galactic Center'
-        )
-        
-        # Add TESS Cycle 8 overlay for bulge
-        add_tess_cycle8_to_plot(plt.gca(), focus_region='bulge', alpha=0.2)
-        
-        plt.xlabel('Galactic Longitude (l) [deg]')
-        plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('CV Candidates in VVV Bulge Region with TESS Cycle 8 Coverage')
-        plt.grid(True, alpha=0.3)
-        
-        # Set limits to focus on bulge region
-        plt.xlim(-12, 12)
-        plt.ylim(-10, 5)
-        
-        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_bulge_tess.png'), dpi=300)
-        plt.close()
-        
-        # 2. Disk region with TESS overlay
-        plt.figure(figsize=(12, 6))
-        
-        # Plot all candidates in disk region
-        plt.scatter(
-            other_candidates_centered['l_centered'],
-            other_candidates_centered['b'],
-            alpha=0.3,
-            s=5,
-            color='blue',
-            label='All candidates'
-        )
-        
-        # Plot top candidates
-        plt.scatter(
-            top_candidates_centered['l_centered'],
-            top_candidates_centered['b'],
-            alpha=0.6,
-            s=15,
-            color='red',
-            label=f'Top {len(top_candidates)} candidates'
-        )
-        
-        # Plot known CVs if available
-        if has_known_cvs:
-            plt.scatter(
-                known_cvs_centered['l_centered'],
-                known_cvs_centered['b'],
-                alpha=0.8,
-                s=30,
-                color='green',
-                marker='*',
-                label='Known CVs'
-            )
-        
-        # Add TESS Cycle 8 overlay for disk
-        add_tess_cycle8_to_plot(plt.gca(), focus_region='disk', alpha=0.2)
-        
-        plt.xlabel('Galactic Longitude (l) [deg]')
-        plt.ylabel('Galactic Latitude (b) [deg]')
-        plt.title('CV Candidates in VVV Disk Region with TESS Cycle 8 Coverage')
-        plt.grid(True, alpha=0.3)
-        
-        # Set limits to focus on disk region
-        plt.xlim(-65, -10)
-        plt.ylim(-10, -1)
-        
-        plt.savefig(os.path.join(viz_dir, 'galactic_distribution_disk_tess.png'), dpi=300)
-        plt.close()
-
-
-
-
-
-
-    def generate_summary(self):
-        """Generate a comprehensive summary report of the CV candidates with classification details."""
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates for summary.")
-            return
-        
-        print("Generating comprehensive summary report...")
-        
-        # Calculate period statistics in hours
-        period_hours = self.cv_candidates['true_period'] * 24.0
-        
-        # Period distribution by range (important for CV population studies)
-        p1 = (period_hours < 2).sum()
-        p2 = ((period_hours >= 2) & (period_hours < 3)).sum()  # Period gap lower bound
-        p3 = ((period_hours >= 3) & (period_hours < 4)).sum()  # Period gap
-        p4 = ((period_hours >= 4) & (period_hours < 5)).sum()  # Period gap upper bound
-        p5 = ((period_hours >= 5) & (period_hours < 10)).sum()
-        p6 = (period_hours >= 10).sum()
-        
-        # Determine sorting criteria for "top candidates"
-        # Prioritize XGBoost classifier results if available
-        if 'cv_prob' in self.cv_candidates.columns:
-            primary_sort_col = 'cv_prob'
-            sort_label = 'Classification Probability'
-        elif 'blended_score' in self.cv_candidates.columns:
-            primary_sort_col = 'blended_score'
-            sort_label = 'Blended Score'
-        elif 'confidence' in self.cv_candidates.columns:
-            primary_sort_col = 'confidence'
-            sort_label = 'Confidence'
-        else:
-            # Fallback to FAP (lower is better)
-            primary_sort_col = 'best_fap'
-            sort_label = 'FAP'
-            # Reverse sort for FAP
-            top_candidates = self.cv_candidates.sort_values(primary_sort_col, ascending=True).head(20)
-        
-        # Get top candidates (default: descending order - higher probability/confidence is better)
-        if primary_sort_col != 'best_fap':
-            top_candidates = self.cv_candidates.sort_values(primary_sort_col, ascending=False).head(20)
-        
-        # Create summary file
-        summary_path = os.path.join(self.output_dir, 'cv_summary.txt')
-        
-        with open(summary_path, 'w') as f:
-            f.write("PRIMVS CV Candidate Summary\n")
-            f.write("==========================\n\n")
-            
-            f.write(f"Total candidates: {len(self.cv_candidates)}\n\n")
-            
-            # Period distribution - critical for CV population studies
-            f.write("Period Distribution:\n")
-            f.write(f"  < 2 hours:  {p1} ({100*p1/len(self.cv_candidates):.1f}%) - Short period CVs\n")
-            f.write(f"  2-3 hours:  {p2} ({100*p2/len(self.cv_candidates):.1f}%) - Period gap lower bound\n")
-            f.write(f"  3-4 hours:  {p3} ({100*p3/len(self.cv_candidates):.1f}%) - Period gap\n")
-            f.write(f"  4-5 hours:  {p4} ({100*p4/len(self.cv_candidates):.1f}%) - Period gap upper bound\n")
-            f.write(f"  5-10 hours: {p5} ({100*p5/len(self.cv_candidates):.1f}%) - Long period CVs\n")
-            f.write(f"  > 10 hours: {p6} ({100*p6/len(self.cv_candidates):.1f}%) - Possible misclassifications or unusual CVs\n\n")
-            
-            # Amplitude statistics - important for CV subtype classification
-            f.write("Amplitude Statistics:\n")
-            f.write(f"  Minimum: {self.cv_candidates['true_amplitude'].min():.2f} mag\n")
-            f.write(f"  1st Quartile: {self.cv_candidates['true_amplitude'].quantile(0.25):.2f} mag\n")
-            f.write(f"  Median:  {self.cv_candidates['true_amplitude'].median():.2f} mag\n")
-            f.write(f"  3rd Quartile: {self.cv_candidates['true_amplitude'].quantile(0.75):.2f} mag\n")
-            f.write(f"  Maximum: {self.cv_candidates['true_amplitude'].max():.2f} mag\n")
-            f.write(f"  Mean:    {self.cv_candidates['true_amplitude'].mean():.2f} mag\n\n")
-            
-            # Classification statistics if available (from XGBoost)
-            if 'cv_prob' in self.cv_candidates.columns:
-                f.write("XGBoost Classification Statistics:\n")
-                f.write(f"  Minimum: {self.cv_candidates['cv_prob'].min():.4f}\n")
-                f.write(f"  1st Quartile: {self.cv_candidates['cv_prob'].quantile(0.25):.4f}\n")
-                f.write(f"  Median:  {self.cv_candidates['cv_prob'].median():.4f}\n")
-                f.write(f"  3rd Quartile: {self.cv_candidates['cv_prob'].quantile(0.75):.4f}\n")
-                f.write(f"  Maximum: {self.cv_candidates['cv_prob'].max():.4f}\n")
-                f.write(f"  Mean:    {self.cv_candidates['cv_prob'].mean():.4f}\n\n")
-                
-                # Count high confidence candidates
-                high_conf = (self.cv_candidates['cv_prob'] >= 0.8).sum()
-                med_conf = ((self.cv_candidates['cv_prob'] >= 0.6) & (self.cv_candidates['cv_prob'] < 0.8)).sum()
-                low_conf = (self.cv_candidates['cv_prob'] < 0.6).sum()
-                
-                f.write(f"  High confidence (≥0.8): {high_conf} ({100*high_conf/len(self.cv_candidates):.1f}%)\n")
-                f.write(f"  Medium confidence (0.6-0.8): {med_conf} ({100*med_conf/len(self.cv_candidates):.1f}%)\n")
-                f.write(f"  Low confidence (<0.6): {low_conf} ({100*low_conf/len(self.cv_candidates):.1f}%)\n\n")
-                
-            # Embedding proximity statistics if available
-            if 'embedding_similarity' in self.cv_candidates.columns:
-                f.write("Embedding Similarity Statistics (proximity to known CVs):\n")
-                f.write(f"  Minimum: {self.cv_candidates['embedding_similarity'].min():.4f}\n")
-                f.write(f"  1st Quartile: {self.cv_candidates['embedding_similarity'].quantile(0.25):.4f}\n")
-                f.write(f"  Median:  {self.cv_candidates['embedding_similarity'].median():.4f}\n")
-                f.write(f"  3rd Quartile: {self.cv_candidates['embedding_similarity'].quantile(0.75):.4f}\n")
-                f.write(f"  Maximum: {self.cv_candidates['embedding_similarity'].max():.4f}\n")
-                f.write(f"  Mean:    {self.cv_candidates['embedding_similarity'].mean():.4f}\n\n")
-            
-            # False alarm probability
-            f.write("Period False Alarm Probability:\n")
-            f.write(f"  Minimum: {self.cv_candidates['best_fap'].min():.4f}\n")
-            f.write(f"  1st Quartile: {self.cv_candidates['best_fap'].quantile(0.25):.4f}\n")
-            f.write(f"  Median:  {self.cv_candidates['best_fap'].median():.4f}\n")
-            f.write(f"  3rd Quartile: {self.cv_candidates['best_fap'].quantile(0.75):.4f}\n")
-            f.write(f"  Maximum: {self.cv_candidates['best_fap'].max():.4f}\n")
-            f.write(f"  Mean:    {self.cv_candidates['best_fap'].mean():.4f}\n\n")
-            
-            # Top 20 candidates
-            f.write(f"Top 20 CV Candidates (sorted by {sort_label}):\n")
-            f.write("=================================================\n")
-            
-            # Create a formatted table header
-            header = f"{'Rank':4} {'Source ID':15} {'Period (hr)':10} {'Amp (mag)':10} {'FAP':8}"
-            
-            # Add XGBoost probability if available
-            if 'cv_prob' in top_candidates.columns:
-                header += f" {'XGBoost':8}"
-                
-            # Add embedding similarity if available
-            if 'embedding_similarity' in top_candidates.columns:
-                header += f" {'Embed Sim':10}"
-                
-            # Add blended score if available
-            if 'blended_score' in top_candidates.columns:
-                header += f" {'Blend Score':12}"
-                
-            f.write(f"{header}\n")
-            f.write("-" * len(header) + "\n")
-            
-            # ID column to display
-            id_col = 'sourceid' if 'sourceid' in top_candidates.columns else 'primvs_id'
-                    
-            for i, (_, cand) in enumerate(top_candidates.iterrows()):
-                # Format source ID to be readable
-                source_id = str(cand[id_col])
-                if len(source_id) > 15:
-                    source_id = source_id[:12] + "..."
-                
-                period_hr = cand['true_period'] * 24.0
-                amp = cand['true_amplitude']
-                fap = cand['best_fap']
-                
-                line = f"{i+1:4d} {source_id:15} {period_hr:10.2f} {amp:10.2f} {fap:8.4f}"
-                
-                # Add XGBoost probability if available
-                if 'cv_prob' in cand:
-                    line += f" {cand['cv_prob']:8.4f}"
-                
-                # Add embedding similarity if available
-                if 'embedding_similarity' in cand:
-                    line += f" {cand['embedding_similarity']:10.4f}"
-                    
-                # Add blended score if available
-                if 'blended_score' in cand:
-                    line += f" {cand['blended_score']:12.4f}"
-                    
-                f.write(f"{line}\n")
-                
-            f.write("\n")
-            
-            # Distribution of candidates in the period-amplitude (Bailey) diagram
-            f.write("Bailey Diagram Distribution (log P vs. Amplitude):\n")
-            f.write("===============================================\n")
-            
-            # Create 2D histogram bins for period (log scale) and amplitude
-            log_period_bins = np.linspace(-1, 2, 7)  # log10 of period in hours
-            amp_bins = np.linspace(0, 3, 7)  # amplitude in mag
-            
-            # Convert period to log scale
-            log_period = np.log10(period_hours)
-            
-            # Create 2D histogram
-            hist, _, _ = np.histogram2d(log_period, self.cv_candidates['true_amplitude'], 
-                                       bins=[log_period_bins, amp_bins])
-            
-            # Print text-based representation of the 2D histogram
-            f.write(f"{'':10}|")
-            for i in range(len(log_period_bins)-1):
-                bin_center = (log_period_bins[i] + log_period_bins[i+1]) / 2
-                period_val = 10**bin_center
-                f.write(f" {period_val:.1f}h ")
-            f.write("\n")
-            
-            f.write("-" * 10 + "+" + "-" * (6 * (len(log_period_bins)-1)) + "\n")
-            
-            for i in range(len(amp_bins)-1, 0, -1):
-                amp_val = (amp_bins[i-1] + amp_bins[i]) / 2
-                f.write(f"Amp {amp_val:4.1f} |")
-                
-                for j in range(len(log_period_bins)-1):
-                    count = int(hist[j, i-1])
-                    if count == 0:
-                        f.write("     .")
-                    elif count < 10:
-                        f.write(f"    {count}")
-                    elif count < 100:
-                        f.write(f"   {count}")
-                    else:
-                        f.write(f"  {count}")
-                f.write("\n")
-                
-            f.write("\n")
-            
-            # Additional information if available
-            if 'is_known_cv' in self.cv_candidates.columns:
-                known_count = self.cv_candidates['is_known_cv'].sum()
-                f.write(f"Known CVs included in candidates: {known_count}\n")
-                
-                if known_count > 0 and 'distance_to_nearest_cv' in self.cv_candidates.columns:
-                    f.write("\nDistance statistics from candidates to nearest known CV:\n")
-                    distances = self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'distance_to_nearest_cv']
-                    f.write(f"  Minimum: {distances.min():.4f}\n")
-                    f.write(f"  1st Quartile: {distances.quantile(0.25):.4f}\n")
-                    f.write(f"  Median:  {distances.median():.4f}\n")
-                    f.write(f"  3rd Quartile: {distances.quantile(0.75):.4f}\n")
-                    f.write(f"  Maximum: {distances.max():.4f}\n")
-            
-        print(f"Comprehensive summary saved to {summary_path}")
-        
-        # Also save a detailed CSV with the top candidates
-        top_csv_path = os.path.join(self.output_dir, 'top_cv_candidates.csv')
-        top_candidates.to_csv(top_csv_path, index=False)
-        print(f"Top candidates saved to {top_csv_path}")
-        
-        # Generate visualizations of top candidates
-        #self.visualize_top_candidates(top_candidates)
-        self.visualize_candidate_distributions()
-
-
-
-
-    def visualize_two_stage_classification(self):
-        """
-        Generate visualizations that illustrate the performance and comparative contributions
-        of traditional feature-based classification versus embedding-based classification
-        in the two-stage ensemble model.
-        """
-        if not hasattr(self, 'filtered_data') or 'cv_prob' not in self.filtered_data.columns:
-            print("No classification results available for visualization.")
-            return
-        
-        # Check if we have results from both stages
-        has_two_stage = all(col in self.filtered_data.columns for col in ['cv_prob_trad', 'cv_prob_emb'])
-        
-        if not has_two_stage:
-            print("Single-stage classification detected. Skipping two-stage visualization.")
-            return
-        
-        print("Generating two-stage classification visualizations...")
-        
-
-        # Probability comparison scatter plot
-        plt.figure(figsize=(10, 8))
-
-        # Use hexbin for density visualization
-        hb = plt.hexbin(
-            self.filtered_data['cv_prob_trad'], 
-            self.filtered_data['cv_prob_emb'], 
-            gridsize=50, cmap='viridis', bins='log'
-        )
-
-        # Add identity line
-        plt.plot([0, 1], [0, 1], 'r--', alpha=0.7, label='Identity Line')
-
-        # Add decision boundaries
-        plt.axvline(0.5, color='gray', linestyle='--', alpha=0.5)
-        plt.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
-
-        # Annotate quadrants
-        plt.text(0.25, 0.75, "Traditional: No\nEmbedding: Yes", 
-                 ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-        plt.text(0.75, 0.75, "Both: Yes", 
-                 ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-        plt.text(0.25, 0.25, "Both: No", 
-                 ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-        plt.text(0.75, 0.25, "Traditional: Yes\nEmbedding: No", 
-                 ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
-
-        plt.xlabel('Traditional Features CV Probability')
-        plt.ylabel('Embedding Features CV Probability')
-        plt.title('Comparison of CV Probabilities: Traditional vs. Embedding Features')
-        plt.colorbar(hb, label='Log Count')
-        plt.grid(True, alpha=0.3)
-        plt.axis('square')
-        plt.xlim(0, 1)
-        plt.ylim(0, 1)
-
-        plt.savefig(os.path.join(self.output_dir, 'two_stage_probability_comparison.png'), dpi=300)
-        plt.close()
-
-
-        # Calculate agreement score (difference between probabilities)
-        agreement = 1 - np.abs(self.filtered_data['cv_prob_trad'] - self.filtered_data['cv_prob_emb'])
-        
-
-        # 4. Bailey diagram with model agreement
-        if all(col in self.filtered_data.columns for col in ['true_period', 'true_amplitude']):
-            plt.figure(figsize=(10, 8))
-            
-            # Prepare data
-            period_hours = self.filtered_data['true_period'] * 24.0
-            log_period = np.log10(period_hours)
-            amplitude = self.filtered_data['true_amplitude']
-            
-            # Plot scatter colored by model agreement
-            sc = plt.scatter(
-                log_period, 
-                amplitude,
-                c=agreement,
-                cmap='coolwarm',
-                alpha=0.7,
-                s=8,
-                edgecolor='none'
-            )
-            
-            plt.colorbar(sc, label='Model Agreement')
-            
-            # Add period gap reference lines
-            plt.axvline(np.log10(2), color='gray', linestyle='--', alpha=0.5, label='2 hours')
-            plt.axvline(np.log10(3), color='gray', linestyle='--', alpha=0.5, label='3 hours')
-            
-            plt.xlabel('Log₁₀(Period) [hours]')
-            plt.ylabel('Amplitude [mag]')
-            plt.title('Bailey Diagram of CV Candidates with Model Agreement')
-            plt.grid(True, alpha=0.3)
-            
-            plt.savefig(os.path.join(self.output_dir, 'two_stage_bailey_diagram.png'), dpi=300)
-            plt.close()
-            
-        print("Two-stage classification visualizations completed.")
 
 
 
