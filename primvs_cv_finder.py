@@ -153,6 +153,12 @@ class PrimvsCVFinder:
 
         df = self.cv_candidates
         
+            df['period_hours'] = df['true_period'] * 24.0
+            df['log_period'] = np.log10(df['period_hours'])
+            
+            df['l_centered'] = np.where(df['l'] > 180, df['l'] - 360, df['l'])
+
+
         # ---------------------------
         # 1) Determine optimal threshold for "best" candidates
         # ---------------------------
@@ -373,111 +379,105 @@ class PrimvsCVFinder:
         # ---------------------------
         # 6) Bailey diagram with three categories
         # ---------------------------
-        if 'true_period' in df.columns and 'true_amplitude' in df.columns:
-            # Convert period to hours & take log
-            df['period_hours'] = df['true_period'] * 24.0
-            df['log_period'] = np.log10(df['period_hours'])
-            
-            plt.figure(figsize=(10, 6))
-            
-            # 1. Plot all candidates
+        # Convert period to hours & take log
+
+        plt.figure(figsize=(10, 6))
+        
+        # 1. Plot all candidates
+        plt.scatter(
+            all_candidates['log_period'],
+            all_candidates['true_amplitude'],
+            c='lightgray',
+            alpha=0.3,
+            s=10,
+            label='All Candidates'
+        )
+        
+        # 2. Plot best candidates that aren't known CVs
+        if len(best_candidates) > 0:
             plt.scatter(
-                all_candidates['log_period'],
-                all_candidates['true_amplitude'],
-                c='lightgray',
-                alpha=0.3,
-                s=10,
-                label='All Candidates'
+                best_candidates['log_period'],
+                best_candidates['true_amplitude'],
+                c='blue',
+                alpha=0.7,
+                s=20,
+                label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
             )
-            
-            # 2. Plot best candidates that aren't known CVs
-            if len(best_candidates) > 0:
-                plt.scatter(
-                    best_candidates['log_period'],
-                    best_candidates['true_amplitude'],
-                    c='blue',
-                    alpha=0.7,
-                    s=20,
-                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
-                )
-            
-            # 3. Plot known CVs if available
-            if has_known_cvs:
-                plt.scatter(
-                    known_cvs['log_period'],
-                    known_cvs['true_amplitude'],
-                    c='red',
-                    alpha=1.0,
-                    s=40,
-                    marker='*',
-                    label='Known CVs'
-                )
-            
-            # Mark the period gap
-            plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='gray', label='Period Gap (2-3h)')
-            
-            plt.xlabel('log₁₀(Period) [hours]')
-            plt.ylabel('Amplitude [mag]')
-            plt.title('Bailey Diagram')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            plt.savefig(os.path.join(self.output_dir, 'bailey_diagram_categories.png'), dpi=300)
-            plt.close()
+        
+        # 3. Plot known CVs if available
+        if has_known_cvs:
+            plt.scatter(
+                known_cvs['log_period'],
+                known_cvs['true_amplitude'],
+                c='red',
+                alpha=1.0,
+                s=40,
+                marker='*',
+                label='Known CVs'
+            )
+        
+        # Mark the period gap
+        plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='gray', label='Period Gap (2-3h)')
+        
+        plt.xlabel('log₁₀(Period) [hours]')
+        plt.ylabel('Amplitude [mag]')
+        plt.title('Bailey Diagram')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.savefig(os.path.join(self.output_dir, 'bailey_diagram_categories.png'), dpi=300)
+        plt.close()
 
         # ---------------------------
         # 7) Galactic spatial plot with three categories
         # ---------------------------
-        if 'l' in df.columns and 'b' in df.columns:
-            # Because TESS overlay uses -180..+180, shift your data similarly
-            df['l_centered'] = np.where(df['l'] > 180, df['l'] - 360, df['l'])
-            
-            plt.figure(figsize=(12, 8))
-            
-            # 1. Plot all candidates
+
+        plt.figure(figsize=(12, 8))
+        
+        # 1. Plot all candidates
+        plt.scatter(
+            all_candidates['l_centered'],
+            all_candidates['b'],
+            c='lightgray',
+            alpha=0.3,
+            s=10,
+            label='All Candidates'
+        )
+        
+        # 2. Plot best candidates that aren't known CVs
+        if len(best_candidates) > 0:
             plt.scatter(
-                all_candidates['l_centered'],
-                all_candidates['b'],
-                c='lightgray',
-                alpha=0.3,
-                s=10,
-                label='All Candidates'
+                best_candidates['l_centered'],
+                best_candidates['b'],
+                c='blue',
+                alpha=0.7,
+                s=20,
+                label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
             )
-            
-            # 2. Plot best candidates that aren't known CVs
-            if len(best_candidates) > 0:
-                plt.scatter(
-                    best_candidates['l_centered'],
-                    best_candidates['b'],
-                    c='blue',
-                    alpha=0.7,
-                    s=20,
-                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
-                )
-            
-            # 3. Plot known CVs if available
-            if has_known_cvs:
-                plt.scatter(
-                    known_cvs['l_centered'],
-                    known_cvs['b'],
-                    c='red',
-                    alpha=1.0,
-                    s=40,
-                    marker='*',
-                    label='Known CVs'
-                )
-            
-            # TESS overlay
-            if 'TESSCycle8Overlay' in globals():
-                tess_overlay = TESSCycle8Overlay()
-                tess_overlay.add_to_plot(plt.gca())
-            
-            plt.xlabel('Galactic Longitude (shifted) [deg]')
-            plt.ylabel('Galactic Latitude [deg]')
-            plt.title('Galactic Spatial Distribution with TESS Overlay')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            plt.savefig(os.path.join(self.output_dir, 'spatial_galactic_categories.png'), dpi=300)
-            plt.close()
+        
+        # 3. Plot known CVs if available
+        if has_known_cvs:
+            plt.scatter(
+                known_cvs['l_centered'],
+                known_cvs['b'],
+                c='red',
+                alpha=1.0,
+                s=40,
+                marker='*',
+                label='Known CVs'
+            )
+        
+        # TESS overlay
+        if 'TESSCycle8Overlay' in globals():
+            tess_overlay = TESSCycle8Overlay()
+            tess_overlay.add_to_plot(plt.gca())
+        
+        plt.xlabel('Galactic Longitude (shifted) [deg]')
+        plt.ylabel('Galactic Latitude [deg]')
+        plt.title('Galactic Spatial Distribution with TESS Overlay')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.savefig(os.path.join(self.output_dir, 'spatial_galactic_categories.png'), dpi=300)
+        plt.close()
 
         # ---------------------------
         # 8) Short summary text + top candidates

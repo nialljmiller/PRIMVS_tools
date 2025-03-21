@@ -229,7 +229,6 @@ def add_tess_overlay_equatorial(ax, alpha=0.2, size=12):
 # Main processing code
 # -------------------------
 
-print(f"Starting CV visualization at {time.strftime('%H:%M:%S')}")
 
 # Load CV candidates data
 df = pd.read_csv('../PRIMVS/cv_results/cv_candidates.csv')
@@ -597,4 +596,3 @@ if len(embedding_features) >= 3:
 else:
     print("Insufficient embedding features found for dimensionality reduction")
 
-print(f"Visualization complete at {time.strftime('%H:%M:%S')}. All plots saved to ../PRIMVS/cv_results/")
