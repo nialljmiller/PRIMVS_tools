@@ -817,6 +817,78 @@ class PrimvsCVFinder:
         return True
     
 
+    def run_classifier(self):
+        """
+        Run the trained classifier on all filtered data to identify CV candidates.
+        """
+        if not hasattr(self, 'model') or self.model is None:
+            print("No trained model available. Training now...")
+            self.train_classifier()
+            return True
+
+        print("Running classifier on all filtered data...")
+        
+        # For two-stage classifier (meta-model)
+        if hasattr(self, 'model_trad') and hasattr(self, 'model_emb'):
+            print("Using two-stage classifier...")
+            
+            # Split features into traditional and embedding sets
+            cc_embedding_cols = [str(i) for i in range(64)]
+            embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
+            traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+            
+            print(f"Traditional features: {len(traditional_features)}")
+            print(f"Embedding features: {len(embedding_features)}")
+            
+            # Extract feature sets
+            X_trad = self.scaled_features[traditional_features].values
+            X_emb = self.scaled_features[embedding_features].values if embedding_features else None
+            
+            # Get predictions from individual models
+            trad_probs = self.model_trad.predict_proba(X_trad)[:, 1]
+            
+            if hasattr(self, 'pca') and self.pca is not None and X_emb is not None:
+                print("Applying PCA transformation to embedding features")
+                X_emb_pca = self.pca.transform(X_emb)
+                emb_probs = self.model_emb.predict_proba(X_emb_pca)[:, 1]
+            else:
+                emb_probs = self.model_emb.predict_proba(X_emb)[:, 1]
+            
+            # Create meta-features
+            meta_features = np.column_stack([trad_probs, emb_probs])
+            
+            # Apply meta-model
+            cv_probs = self.model.predict_proba(meta_features)[:, 1]
+            
+            # Add to filtered data
+            self.filtered_data['cv_prob_trad'] = trad_probs
+            self.filtered_data['cv_prob_emb'] = emb_probs
+            self.filtered_data['cv_prob'] = cv_probs
+        else:
+            # Single model
+            cv_probs = self.model.predict_proba(self.scaled_features)[:, 1]
+            self.filtered_data['cv_prob'] = cv_probs
+        
+        # Plot probability distribution
+        plt.figure(figsize=(10, 6))
+        plt.hist(cv_probs, bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+        plt.xlabel('CV Probability')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Probabilities')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
+        plt.close()
+        
+        return True
+
+
+
+
+
+
 
     def select_candidates(self):
         """
