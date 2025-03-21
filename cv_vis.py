@@ -225,15 +225,15 @@ def add_tess_overlay_equatorial(ax, alpha=0.2, size=12):
 
 
 
-
-
-
 # -------------------------
 # Main processing code
 # -------------------------
 
+print(f"Starting CV visualization at {time.strftime('%H:%M:%S')}")
+
 # Load CV candidates data
 df = pd.read_csv('../PRIMVS/cv_results/cv_candidates.csv')
+print(f"Loaded {len(df)} candidates from CSV")
 
 # Adjust Galactic longitude from [0, 360) to [-180, 180)
 df['l'] = df['l'].apply(lambda x: x - 360 if x > 180 else x)
@@ -245,6 +245,7 @@ if 'cv_prob' not in df.columns:
 # Make sure known CVs are flagged
 if 'is_known_cv' not in df.columns:
     df['is_known_cv'] = False
+    print("Warning: is_known_cv column not found, assuming all are unknown")
 
 # For ROC curve, we need binary labels: 1 for known CV, 0 for others
 df['true_label'] = df['is_known_cv'].astype(int)
@@ -267,7 +268,7 @@ print(f"Best candidates: {len(best)}")
 print(f"Known CVs: {len(known)}")
 
 # -------------------------
-# Plot 1: ROC Curve
+# Plot 1: ROC Curve (unchanged)
 # -------------------------
 plt.figure(figsize=(8,6))
 plt.plot(fpr, tpr, label=f'ROC curve (AUC = {roc_auc:.2f})')
@@ -279,19 +280,26 @@ plt.title('ROC Curve for CV Classifier')
 plt.legend()
 plt.grid(True)
 plt.savefig("../PRIMVS/cv_results/roc_curve.png", dpi=300)
+plt.close()
 
 # -------------------------
-# Plot 2: Bailey Diagram (Period vs Amplitude)
+# Plot 2: Bailey Diagram with Density Plot for background
 # -------------------------
+print("Generating Bailey diagram...")
 plt.figure(figsize=(10,8))
-# All candidates (gray)
-plt.scatter(df['true_period'], df['true_amplitude'], 
-            label='All Candidates', alpha=0.3, color='lightgray', s=20)
+
+# Use hexbin for all candidates to avoid overplotting
+hb = plt.hexbin(df['true_period'], df['true_amplitude'], 
+                gridsize=50, cmap='Greys', bins='log',
+                label='All Candidates')
+plt.colorbar(hb, label='log10(count)')
+
 # Best candidates that aren't known CVs (blue)
 best_not_known = df[(df['is_best_candidate']) & (~df['is_known_cv'])]
 plt.scatter(best_not_known['true_period'], best_not_known['true_amplitude'], 
             label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
             alpha=0.7, color='blue', s=30)
+
 # Known CVs (red stars)
 if not known.empty:
     plt.scatter(known['true_period'], known['true_amplitude'], 
@@ -301,43 +309,57 @@ plt.xlabel('True Period (days)')
 plt.ylabel('True Amplitude (mag)')
 plt.title('Bailey Diagram: Period vs Amplitude')
 plt.legend()
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.savefig("../PRIMVS/cv_results/bailey_diagram_categories.png", dpi=300)
+plt.close()
 
 # Log version of the Bailey diagram
 plt.figure(figsize=(10,8))
-# All candidates (gray)
-plt.scatter(np.log10(df['true_period']), df['true_amplitude'], 
-            label='All Candidates', alpha=0.3, color='lightgray', s=20)
+
+# Use hexbin with log period for all candidates to avoid overplotting
+hb = plt.hexbin(np.log10(df['true_period']), df['true_amplitude'], 
+                gridsize=50, cmap='Greys', bins='log',
+                label='All Candidates')
+plt.colorbar(hb, label='log10(count)')
+
 # Best candidates that aren't known CVs (blue)
 plt.scatter(np.log10(best_not_known['true_period']), best_not_known['true_amplitude'], 
             label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
             alpha=0.7, color='blue', s=30)
+
 # Known CVs (red stars)
 if not known.empty:
     plt.scatter(np.log10(known['true_period']), known['true_amplitude'], 
                 label='Known CVs', color='red', marker='*', s=80)
+
 # Mark the period gap (2-3 hours)
-plt.axvspan(np.log10(2/24), np.log10(3/24), alpha=0.2, color='gray', label='Period Gap (2-3h)')
+plt.axvspan(np.log10(2/24), np.log10(3/24), alpha=0.2, color='lightgreen', label='Period Gap (2-3h)')
 
 plt.xlabel('Log True Period (days)')
 plt.ylabel('True Amplitude (mag)')
 plt.title('Bailey Diagram: Log Period vs Amplitude')
 plt.legend()
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.savefig("../PRIMVS/cv_results/bailey_diagram_log_categories.png", dpi=300)
+plt.close()
 
 # -------------------------
 # Plot 3a: Spatial Plot in Galactic Coordinates with TESS Overlay
 # -------------------------
+print("Generating spatial plots...")
 plt.figure(figsize=(12,10))
-# All candidates (gray)
-plt.scatter(df['l'], df['b'], label='All Candidates', 
-            alpha=0.3, color='lightgray', s=20)
+
+# Use hexbin for all candidates
+hb = plt.hexbin(df['l'], df['b'], 
+                gridsize=75, cmap='Greys', bins='log',
+                label='All Candidates')
+plt.colorbar(hb, label='log10(count)')
+
 # Best candidates that aren't known CVs (blue)
 plt.scatter(best_not_known['l'], best_not_known['b'], 
             label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
             alpha=0.7, color='blue', s=30)
+
 # Known CVs (red stars)
 if not known.empty:
     plt.scatter(known['l'], known['b'], 
@@ -352,26 +374,33 @@ plt.xlabel('Galactic Longitude (l)')
 plt.ylabel('Galactic Latitude (b)')
 plt.title('Spatial Distribution (Galactic Coordinates) with TESS Cycle 8 Footprints')
 plt.legend()
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.savefig("../PRIMVS/cv_results/spatial_galactic_categories.png", dpi=300)
+plt.close()
 
 # -------------------------
 # Plot 3b: Spatial Plot in Equatorial Coordinates with TESS Overlay
 # -------------------------
 # If 'ra' and 'dec' don't exist, compute from l and b
 if 'ra' not in df.columns or 'dec' not in df.columns:
+    print("Computing RA/Dec from Galactic coordinates...")
     coords = SkyCoord(l=df['l'].values*u.degree, b=df['b'].values*u.degree, frame='galactic')
     df['ra'] = coords.icrs.ra.deg
     df['dec'] = coords.icrs.dec.deg
 
 plt.figure(figsize=(12,10))
-# All candidates (gray)
-plt.scatter(df['ra'], df['dec'], label='All Candidates', 
-            alpha=0.3, color='lightgray', s=20)
+
+# Use hexbin for all candidates 
+hb = plt.hexbin(df['ra'], df['dec'], 
+                gridsize=75, cmap='Greys', bins='log',
+                label='All Candidates')
+plt.colorbar(hb, label='log10(count)')
+
 # Best candidates that aren't known CVs (blue)
 plt.scatter(best_not_known['ra'], best_not_known['dec'], 
             label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
             alpha=0.7, color='blue', s=30)
+
 # Known CVs (red stars)
 if not known.empty:
     plt.scatter(known['ra'], known['dec'], 
@@ -379,18 +408,23 @@ if not known.empty:
 
 ax_eq = plt.gca()
 # Overlay TESS footprints in equatorial coordinates
-ax_eq = add_tess_overlay_equatorial(ax_eq, alpha=0.2)
+try:
+    ax_eq = add_tess_overlay_equatorial(ax_eq, alpha=0.2)
+except Exception as e:
+    print(f"Warning: Could not add TESS overlay: {e}")
 
 plt.xlabel('Right Ascension (deg)')
 plt.ylabel('Declination (deg)')
 plt.title('Spatial Distribution (Equatorial Coordinates) with TESS Cycle 8 Footprints')
 plt.legend()
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.savefig("../PRIMVS/cv_results/spatial_equatorial_categories.png", dpi=300)
+plt.close()
 
 # -------------------------
 # Embedding Space Plots (PCA and UMAP)
 # -------------------------
+print("Processing embedding features...")
 # Extract embedding columns if they exist
 cc_embedding_cols = [str(i) for i in range(64)]
 embedding_features = [col for col in cc_embedding_cols if col in df.columns]
@@ -399,25 +433,35 @@ if len(embedding_features) >= 3:
     print(f"Found {len(embedding_features)} embedding features for dimensionality reduction")
     
     # Extract embeddings
+    print("Extracting embeddings...")
     embeddings = df[embedding_features].values
     
     # 1. PCA for embedding visualization
+    print("Computing PCA...")
     pca = PCA(n_components=3)
     pca_result = pca.fit_transform(embeddings)
-    
     print(f"PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
     
     # 2. UMAP for embedding visualization
-    reducer = umap.UMAP(n_components=3, random_state=42)
-    umap_result = reducer.fit_transform(embeddings)
+    print("Computing UMAP (this may take a while)...")
+    try:
+        reducer = umap.UMAP(n_components=3, random_state=42, n_neighbors=15, min_dist=0.1)
+        umap_result = reducer.fit_transform(embeddings)
+        have_umap = True
+    except Exception as e:
+        print(f"Warning: UMAP computation failed: {e}")
+        print("Skipping UMAP plots")
+        have_umap = False
     
     # Store results back in dataframe
     df['pca_1'] = pca_result[:, 0]
     df['pca_2'] = pca_result[:, 1]
     df['pca_3'] = pca_result[:, 2]
-    df['umap_1'] = umap_result[:, 0]
-    df['umap_2'] = umap_result[:, 1] 
-    df['umap_3'] = umap_result[:, 2]
+    
+    if have_umap:
+        df['umap_1'] = umap_result[:, 0]
+        df['umap_2'] = umap_result[:, 1] 
+        df['umap_3'] = umap_result[:, 2]
     
     # Extract subsets for our three categories
     all_emb = df
@@ -427,14 +471,20 @@ if len(embedding_features) >= 3:
     # -------------------------
     # Plot 4a: 2D PCA of Embeddings
     # -------------------------
+    print("Generating PCA plots...")
     plt.figure(figsize=(10,8))
-    # All candidates (gray)
-    plt.scatter(all_emb['pca_1'], all_emb['pca_2'], 
-                label='All Candidates', alpha=0.3, color='lightgray', s=20)
+    
+    # Use hexbin for all candidates
+    hb = plt.hexbin(all_emb['pca_1'], all_emb['pca_2'], 
+                    gridsize=100, cmap='Greys', bins='log',
+                    label='All Candidates')
+    plt.colorbar(hb, label='log10(count)')
+    
     # Best candidates that aren't known CVs (blue)
     plt.scatter(best_not_known_emb['pca_1'], best_not_known_emb['pca_2'], 
                 label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
                 alpha=0.7, color='blue', s=30)
+    
     # Known CVs (red stars)
     if not known_emb.empty:
         plt.scatter(known_emb['pca_1'], known_emb['pca_2'], 
@@ -446,6 +496,7 @@ if len(embedding_features) >= 3:
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.savefig("../PRIMVS/cv_results/embedding_pca_2d_categories.png", dpi=300)
+    plt.close()
     
     # -------------------------
     # Plot 4b: 3D PCA of Embeddings
@@ -453,13 +504,25 @@ if len(embedding_features) >= 3:
     fig = plt.figure(figsize=(10,8))
     ax = fig.add_subplot(111, projection='3d')
     
-    # All candidates (gray)
-    ax.scatter(all_emb['pca_1'], all_emb['pca_2'], all_emb['pca_3'], 
-               label='All Candidates', alpha=0.3, color='lightgray', s=20)
+    # For 3D, we'll use a random sample of the full dataset to prevent overplotting
+    # Select at most 5000 points to prevent memory/rendering issues
+    if len(all_emb) > 5000:
+        sample_size = 5000
+        sampled_indices = np.random.choice(all_emb.index, size=sample_size, replace=False)
+        sampled_df = all_emb.loc[sampled_indices]
+        print(f"Using {sample_size} random points for 3D visualization")
+    else:
+        sampled_df = all_emb
+    
+    # All candidates (sampled, gray)
+    ax.scatter(sampled_df['pca_1'], sampled_df['pca_2'], sampled_df['pca_3'], 
+               label='All Candidates (sampled)', alpha=0.3, color='lightgray', s=15)
+    
     # Best candidates that aren't known CVs (blue)
     ax.scatter(best_not_known_emb['pca_1'], best_not_known_emb['pca_2'], best_not_known_emb['pca_3'], 
                label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
                alpha=0.7, color='blue', s=30)
+    
     # Known CVs (red stars)
     if not known_emb.empty:
         ax.scatter(known_emb['pca_1'], known_emb['pca_2'], known_emb['pca_3'], 
@@ -471,55 +534,67 @@ if len(embedding_features) >= 3:
     ax.set_title('3D PCA of Embedding Space')
     plt.legend()
     plt.savefig("../PRIMVS/cv_results/embedding_pca_3d_categories.png", dpi=300)
+    plt.close()
     
-    # -------------------------
-    # Plot 5a: 2D UMAP of Embeddings
-    # -------------------------
-    plt.figure(figsize=(10,8))
-    # All candidates (gray)
-    plt.scatter(all_emb['umap_1'], all_emb['umap_2'], 
-                label='All Candidates', alpha=0.3, color='lightgray', s=20)
-    # Best candidates that aren't known CVs (blue)
-    plt.scatter(best_not_known_emb['umap_1'], best_not_known_emb['umap_2'], 
-                label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
-                alpha=0.7, color='blue', s=30)
-    # Known CVs (red stars)
-    if not known_emb.empty:
-        plt.scatter(known_emb['umap_1'], known_emb['umap_2'], 
-                    label='Known CVs', color='red', marker='*', s=80)
-    
-    plt.xlabel('UMAP 1')
-    plt.ylabel('UMAP 2')
-    plt.title('2D UMAP of Embedding Space')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig("../PRIMVS/cv_results/embedding_umap_2d_categories.png", dpi=300)
-    
-    # -------------------------
-    # Plot 5b: 3D UMAP of Embeddings
-    # -------------------------
-    fig = plt.figure(figsize=(10,8))
-    ax = fig.add_subplot(111, projection='3d')
-    
-    # All candidates (gray)
-    ax.scatter(all_emb['umap_1'], all_emb['umap_2'], all_emb['umap_3'], 
-               label='All Candidates', alpha=0.3, color='lightgray', s=20)
-    # Best candidates that aren't known CVs (blue)
-    ax.scatter(best_not_known_emb['umap_1'], best_not_known_emb['umap_2'], best_not_known_emb['umap_3'], 
-               label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
-               alpha=0.7, color='blue', s=30)
-    # Known CVs (red stars)
-    if not known_emb.empty:
-        ax.scatter(known_emb['umap_1'], known_emb['umap_2'], known_emb['umap_3'], 
-                   label='Known CVs', color='red', marker='*', s=80)
-    
-    ax.set_xlabel('UMAP 1')
-    ax.set_ylabel('UMAP 2')
-    ax.set_zlabel('UMAP 3')
-    ax.set_title('3D UMAP of Embedding Space')
-    plt.legend()
-    plt.savefig("../PRIMVS/cv_results/embedding_umap_3d_categories.png", dpi=300)
+    if have_umap:
+        # -------------------------
+        # Plot 5a: 2D UMAP of Embeddings
+        # -------------------------
+        print("Generating UMAP plots...")
+        plt.figure(figsize=(10,8))
+        
+        # Use hexbin for all candidates
+        hb = plt.hexbin(all_emb['umap_1'], all_emb['umap_2'], 
+                        gridsize=100, cmap='Greys', bins='log',
+                        label='All Candidates')
+        plt.colorbar(hb, label='log10(count)')
+        
+        # Best candidates that aren't known CVs (blue)
+        plt.scatter(best_not_known_emb['umap_1'], best_not_known_emb['umap_2'], 
+                    label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
+                    alpha=0.7, color='blue', s=30)
+        
+        # Known CVs (red stars)
+        if not known_emb.empty:
+            plt.scatter(known_emb['umap_1'], known_emb['umap_2'], 
+                        label='Known CVs', color='red', marker='*', s=80)
+        
+        plt.xlabel('UMAP 1')
+        plt.ylabel('UMAP 2')
+        plt.title('2D UMAP of Embedding Space')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig("../PRIMVS/cv_results/embedding_umap_2d_categories.png", dpi=300)
+        plt.close()
+        
+        # -------------------------
+        # Plot 5b: 3D UMAP of Embeddings
+        # -------------------------
+        fig = plt.figure(figsize=(10,8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # All candidates (sampled, gray)
+        ax.scatter(sampled_df['umap_1'], sampled_df['umap_2'], sampled_df['umap_3'], 
+                   label='All Candidates (sampled)', alpha=0.3, color='lightgray', s=15)
+        
+        # Best candidates that aren't known CVs (blue)
+        ax.scatter(best_not_known_emb['umap_1'], best_not_known_emb['umap_2'], best_not_known_emb['umap_3'], 
+                   label=f'Best Candidates (prob ≥ {optimal_threshold:.2f})', 
+                   alpha=0.7, color='blue', s=30)
+        
+        # Known CVs (red stars)
+        if not known_emb.empty:
+            ax.scatter(known_emb['umap_1'], known_emb['umap_2'], known_emb['umap_3'], 
+                       label='Known CVs', color='red', marker='*', s=80)
+        
+        ax.set_xlabel('UMAP 1')
+        ax.set_ylabel('UMAP 2')
+        ax.set_zlabel('UMAP 3')
+        ax.set_title('3D UMAP of Embedding Space')
+        plt.legend()
+        plt.savefig("../PRIMVS/cv_results/embedding_umap_3d_categories.png", dpi=300)
+        plt.close()
 else:
     print("Insufficient embedding features found for dimensionality reduction")
 
-print("Visualization complete. All plots saved to ../PRIMVS/cv_results/")
+print(f"Visualization complete at {time.strftime('%H:%M:%S')}. All plots saved to ../PRIMVS/cv_results/")
