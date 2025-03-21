@@ -595,209 +595,6 @@ class PrimvsCVFinder:
 
 
 
-
-
-
-
-    def analyze_galactic_regions(self):
-        """
-        Analyze CV period distribution across different Galactic regions (bulge and disk)
-        with statistical comparison between each region and the overall distribution.
-        """
-        import numpy as np
-        import matplotlib.pyplot as plt
-        from scipy import stats
-        import os
-        
-        if 'l' not in self.cv_candidates.columns or 'b' not in self.cv_candidates.columns:
-            print("Galactic coordinates not found in data. Analysis skipped.")
-            return
-        
-        if 'true_period' not in self.cv_candidates.columns:
-            print("Period information not found in data. Analysis skipped.")
-            return
-        
-        print("Analyzing CV distribution across Galactic regions...")
-        
-        # Define regions based on Galactic position
-        self.cv_candidates['region'] = 'Other'
-        
-        # 1. Central Bulge
-        central_mask = (self.cv_candidates['l'] > -5) & (self.cv_candidates['l'] < 5) & \
-                       (self.cv_candidates['b'] > -5) & (self.cv_candidates['b'] < 5)
-        self.cv_candidates.loc[central_mask, 'region'] = 'Central Bulge'
-        
-        # 2. Inner Bulge
-        inner_mask = (self.cv_candidates['l'] > -10) & (self.cv_candidates['l'] < 10) & \
-                     (self.cv_candidates['b'] > -10) & (self.cv_candidates['b'] < 10) & \
-                     ~central_mask
-        self.cv_candidates.loc[inner_mask, 'region'] = 'Inner Bulge'
-        
-        # 3. Outer Bulge
-        outer_mask = (self.cv_candidates['l'] > -20) & (self.cv_candidates['l'] < 20) & \
-                     (self.cv_candidates['b'] > -15) & (self.cv_candidates['b'] < 15) & \
-                     ~central_mask & ~inner_mask
-        self.cv_candidates.loc[outer_mask, 'region'] = 'Outer Bulge'
-        
-        # 4. Inner Disk
-        inner_disk_mask = ((np.abs(self.cv_candidates['l']) >= 20) & (np.abs(self.cv_candidates['l']) < 60)) & \
-                          (np.abs(self.cv_candidates['b']) < 5)
-        self.cv_candidates.loc[inner_disk_mask, 'region'] = 'Inner Disk'
-        
-        # 5. Outer Disk
-        outer_disk_mask = (np.abs(self.cv_candidates['l']) >= 60) & \
-                          (np.abs(self.cv_candidates['b']) < 5)
-        self.cv_candidates.loc[outer_disk_mask, 'region'] = 'Outer Disk'
-        
-        # 6. High Latitude
-        high_lat_mask = (np.abs(self.cv_candidates['b']) >= 5)
-        self.cv_candidates.loc[high_lat_mask, 'region'] = 'High Latitude'
-        
-        # Prepare figure for period distribution analysis
-        fig, axs = plt.subplots(3, 2, figsize=(15, 18))
-        axs = axs.flatten()
-        
-        # Calculate overall period distribution (in hours) for reference
-        all_periods = self.cv_candidates['true_period'] * 24.0  # Convert to hours
-        log_all_periods = np.log10(all_periods)
-        valid_log_periods = log_all_periods[~np.isnan(log_all_periods) & ~np.isinf(log_all_periods)]
-        
-        # Define regions to analyze
-        regions = ['Central Bulge', 'Inner Bulge', 'Outer Bulge', 
-                   'Inner Disk', 'Outer Disk', 'High Latitude']
-        
-        # Color map for visual distinction
-        colors = ['#E63946', '#F1C453', '#A8DADC', '#457B9D', '#1D3557', '#6A994E']
-        
-        region_stats = {}
-        
-        # Analyze each region
-        for i, region in enumerate(regions):
-            region_mask = self.cv_candidates['region'] == region
-            count = region_mask.sum()
-            
-            if count < 5:
-                axs[i].text(0.5, 0.5, f"Insufficient data for {region}\n(n={count})", 
-                           ha='center', va='center', transform=axs[i].transAxes, fontsize=14)
-                axs[i].set_title(f"{region}", fontsize=16)
-                continue
-            
-            # Extract period data for this region
-            period_hours = self.cv_candidates.loc[region_mask, 'true_period'] * 24.0
-            log_period = np.log10(period_hours)
-            valid_log_period = log_period[~np.isnan(log_period) & ~np.isinf(log_period)]
-            
-            # Perform Kolmogorov-Smirnov test against the overall distribution
-            ks_stat, p_value = stats.ks_2samp(valid_log_period, valid_log_periods)
-            region_stats[region] = {
-                'count': count,
-                'ks_statistic': ks_stat,
-                'p_value': p_value,
-                'median_period': np.median(period_hours)
-            }
-            
-            # Create histogram for this region
-            n, bins, _ = axs[i].hist(valid_log_period, bins=25, alpha=0.7, color=colors[i],
-                                    label=f'{region} (n={count})')
-            
-            # Plot the overall distribution as a step function for comparison
-            if len(valid_log_periods) > 0:
-                hist_all, bins_all = np.histogram(valid_log_periods, bins=bins, density=True)
-                hist_region, _ = np.histogram(valid_log_period, bins=bins, density=True)
-                scale_factor = n.max() / hist_all.max() if hist_all.max() > 0 else 1
-                axs[i].step(bins_all[:-1], hist_all * scale_factor, where='post', 
-                           color='black', linestyle='--', linewidth=2, 
-                           label='Overall Distribution (scaled)')
-            
-            # Highlight the period gap
-            axs[i].axvspan(np.log10(2), np.log10(3), alpha=0.2, color='red', label='Period Gap (2-3h)')
-            
-            # Add statistical information
-            stat_text = f"KS test: p={p_value:.4f}\n"
-            stat_text += f"Median period: {np.median(period_hours):.2f}h"
-            axs[i].text(0.02, 0.95, stat_text, transform=axs[i].transAxes, 
-                       va='top', fontsize=11, bbox=dict(facecolor='white', alpha=0.8))
-            
-            # Setup axis labels and title
-            axs[i].set_xlabel('log₁₀(Period) [hours]', fontsize=12)
-            axs[i].set_ylabel('Count', fontsize=12)
-            axs[i].set_title(f"{region}", fontsize=16)
-            axs[i].legend(loc='upper right', fontsize=10)
-            axs[i].grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'galactic_regions_period_analysis.png'), dpi=300)
-        plt.close()
-        
-        # Create a spatial plot showing the distribution of CVs by region
-        plt.figure(figsize=(14, 10))
-        
-        # Define the colormap for consistency with the histogram plots
-        region_colors = {region: color for region, color in zip(regions, colors)}
-        
-        # Plot each region with its respective color
-        for region, color in region_colors.items():
-            mask = self.cv_candidates['region'] == region
-            if mask.sum() > 0:
-                plt.scatter(self.cv_candidates.loc[mask, 'l'], 
-                           self.cv_candidates.loc[mask, 'b'],
-                           c=color, label=f"{region} (n={mask.sum()})", 
-                           alpha=0.7, s=15, edgecolors='none')
-        
-        # Add visual guides for the region boundaries
-        plt.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
-        plt.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
-        
-        # Central Bulge
-        plt.plot([-5, 5, 5, -5, -5], [-5, -5, 5, 5, -5], 'k-', alpha=0.3)
-        
-        # Inner Bulge
-        plt.plot([-10, 10, 10, -10, -10], [-10, -10, 10, 10, -10], 'k-', alpha=0.3)
-        
-        # Outer Bulge
-        plt.plot([-20, 20, 20, -20, -20], [-15, -15, 15, 15, -15], 'k-', alpha=0.3)
-        
-        # Inner & Outer Disk + High Latitude boundaries (simplified visualization)
-        plt.axhline(y=5, color='k', linestyle='-', alpha=0.3)
-        plt.axhline(y=-5, color='k', linestyle='-', alpha=0.3)
-        plt.axvline(x=20, color='k', linestyle='-', alpha=0.3)
-        plt.axvline(x=-20, color='k', linestyle='-', alpha=0.3)
-        plt.axvline(x=60, color='k', linestyle='-', alpha=0.3)
-        plt.axvline(x=-60, color='k', linestyle='-', alpha=0.3)
-        
-        plt.xlabel('Galactic Longitude (l) [deg]', fontsize=14)
-        plt.ylabel('Galactic Latitude (b) [deg]', fontsize=14)
-        plt.title('Spatial Distribution of CV Candidates by Galactic Region', fontsize=16)
-        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.axis('equal')
-        
-        # Create a summary table of regional statistics
-        stats_table = plt.figtext(0.5, -0.05, "", ha='center', va='center', fontsize=12)
-        
-        table_text = "Regional Period Statistics:\n\n"
-        table_text += f"{'Region':<15} {'Count':<8} {'KS p-value':<12} {'Median Period (h)':<18}\n"
-        table_text += "-" * 60 + "\n"
-        
-        for region in regions:
-            if region in region_stats:
-                stats = region_stats[region]
-                table_text += f"{region:<15} {stats['count']:<8} {stats['p_value']:.4f}{' ':8} {stats['median_period']:.2f}{' ':14}\n"
-        
-        stats_table.set_text(table_text)
-        
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.2)  # Make room for the table
-        plt.savefig(os.path.join(self.output_dir, 'galactic_regions_spatial.png'), dpi=300)
-        plt.close()
-        
-        print(f"Galactic region analysis complete. Results saved to {self.output_dir}.")
-        
-        # Return statistics for potential further analysis
-        return region_stats
-
-
-
     def analyze_galactic_regions(self):
         """
         Analyze CV period distribution across different Galactic regions (bulge and disk)
@@ -877,171 +674,234 @@ class PrimvsCVFinder:
             log_period = np.log10(period_hours)
             valid_log_period = log_period[~np.isnan(log_period) & ~np.isinf(log_period)]
             
-            # Perform Kolmogorov-Smirnov test against the overall distribution
-            ks_stat, p_value = stats.ks_2samp(valid_log_period, valid_log_periods)
+            # Handle the case where there are no valid periods
+            if len(valid_log_period) == 0 or len(valid_log_periods) == 0:
+                # Skip KS test and use placeholder values
+                ks_stat, p_value = np.nan, np.nan
+                median_period = np.nan
+                # Display message about insufficient data
+                axs[i].text(0.5, 0.5, f"Insufficient data for {region}\n(n={count})", 
+                           ha='center', va='center', transform=axs[i].transAxes, fontsize=14)
+                axs[i].set_title(f"{region}", fontsize=16)
+                continue
+            else:
+                # Perform Kolmogorov-Smirnov test against the overall distribution
+                try:
+                    ks_stat, p_value = stats.ks_2samp(valid_log_period, valid_log_periods)
+                    median_period = np.median(period_hours)
+                except Exception as e:
+                    print(f"Error performing KS test for {region}: {str(e)}")
+                    print(f"  valid_log_period: {len(valid_log_period)} values")
+                    print(f"  valid_log_periods: {len(valid_log_periods)} values")
+                    ks_stat, p_value = np.nan, np.nan
+                    median_period = np.median(period_hours) if len(period_hours) > 0 else np.nan
+            
             region_stats[region] = {
                 'count': count,
                 'ks_statistic': ks_stat,
                 'p_value': p_value,
-                'median_period': np.median(period_hours)
+                'median_period': median_period
             }
             
             # Create normalized histogram for this region
-            hist_region, _ = np.histogram(valid_log_period, bins=common_bins, density=True)
-            hist_region_scaled = hist_region * count  # Scale back to counts for readability
-            
-            # Plot normalized histogram
-            width = common_bins[1] - common_bins[0]
-            axs[i].bar(common_bins[:-1], hist_region_scaled, width=width, alpha=0.7, color=colors[i],
-                      label=f'{region} (n={count})')
-            
-            # Plot the overall distribution as a step function for comparison
-            hist_all, _ = np.histogram(valid_log_periods, bins=common_bins, density=True)
-            total_count = len(valid_log_periods)
-            scale_factor = count / total_count  # Scale to make visual comparison easier
-            axs[i].step(common_bins[:-1], hist_all * total_count * scale_factor, where='post', 
-                       color='black', linestyle='--', linewidth=2, 
-                       label='Overall Distribution (scaled)')
-            
-            # Highlight the period gap
-            axs[i].axvspan(np.log10(2), np.log10(3), alpha=0.2, color='red', label='Period Gap (2-3h)')
-            
-            # Add statistical information - format p-value to avoid showing "0.0000"
-            if p_value < 0.0001:
-                p_value_str = "p<0.0001"
-            else:
-                p_value_str = f"p={p_value:.4f}"
+            try:
+                hist_region, _ = np.histogram(valid_log_period, bins=common_bins, density=True)
+                hist_region_scaled = hist_region * count  # Scale back to counts for readability
                 
-            stat_text = f"KS test: {p_value_str}\n"
-            stat_text += f"Median period: {np.median(period_hours):.2f}h"
-            axs[i].text(0.02, 0.95, stat_text, transform=axs[i].transAxes, 
-                       va='top', fontsize=11, bbox=dict(facecolor='white', alpha=0.8))
-            
-            # Setup axis labels and title
-            axs[i].set_xlabel('log₁₀(Period) [hours]', fontsize=12)
-            axs[i].set_ylabel('Normalized Count', fontsize=12)
-            axs[i].set_title(f"{region}", fontsize=16)
-            axs[i].legend(loc='upper right', fontsize=10)
-            axs[i].grid(True, alpha=0.3)
-            
-            # Set consistent x-axis range
-            axs[i].set_xlim(min_log_period, max_log_period)
+                # Plot normalized histogram
+                width = common_bins[1] - common_bins[0]
+                axs[i].bar(common_bins[:-1], hist_region_scaled, width=width, alpha=0.7, color=colors[i],
+                          label=f'{region} (n={count})')
+                
+                # Plot the overall distribution as a step function for comparison
+                hist_all, _ = np.histogram(valid_log_periods, bins=common_bins, density=True)
+                total_count = len(valid_log_periods)
+                scale_factor = count / total_count if total_count > 0 else 1  # Scale to make visual comparison easier
+                axs[i].step(common_bins[:-1], hist_all * total_count * scale_factor, where='post', 
+                           color='black', linestyle='--', linewidth=2, 
+                           label='Overall Distribution (scaled)')
+                
+                # Highlight the period gap
+                axs[i].axvspan(np.log10(2), np.log10(3), alpha=0.2, color='red', label='Period Gap (2-3h)')
+                
+                # Add statistical information - format p-value to avoid showing "0.0000"
+                if np.isnan(p_value):
+                    p_value_str = "p=N/A"
+                elif p_value < 0.0001:
+                    p_value_str = "p<0.0001"
+                else:
+                    p_value_str = f"p={p_value:.4f}"
+                    
+                if np.isnan(median_period):
+                    median_str = "N/A"
+                else:
+                    median_str = f"{median_period:.2f}h"
+                    
+                stat_text = f"KS test: {p_value_str}\n"
+                stat_text += f"Median period: {median_str}"
+                axs[i].text(0.02, 0.95, stat_text, transform=axs[i].transAxes, 
+                           va='top', fontsize=11, bbox=dict(facecolor='white', alpha=0.8))
+                
+                # Setup axis labels and title
+                axs[i].set_xlabel('log₁₀(Period) [hours]', fontsize=12)
+                axs[i].set_ylabel('Normalized Count', fontsize=12)
+                axs[i].set_title(f"{region}", fontsize=16)
+                axs[i].legend(loc='upper right', fontsize=10)
+                axs[i].grid(True, alpha=0.3)
+                
+                # Set consistent x-axis range
+                axs[i].set_xlim(min_log_period, max_log_period)
+                
+            except Exception as e:
+                print(f"Error creating histogram for {region}: {str(e)}")
+                axs[i].text(0.5, 0.5, f"Error creating plot for {region}\n{str(e)}", 
+                           ha='center', va='center', transform=axs[i].transAxes, fontsize=12)
+                axs[i].set_title(f"{region}", fontsize=16)
         
         plt.tight_layout()
         plt.savefig(os.path.join(self.output_dir, 'galactic_regions_period_analysis.png'), dpi=300)
         plt.close()
         
         # Create an improved spatial plot showing the distribution of CVs by region
-        plt.figure(figsize=(12, 8))
+        try:
+            plt.figure(figsize=(12, 8))
+            
+            # Define the colormap for consistency with the histogram plots
+            region_colors = {region: color for region, color in zip(regions, colors)}
+            
+            # Create density-based scatter (to handle the large number of points)
+            # Get all longitudes and adjust them to be in -180 to +180 range for better visualization
+            longitudes = self.cv_candidates['l'].values
+            longitudes = np.where(longitudes > 180, longitudes - 360, longitudes)
+            latitudes = self.cv_candidates['b'].values
+            
+            # Create hexbin plots for each region
+            for region, color in region_colors.items():
+                mask = self.cv_candidates['region'] == region
+                if mask.sum() > 0:
+                    try:
+                        region_longs = self.cv_candidates.loc[mask, 'l'].values
+                        region_longs = np.where(region_longs > 180, region_longs - 360, region_longs)
+                        
+                        # Use appropriate colormap for each region
+                        region_cmap = plt.cm.Reds if region == 'Central Bulge' else \
+                                     plt.cm.YlOrBr if region == 'Inner Bulge' else \
+                                     plt.cm.GnBu if region == 'Outer Bulge' else \
+                                     plt.cm.Blues if region == 'Inner Disk' else \
+                                     plt.cm.Purples if region == 'Outer Disk' else \
+                                     plt.cm.Greens
+                        
+                        hb = plt.hexbin(region_longs, 
+                                       self.cv_candidates.loc[mask, 'b'].values,
+                                       gridsize=50, cmap=region_cmap,
+                                       alpha=0.8, mincnt=1)
+                    except Exception as e:
+                        print(f"Error plotting {region}: {str(e)}")
+            
+            # Add region boundary lines (more subtle)
+            plt.axhline(y=0, color='gray', linestyle='--', alpha=0.3)
+            plt.axvline(x=0, color='gray', linestyle='--', alpha=0.3)
+            
+            # Add labels for regions with counts
+            for region in regions:
+                mask = self.cv_candidates['region'] == region
+                count = mask.sum()
+                if region == 'Central Bulge':
+                    plt.annotate(f'Central Bulge\n(n={count})', xy=(0, 0), xytext=(0, 0), 
+                                ha='center', va='center', fontsize=10, weight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+                elif region == 'Inner Bulge':
+                    plt.annotate(f'Inner Bulge\n(n={count})', xy=(-7, 7), xytext=(-7, 7), 
+                                ha='center', va='center', fontsize=10, weight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+                elif region == 'Outer Bulge':
+                    plt.annotate(f'Outer Bulge\n(n={count})', xy=(-15, 12), xytext=(-15, 12), 
+                                ha='center', va='center', fontsize=10, weight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+                elif region == 'Inner Disk':
+                    plt.annotate(f'Inner Disk\n(n={count})', xy=(-40, 0), xytext=(-40, 0), 
+                                ha='center', va='center', fontsize=10, weight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+                elif region == 'Outer Disk':
+                    plt.annotate(f'Outer Disk\n(n={count})', xy=(-120, 0), xytext=(-120, 0), 
+                                ha='center', va='center', fontsize=10, weight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+                elif region == 'High Latitude':
+                    plt.annotate(f'High Latitude\n(n={count})', xy=(-60, 10), xytext=(-60, 10), 
+                                ha='center', va='center', fontsize=10, weight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
+            
+            # Set axis limits to focus on the relevant area
+            plt.xlim(-180, 180)
+            plt.ylim(-15, 15)
+            
+            plt.xlabel('Galactic Longitude (l) [deg]', fontsize=14)
+            plt.ylabel('Galactic Latitude (b) [deg]', fontsize=14)
+            plt.title('Spatial Distribution of CV Candidates by Galactic Region', fontsize=16)
+            plt.grid(True, alpha=0.3)
+            
+            # Create a summary table of regional statistics
+            table_data = []
+            for region in regions:
+                if region in region_stats:
+                    stats = region_stats[region]
+                    p_value = stats['p_value']
+                    
+                    # Format p-value
+                    if np.isnan(p_value):
+                        p_value_str = "N/A"
+                    elif p_value < 0.0001:
+                        p_value_str = "p<0.0001"
+                    else:
+                        p_value_str = f"p={p_value:.4f}"
+                    
+                    # Format median period
+                    median_period = stats['median_period']
+                    if np.isnan(median_period):
+                        median_str = "N/A"
+                    else:
+                        median_str = f"{median_period:.2f}h"
+                    
+                    table_data.append([
+                        region, 
+                        f"{stats['count']}",
+                        p_value_str,
+                        median_str
+                    ])
+            
+            # Add table below the plot
+            column_labels = ['Region', 'Count', 'KS Test', 'Median Period']
+            table = plt.table(
+                cellText=table_data,
+                colLabels=column_labels,
+                loc='bottom',
+                bbox=[0.0, -0.35, 1.0, 0.25]
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1, 1.5)
+            
+            # Adjust figure layout to make room for the table
+            plt.tight_layout()
+            plt.subplots_adjust(bottom=0.3)
+            
+            plt.savefig(os.path.join(self.output_dir, 'galactic_regions_spatial.png'), dpi=300, bbox_inches='tight')
+            plt.close()
         
-        # Define the colormap for consistency with the histogram plots
-        region_colors = {region: color for region, color in zip(regions, colors)}
-        
-        # Create density-based scatter (to handle the large number of points)
-        # Get all longitudes and adjust them to be in -180 to +180 range for better visualization
-        longitudes = self.cv_candidates['l'].values
-        longitudes = np.where(longitudes > 180, longitudes - 360, longitudes)
-        latitudes = self.cv_candidates['b'].values
-        
-        # Create hexbin plots for each region
-        for region, color in region_colors.items():
-            mask = self.cv_candidates['region'] == region
-            if mask.sum() > 0:
-                region_longs = np.where(self.cv_candidates.loc[mask, 'l'] > 180, 
-                                       self.cv_candidates.loc[mask, 'l'] - 360,
-                                       self.cv_candidates.loc[mask, 'l'])
-                
-                hb = plt.hexbin(region_longs, 
-                               self.cv_candidates.loc[mask, 'b'],
-                               gridsize=50, cmap=plt.cm.Reds if region == 'Central Bulge' else 
-                                                plt.cm.YlOrBr if region == 'Inner Bulge' else
-                                                plt.cm.GnBu if region == 'Outer Bulge' else
-                                                plt.cm.Blues if region == 'Inner Disk' else
-                                                plt.cm.Purples if region == 'Outer Disk' else
-                                                plt.cm.Greens,
-                               alpha=0.8, bins='log', label=f"{region} (n={mask.sum()})")
-        
-        # Add region boundary lines (more subtle)
-        plt.axhline(y=0, color='gray', linestyle='--', alpha=0.3)
-        plt.axvline(x=0, color='gray', linestyle='--', alpha=0.3)
-        
-        # Add labels for regions
-        plt.annotate('Central\nBulge', xy=(0, 0), xytext=(0, 0), 
-                    ha='center', va='center', fontsize=10, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
-        
-        plt.annotate('Inner Bulge', xy=(-7, 7), xytext=(-7, 7), 
-                    ha='center', va='center', fontsize=10, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
-        
-        plt.annotate('Outer Bulge', xy=(-15, 12), xytext=(-15, 12), 
-                    ha='center', va='center', fontsize=10, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
-        
-        plt.annotate('Inner Disk', xy=(-40, 0), xytext=(-40, 0), 
-                    ha='center', va='center', fontsize=10, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
-        
-        plt.annotate('Outer Disk', xy=(-120, 0), xytext=(-120, 0), 
-                    ha='center', va='center', fontsize=10, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
-        
-        plt.annotate('High Latitude', xy=(-60, 10), xytext=(-60, 10), 
-                    ha='center', va='center', fontsize=10, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="gray", alpha=0.7))
-        
-        # Set axis limits to focus on the relevant area
-        plt.xlim(-180, 180)
-        plt.ylim(-15, 15)
-        
-        plt.xlabel('Galactic Longitude (l) [deg]', fontsize=14)
-        plt.ylabel('Galactic Latitude (b) [deg]', fontsize=14)
-        plt.title('Spatial Distribution of CV Candidates by Galactic Region', fontsize=16)
-        plt.grid(True, alpha=0.3)
-        
-        # Create a summary table of regional statistics
-        table_data = []
-        for region in regions:
-            if region in region_stats:
-                stats = region_stats[region]
-                p_value = stats['p_value']
-                if p_value < 0.0001:
-                    p_value_str = "p<0.0001"
-                else:
-                    p_value_str = f"p={p_value:.4f}"
-                
-                table_data.append([
-                    region, 
-                    f"{stats['count']}",
-                    p_value_str,
-                    f"{stats['median_period']:.2f}h"
-                ])
-        
-        # Add table below the plot
-        column_labels = ['Region', 'Count', 'KS Test', 'Median Period']
-        table = plt.table(
-            cellText=table_data,
-            colLabels=column_labels,
-            loc='bottom',
-            bbox=[0.0, -0.35, 1.0, 0.25]  # Adjust these values to position the table
-        )
-        table.auto_set_font_size(False)
-        table.set_fontsize(10)
-        table.scale(1, 1.5)  # Make the table taller for better readability
-        
-        # Adjust figure layout to make room for the table
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.3)
-        
-        plt.savefig(os.path.join(self.output_dir, 'galactic_regions_spatial.png'), dpi=300, bbox_inches='tight')
-        plt.close()
+        except Exception as e:
+            print(f"Error creating spatial plot: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
         print(f"Galactic region analysis complete. Results saved to {self.output_dir}.")
         
         # Return statistics for potential further analysis
         return region_stats
-
-
+        
+        print(f"Galactic region analysis complete. Results saved to {self.output_dir}.")
+        
+        # Return statistics for potential further analysis
+        return region_stats
 
 
 
@@ -1592,12 +1452,12 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         print("Tuning traditional feature model...")
         param_grid_trad = {
-            'n_estimators': [10],#, 100, 500],
-            'max_depth': [5],#, 10, 100, 200],
-            'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
-            'min_child_weight': [1],#, 3, 5],  # Helps with imbalanced data
-            'gamma': [0],#, 0.1, 0.2],  # Minimum loss reduction
-            'subsample': [0.8],#, 0.9, 1.0],  # Prevents overfitting
+            'n_estimators': [10, 100, 500],
+            'max_depth': [5, 10, 100, 200],
+            'learning_rate': [0.1, 0.05, 0.01, 0.001],
+            'min_child_weight': [1, 3, 5],  # Helps with imbalanced data
+            'gamma': [0, 0.1, 0.2],  # Minimum loss reduction
+            'subsample': [0.8, 0.9, 1.0],  # Prevents overfitting
         }
 
 
@@ -1657,9 +1517,9 @@ class PrimvsCVFinder:
 
             print("Tuning embedding feature model...")
             param_grid_emb = {
-                'n_estimators': [10],#, 200, 500],
-                'max_depth': [3],#, 10, 100, 200],
-                'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
+                'n_estimators': [10, 200, 500],
+                'max_depth': [3, 10, 100, 200],
+                'learning_rate': [0.1, 0.05, 0.01, 0.001],
             }
             xgb_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
