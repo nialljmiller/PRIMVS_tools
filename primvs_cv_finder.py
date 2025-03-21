@@ -126,21 +126,15 @@ class PrimvsCVFinder:
         self.primvs_data = None
         self.cv_candidates = None
         self.model = None
+
     
-
-
     def post_processing_plots(self, max_top_candidates=20):
         """
-        A condensed post-processing routine that:
-          1) Computes PCA on embeddings (if present) and stores pca_1, pca_2, pca_3.
-          2) Creates a 3D PCA scatter colored by classification confidence.
-          3) Creates a 2D PCA scatter colored by classification confidence.
-          4) Highlights known CVs in the same PCA plane (if 'is_known_cv' is present).
-          5) If two-stage classification (cv_prob_trad, cv_prob_emb), makes a hexbin comparison.
-          6) Generates a Bailey diagram (Period vs. Amplitude) if data are present.
-          7) Creates a galactic spatial plot (l, b) with TESS overlay if data are present.
-          8) Writes a short summary text (similar to 'generate_summary').
-
+        Enhanced post-processing routine that consistently displays three categories in plots:
+        1. All candidates
+        2. Known CVs (if available)
+        3. Best CVs (based on optimal confidence threshold)
+        
         Parameters
         ----------
         max_top_candidates : int
@@ -151,15 +145,53 @@ class PrimvsCVFinder:
         import matplotlib.pyplot as plt
         from astropy.table import Table
         import pandas as pd
+        from sklearn.metrics import roc_curve, auc
 
         if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
             print("No CV candidates available for post-processing plots.")
             return
 
         df = self.cv_candidates
-
+        
         # ---------------------------
-        # 1) Prepare or reuse PCA columns from embeddings
+        # 1) Determine optimal threshold for "best" candidates
+        # ---------------------------
+        has_known_cvs = ('is_known_cv' in df.columns) and df['is_known_cv'].any()
+        
+        # Determine confidence column
+        if 'confidence' in df.columns:
+            conf_col = 'confidence'
+        elif 'cv_prob' in df.columns:
+            conf_col = 'cv_prob'
+        else:
+            df['temp_conf'] = 0.5
+            conf_col = 'temp_conf'
+        
+        # Find optimal threshold if we have known CVs
+        if has_known_cvs and conf_col in df.columns:
+            print("Determining optimal threshold from ROC curve...")
+            fpr, tpr, thresholds = roc_curve(df['is_known_cv'], df[conf_col])
+            roc_auc = auc(fpr, tpr)
+            
+            # Find optimal threshold (maximize tpr - fpr)
+            optimal_idx = np.argmax(tpr - fpr)
+            optimal_threshold = thresholds[optimal_idx]
+            print(f"Optimal threshold from ROC curve: {optimal_threshold:.3f}")
+        else:
+            # Default to 0.8 if we don't have known CVs for comparison
+            optimal_threshold = 0.8
+            print(f"Using default threshold: {optimal_threshold:.3f}")
+        
+        # Flag best candidates
+        df['is_best_candidate'] = df[conf_col] >= optimal_threshold
+        best_count = df['is_best_candidate'].sum()
+        print(f"Identified {best_count} best candidates (confidence >= {optimal_threshold:.3f})")
+        
+        # Create output directory if needed
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # ---------------------------
+        # 2) Prepare or reuse PCA columns from embeddings
         # ---------------------------
         cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in cc_embedding_cols if col in df.columns]
@@ -181,130 +213,152 @@ class PrimvsCVFinder:
         else:
             print("No or insufficient embedding features found. Skipping PCA-based plots.")
         
-        # For convenience in referencing columns
-        # If user has some column named 'confidence', use it; else fallback to 'cv_prob' or 0.5
-        if 'confidence' in df.columns:
-            conf_col = 'confidence'
-        elif 'cv_prob' in df.columns:
-            conf_col = 'cv_prob'
-        else:
-            df['temp_conf'] = 0.5
-            conf_col = 'temp_conf'
-
         # Check for two-stage classification
         has_two_stage = ('cv_prob_trad' in df.columns) and ('cv_prob_emb' in df.columns)
 
-        # Check for known CV flags
-        has_known_cvs = ('is_known_cv' in df.columns) and df['is_known_cv'].any()
-
-        # Create output directory if needed
-        os.makedirs(self.output_dir, exist_ok=True)
-
         # ---------------------------
-        # 2) 3D PCA scatter colored by confidence
+        # 3) 3D PCA scatter with three categories
         # ---------------------------
         if 'pca_1' in df.columns and 'pca_2' in df.columns and 'pca_3' in df.columns:
             from mpl_toolkits.mplot3d import Axes3D  # noqa
             fig = plt.figure(figsize=(10, 8))
             ax = fig.add_subplot(111, projection='3d')
-            sc = ax.scatter(
-                df['pca_1'],
-                df['pca_2'],
-                df['pca_3'],
-                c=df[conf_col],
-                cmap='viridis',
-                alpha=0.7,
-                s=15
+            
+            # 1. Plot all candidates
+            all_candidates = df
+            sc_all = ax.scatter(
+                all_candidates['pca_1'],
+                all_candidates['pca_2'],
+                all_candidates['pca_3'],
+                c='lightgray',
+                alpha=0.3,
+                s=10,
+                label='All Candidates'
             )
-            cbar = plt.colorbar(sc, ax=ax, pad=0.1)
-            cbar.set_label(f'{conf_col}')
+            
+            # 2. Plot best candidates that aren't known CVs
+            best_candidates = df[(df['is_best_candidate']) & (~df['is_known_cv'] if has_known_cvs else True)]
+            if len(best_candidates) > 0:
+                sc_best = ax.scatter(
+                    best_candidates['pca_1'],
+                    best_candidates['pca_2'],
+                    best_candidates['pca_3'],
+                    c='blue',
+                    alpha=0.7,
+                    s=20,
+                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
+                )
+            
+            # 3. Plot known CVs if available
+            if has_known_cvs:
+                known_cvs = df[df['is_known_cv']]
+                sc_known = ax.scatter(
+                    known_cvs['pca_1'],
+                    known_cvs['pca_2'],
+                    known_cvs['pca_3'],
+                    c='red',
+                    alpha=1.0,
+                    s=40,
+                    marker='*',
+                    label='Known CVs'
+                )
+            
             ax.set_xlabel('PCA 1')
             ax.set_ylabel('PCA 2')
             ax.set_zlabel('PCA 3')
-            ax.set_title('3D PCA of Embeddings (colored by confidence)')
-            plt.savefig(os.path.join(self.output_dir, 'embeddings_3d.png'), dpi=300)
+            ax.set_title('3D PCA of Embeddings')
+            plt.legend()
+            plt.savefig(os.path.join(self.output_dir, 'embeddings_3d_categories.png'), dpi=300)
             plt.close()
 
             # ---------------------------
-            # 3) 2D PCA scatter colored by confidence
+            # 4) 2D PCA scatter with three categories
             # ---------------------------
             plt.figure(figsize=(10, 8))
-            sc = plt.scatter(
-                df['pca_1'],
-                df['pca_2'],
-                c=df[conf_col],
-                cmap='viridis',
-                alpha=0.7,
-                s=15
+            
+            # 1. Plot all candidates
+            plt.scatter(
+                all_candidates['pca_1'],
+                all_candidates['pca_2'],
+                c='lightgray',
+                alpha=0.3,
+                s=10,
+                label='All Candidates'
             )
-            plt.colorbar(sc, label=f'{conf_col}')
-            plt.xlabel('PCA 1')
-            plt.ylabel('PCA 2')
-            plt.title('2D PCA of Embeddings (colored by confidence)')
-            plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.output_dir, 'embeddings_2d.png'), dpi=300)
-            plt.close()
-
-            # ---------------------------
-            # 4) Highlight known CVs in 2D PCA (if present)
-            # ---------------------------
-            if has_known_cvs:
-                known = df[df['is_known_cv']]
-                unknown = df[~df['is_known_cv']]
-
-                plt.figure(figsize=(10, 8))
-                # Plot unknown as background
+            
+            # 2. Plot best candidates that aren't known CVs
+            if len(best_candidates) > 0:
                 plt.scatter(
-                    unknown['pca_1'],
-                    unknown['pca_2'],
-                    alpha=0.3,
-                    s=10,
-                    color='gray',
-                    label='Unknown Candidates'
+                    best_candidates['pca_1'],
+                    best_candidates['pca_2'],
+                    c='blue',
+                    alpha=0.7,
+                    s=20,
+                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
                 )
-                # Plot known in color
+            
+            # 3. Plot known CVs if available
+            if has_known_cvs:
                 plt.scatter(
-                    known['pca_1'],
-                    known['pca_2'],
+                    known_cvs['pca_1'],
+                    known_cvs['pca_2'],
+                    c='red',
                     alpha=1.0,
                     s=40,
-                    color='red',
                     marker='*',
-                    edgecolors='black',
-                    linewidths=0.5,
                     label='Known CVs'
                 )
-                plt.xlabel('PCA 1')
-                plt.ylabel('PCA 2')
-                plt.title('Embedding Space: Known CVs vs. Unknown')
-                plt.grid(True, alpha=0.3)
-                plt.legend()
-                plt.savefig(os.path.join(self.output_dir, 'known_vs_unknown_pca2d.png'), dpi=300)
-                plt.close()
+            
+            plt.xlabel('PCA 1')
+            plt.ylabel('PCA 2')
+            plt.title('2D PCA of Embeddings')
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.savefig(os.path.join(self.output_dir, 'embeddings_2d_categories.png'), dpi=300)
+            plt.close()
 
         # ---------------------------
         # 5) Hexbin of cv_prob_trad vs cv_prob_emb (two-stage only)
         # ---------------------------
         if has_two_stage:
             plt.figure(figsize=(8, 6))
+            # Hexbin for density of all candidates
             hb = plt.hexbin(
                 df['cv_prob_trad'], df['cv_prob_emb'],
                 gridsize=30,
-                cmap='viridis',
-                bins='log'
+                cmap='Greys',
+                bins='log',
+                alpha=0.7
             )
             plt.colorbar(hb, label='log10(count)')
-            plt.plot([0,1], [0,1], 'r--', alpha=0.7, label='Perfect Agreement')
+            
+            # Overlay best candidates
+            if len(best_candidates) > 0:
+                plt.scatter(
+                    best_candidates['cv_prob_trad'],
+                    best_candidates['cv_prob_emb'],
+                    c='blue',
+                    alpha=0.7,
+                    s=20,
+                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
+                )
+            
+            # Overlay known CVs
+            if has_known_cvs:
+                plt.scatter(
+                    known_cvs['cv_prob_trad'],
+                    known_cvs['cv_prob_emb'],
+                    c='red',
+                    alpha=1.0,
+                    s=40,
+                    marker='*',
+                    label='Known CVs'
+                )
+            
+            plt.plot([0,1], [0,1], 'k--', alpha=0.7, label='Perfect Agreement')
             plt.axvline(0.5, color='gray', linestyle='--', alpha=0.5)
             plt.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
-            plt.text(0.25, 0.75, "Trad: No\nEmb: Yes", ha='center', va='center',
-                     bbox=dict(facecolor='white', alpha=0.5))
-            plt.text(0.75, 0.75, "Both: Yes", ha='center', va='center',
-                     bbox=dict(facecolor='white', alpha=0.5))
-            plt.text(0.25, 0.25, "Both: No", ha='center', va='center',
-                     bbox=dict(facecolor='white', alpha=0.5))
-            plt.text(0.75, 0.25, "Trad: Yes\nEmb: No", ha='center', va='center',
-                     bbox=dict(facecolor='white', alpha=0.5))
+            
             plt.xlabel('Traditional Probability')
             plt.ylabel('Embedding Probability')
             plt.title('Two-Stage Classification: Probabilities Comparison')
@@ -313,72 +367,105 @@ class PrimvsCVFinder:
             plt.xlim(0, 1)
             plt.ylim(0, 1)
             plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.output_dir, 'prob_trad_vs_emb_hexbin.png'), dpi=300)
+            plt.savefig(os.path.join(self.output_dir, 'prob_trad_vs_emb_categories.png'), dpi=300)
             plt.close()
 
         # ---------------------------
-        # 6) Bailey diagram (Period vs. Amplitude)
+        # 6) Bailey diagram with three categories
         # ---------------------------
         if 'true_period' in df.columns and 'true_amplitude' in df.columns:
             # Convert period to hours & take log
-            period_hours = df['true_period'] * 24.0
-            log_period = np.log10(period_hours)
+            df['period_hours'] = df['true_period'] * 24.0
+            df['log_period'] = np.log10(df['period_hours'])
             
             plt.figure(figsize=(10, 6))
-            if conf_col in df.columns:
-                sc = plt.scatter(
-                    log_period,
-                    df['true_amplitude'],
-                    c=df[conf_col],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=15
-                )
-                plt.colorbar(sc, label=f'{conf_col}')
-            else:
+            
+            # 1. Plot all candidates
+            plt.scatter(
+                all_candidates['log_period'],
+                all_candidates['true_amplitude'],
+                c='lightgray',
+                alpha=0.3,
+                s=10,
+                label='All Candidates'
+            )
+            
+            # 2. Plot best candidates that aren't known CVs
+            if len(best_candidates) > 0:
                 plt.scatter(
-                    log_period,
-                    df['true_amplitude'],
+                    best_candidates['log_period'],
+                    best_candidates['true_amplitude'],
+                    c='blue',
                     alpha=0.7,
-                    s=15,
-                    color='blue'
+                    s=20,
+                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
                 )
+            
+            # 3. Plot known CVs if available
+            if has_known_cvs:
+                plt.scatter(
+                    known_cvs['log_period'],
+                    known_cvs['true_amplitude'],
+                    c='red',
+                    alpha=1.0,
+                    s=40,
+                    marker='*',
+                    label='Known CVs'
+                )
+            
             # Mark the period gap
             plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='gray', label='Period Gap (2-3h)')
+            
             plt.xlabel('log₁₀(Period) [hours]')
             plt.ylabel('Amplitude [mag]')
             plt.title('Bailey Diagram')
             plt.grid(True, alpha=0.3)
             plt.legend()
-            plt.savefig(os.path.join(self.output_dir, 'bailey_diagram.png'), dpi=300)
+            plt.savefig(os.path.join(self.output_dir, 'bailey_diagram_categories.png'), dpi=300)
             plt.close()
 
         # ---------------------------
-        # 7) Galactic spatial plot (l, b) with TESS overlay
+        # 7) Galactic spatial plot with three categories
         # ---------------------------
         if 'l' in df.columns and 'b' in df.columns:
             # Because TESS overlay uses -180..+180, shift your data similarly
-            l_centered = np.where(df['l'] > 180, df['l'] - 360, df['l'])
+            df['l_centered'] = np.where(df['l'] > 180, df['l'] - 360, df['l'])
             
             plt.figure(figsize=(12, 8))
-            if conf_col in df.columns:
-                sc = plt.scatter(
-                    l_centered,
-                    df['b'],
-                    c=df[conf_col],
-                    cmap='viridis',
-                    alpha=0.7,
-                    s=15
-                )
-                plt.colorbar(sc, label=f'{conf_col}')
-            else:
+            
+            # 1. Plot all candidates
+            plt.scatter(
+                all_candidates['l_centered'],
+                all_candidates['b'],
+                c='lightgray',
+                alpha=0.3,
+                s=10,
+                label='All Candidates'
+            )
+            
+            # 2. Plot best candidates that aren't known CVs
+            if len(best_candidates) > 0:
                 plt.scatter(
-                    l_centered,
-                    df['b'],
+                    best_candidates['l_centered'],
+                    best_candidates['b'],
+                    c='blue',
                     alpha=0.7,
-                    s=15,
-                    color='red'
+                    s=20,
+                    label=f'Best Candidates (conf ≥ {optimal_threshold:.2f})'
                 )
+            
+            # 3. Plot known CVs if available
+            if has_known_cvs:
+                plt.scatter(
+                    known_cvs['l_centered'],
+                    known_cvs['b'],
+                    c='red',
+                    alpha=1.0,
+                    s=40,
+                    marker='*',
+                    label='Known CVs'
+                )
+            
             # TESS overlay
             if 'TESSCycle8Overlay' in globals():
                 tess_overlay = TESSCycle8Overlay()
@@ -388,36 +475,54 @@ class PrimvsCVFinder:
             plt.ylabel('Galactic Latitude [deg]')
             plt.title('Galactic Spatial Distribution with TESS Overlay')
             plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(self.output_dir, 'spatial_galactic_tess.png'), dpi=300)
+            plt.legend()
+            plt.savefig(os.path.join(self.output_dir, 'spatial_galactic_categories.png'), dpi=300)
             plt.close()
 
         # ---------------------------
         # 8) Short summary text + top candidates
         # ---------------------------
-        summary_path = os.path.join(self.output_dir, 'cv_summary_condensed.txt')
+        summary_path = os.path.join(self.output_dir, 'cv_summary_categories.txt')
         with open(summary_path, 'w') as f:
-            f.write("Condensed CV Candidate Summary\n")
+            f.write("CV Candidate Summary with Categories\n")
             f.write("====================================\n\n")
-            f.write(f"Total candidates: {len(df)}\n\n")
+            f.write(f"Total candidates: {len(df)}\n")
+            f.write(f"Best candidates (conf ≥ {optimal_threshold:.3f}): {best_count}\n")
+            if has_known_cvs:
+                known_count = df['is_known_cv'].sum()
+                f.write(f"Known CVs: {known_count}\n")
+            f.write("\n")
 
-            # Quick period stats if we have period
+            # Quick period stats for each category
             if 'true_period' in df.columns:
-                period_hours = df['true_period'] * 24.0
-                f.write("Period (hrs) Stats:\n")
+                f.write("Period (hrs) Stats by Category:\n")
+                f.write("---------------------------------\n")
+                
+                # All candidates
+                period_hours = df['period_hours']
+                f.write("All candidates:\n")
                 f.write(f"  Min: {period_hours.min():.2f}\n")
                 f.write(f"  Median: {period_hours.median():.2f}\n")
                 f.write(f"  Max: {period_hours.max():.2f}\n\n")
-
-            # Quick amplitude stats
-            if 'true_amplitude' in df.columns:
-                f.write("Amplitude (mag) Stats:\n")
-                f.write(f"  Min: {df['true_amplitude'].min():.2f}\n")
-                f.write(f"  Median: {df['true_amplitude'].median():.2f}\n")
-                f.write(f"  Max: {df['true_amplitude'].max():.2f}\n\n")
-
-            # If we have a classifier probability
+                
+                # Best candidates
+                if best_count > 0:
+                    best_period = best_candidates['period_hours']
+                    f.write("Best candidates:\n")
+                    f.write(f"  Min: {best_period.min():.2f}\n")
+                    f.write(f"  Median: {best_period.median():.2f}\n")
+                    f.write(f"  Max: {best_period.max():.2f}\n\n")
+                
+                # Known CVs
+                if has_known_cvs and known_count > 0:
+                    known_period = known_cvs['period_hours']
+                    f.write("Known CVs:\n")
+                    f.write(f"  Min: {known_period.min():.2f}\n")
+                    f.write(f"  Median: {known_period.median():.2f}\n")
+                    f.write(f"  Max: {known_period.max():.2f}\n\n")
+            
+            # Top candidates
             sort_col = None
-            # Choose from a few likely columns
             for col in ['cv_prob', 'confidence', 'blended_score']:
                 if col in df.columns:
                     sort_col = col
@@ -425,7 +530,6 @@ class PrimvsCVFinder:
             if sort_col is None and 'best_fap' in df.columns:
                 sort_col = 'best_fap'
             
-            # Get top N
             if sort_col is not None:
                 ascending = (sort_col == 'best_fap')  # For FAP, lower is better
                 top_candidates = df.sort_values(sort_col, ascending=ascending).head(max_top_candidates)
@@ -434,19 +538,21 @@ class PrimvsCVFinder:
                 id_col = 'sourceid' if 'sourceid' in df.columns else 'primvs_id'
                 for i, row in top_candidates.iterrows():
                     pid = str(row.get(id_col, '???'))
-                    if 'true_period' in row and 'true_amplitude' in row:
-                        per_hrs = row['true_period'] * 24.0
+                    if 'period_hours' in row and 'true_amplitude' in row:
+                        per_hrs = row['period_hours']
                         amp = row['true_amplitude']
                     else:
                         per_hrs, amp = -1, -1
                     val = row.get(sort_col, -1)
-                    f.write(f"  {pid:15s}  Per={per_hrs:.2f}h  Amp={amp:.2f}  {sort_col}={val:.3f}\n")
+                    is_known = "*" if row.get('is_known_cv', False) else " "
+                    is_best = "+" if row.get('is_best_candidate', False) else " "
+                    f.write(f"  {is_known}{is_best} {pid:15s}  Per={per_hrs:.2f}h  Amp={amp:.2f}  {sort_col}={val:.3f}\n")
+                
+                f.write("\nLegend: * = Known CV, + = Best Candidate\n")
             else:
                 f.write("No recognized sort column found for top candidates.\n")
         
-        print(f"Condensed post-processing complete. Summary written to: {summary_path}")
-
-
+        print(f"Enhanced post-processing complete. Summary written to: {summary_path}")
 
 
     def save_candidates(self):
@@ -1405,15 +1511,12 @@ class PrimvsCVFinder:
 
 
 
-
-
-
-    def run_pipeline(self):
-        """Run the complete CV finder pipeline with two-stage classification."""
+    def run_pipeline(self, skip_training=False):
+        """Run the complete CV finder pipeline with option to skip training."""
         start_time = time.time()
         
         print("\n" + "="*80)
-        print("RUNNING PRIMVS CV FINDER PIPELINE WITH TWO-STAGE CLASSIFICATION")
+        print("RUNNING PRIMVS CV FINDER PIPELINE")
         print("="*80 + "\n")
         
         # Step 1: Load PRIMVS data
@@ -1425,10 +1528,38 @@ class PrimvsCVFinder:
         # Step 3: Extract features for classification
         self.extract_features()
 
-        self.train_two_stage_classifier()
+        # Step 4: Train or load model
+        if not skip_training:
+            print("Training new classification model...")
+            self.train_two_stage_classifier()
+        else:
+            print("Loading existing classification model...")
+            model_path = os.path.join(self.output_dir, 'cv_classifier_meta.joblib')
+            if os.path.exists(model_path):
+                self.model = joblib.load(model_path)
+                # Load the traditional and embedding models too if needed
+                trad_path = os.path.join(self.output_dir, 'cv_classifier_traditional.joblib')
+                emb_path = os.path.join(self.output_dir, 'cv_classifier_embedding.joblib')
+                pca_path = os.path.join(self.output_dir, 'embedding_pca.joblib')
+                
+                if os.path.exists(trad_path):
+                    self.model_trad = joblib.load(trad_path)
+                if os.path.exists(emb_path):
+                    self.model_emb = joblib.load(emb_path)
+                if os.path.exists(pca_path):
+                    self.pca = joblib.load(pca_path)
+                    
+                # Apply the model to our data
+                self.run_classifier()
+                print("Successfully loaded existing model")
+            else:
+                print(f"Warning: No model found at {model_path}, training new model")
+                self.train_two_stage_classifier()
 
+        # Step 5: Select candidates
         self.select_candidates()
         
+        # Step 6: Save results and generate plots
         self.save_candidates()
         self.post_processing_plots()
 
@@ -1442,17 +1573,6 @@ class PrimvsCVFinder:
         print("="*80 + "\n")
         
         return True
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1485,7 +1605,7 @@ def main():
     )
     
     # Run pipeline
-    success = finder.run_pipeline()
+    success = finder.run_pipeline(skip_training = True)
     
     if success:
         print(f"CV finder completed successfully. Results in {output_dir}")
