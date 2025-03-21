@@ -152,11 +152,10 @@ class PrimvsCVFinder:
             return
 
         df = self.cv_candidates
-        
-            df['period_hours'] = df['true_period'] * 24.0
-            df['log_period'] = np.log10(df['period_hours'])
-            
-            df['l_centered'] = np.where(df['l'] > 180, df['l'] - 360, df['l'])
+    
+        df['period_hours'] = df['true_period'] * 24.0
+        df['log_period'] = np.log10(df['period_hours'])    
+        df['l_centered'] = np.where(df['l'] > 180, df['l'] - 360, df['l'])
 
 
         # ---------------------------
