@@ -1217,7 +1217,7 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         print("Tuning traditional feature model...")
         param_grid_trad = {
-            'n_estimators': [100, 200, 500],
+            'n_estimators': [10, 100, 200, 500],
             'max_depth': [3, 5, 10],
             'learning_rate': [0.1, 0.05, 0.01],
         }
@@ -1233,7 +1233,7 @@ class PrimvsCVFinder:
             xgb_trad,
             param_grid_trad,
             scoring='roc_auc',
-            cv=3,
+            cv=2,
             verbose=1
         )
         grid_trad.fit(X_trad_train, y_train)
@@ -1271,7 +1271,7 @@ class PrimvsCVFinder:
 
             print("Tuning embedding feature model...")
             param_grid_emb = {
-                'n_estimators': [100, 200, 500],
+                'n_estimators': [10, 100, 200, 500],
                 'max_depth': [3, 5, 10, 100],
                 'learning_rate': [0.1, 0.05, 0.01],
             }
@@ -1287,7 +1287,7 @@ class PrimvsCVFinder:
                 xgb_emb,
                 param_grid_emb,
                 scoring='roc_auc',
-                cv=3,
+                cv=2,
                 verbose=1
             )
             grid_emb.fit(X_emb_train_pca, y_train)
@@ -1463,8 +1463,8 @@ def main():
     output_dir = "../PRIMVS/cv_results"
     known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits"
     period_limit = 10.0  # Very generous upper limit (days)
-    amplitude_limit = 0.03  # Very low amplitude threshold (mag)
-    fap_limit = 0.7  # Permissive FAP threshold
+    amplitude_limit = 0.003  # Very low amplitude threshold (mag)
+    fap_limit = 1.0  # Permissive FAP threshold
 
     print(f"Starting CV finder with parameters:")
     print(f"  - PRIMVS file: {primvs_file}")
