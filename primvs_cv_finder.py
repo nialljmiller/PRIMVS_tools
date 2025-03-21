@@ -119,7 +119,7 @@ class PrimvsCVFinder:
             'Z-K', 'Y-K', 'J-K', 'H-K',
             
             # Position features (for spatial distribution analysis)
-            'l', 'b'
+            #'l', 'b'
         ]
         
         # Initialize data containers
