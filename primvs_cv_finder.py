@@ -667,33 +667,6 @@ class PrimvsCVFinder:
 
 
 
-
-    def save_candidates(self):
-        """Save the CV candidates to CSV and FITS files."""
-        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
-            print("No CV candidates to save.")
-            return False
-        
-        print(f"Saving {len(self.cv_candidates)} CV candidates...")
-        
-        # Save to CSV
-        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
-        self.cv_candidates.to_csv(csv_path, index=False)
-        print(f"Saved candidates to CSV: {csv_path}")
-        
-        # Save to FITS
-        fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
-        table = Table.from_pandas(self.cv_candidates)
-        table.write(fits_path, overwrite=True)
-        print(f"Saved candidates to FITS: {fits_path}")
-
-        return True
-
-
-
-
-
-
     def load_primvs_data(self):
         """Load data from the PRIMVS FITS file."""
         print(f"Loading PRIMVS data from {self.primvs_file}...")
@@ -793,57 +766,6 @@ class PrimvsCVFinder:
         return True
 
 
-
-    def extract_features(self):
-        """Extract and normalize features for CV detection, including contrastive curves embeddings."""
-        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
-            print("No filtered data available. Call apply_initial_filters() first.")
-            return None
-        
-        print("Extracting features for CV detection...")
-        
-        # Filter feature list to include only available columns
-        available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
-        
-        # Extract contrastive curves embeddings if available
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
-        
-        if embedding_features:
-            print(f"Found {len(embedding_features)} contrastive curves embedding features")
-            available_features.extend(embedding_features)
-        else:
-            print("No contrastive curves embeddings found in the data")
-        
-        # Extract feature matrix
-        X = self.filtered_data[available_features].copy()
-        
-        # Handle missing values
-        for col in X.columns:
-            if X[col].isnull().any():
-                if X[col].dtype in [np.float64, np.int64]:
-                    X[col] = X[col].fillna(X[col].median())
-                else:
-                    X[col] = X[col].fillna(X[col].mode()[0] if len(X[col].mode()) > 0 else 0)
-        
-        # Scale features (but not embedding features which are already normalized)
-        self.scaler = StandardScaler()
-        cols_to_scale = [col for col in X.columns if col not in embedding_features]
-        
-        if cols_to_scale:
-            X_scaled = X.copy()
-            X_scaled[cols_to_scale] = self.scaler.fit_transform(X[cols_to_scale])
-        else:
-            X_scaled = X.copy()
-        
-        self.features = X
-        self.scaled_features = X_scaled
-        self.feature_names = available_features
-        
-        return X_scaled
-
-
-
     def load_known_cvs(self):
         """
         Load known CVs for classifier training with enhanced ID matching capability.
@@ -897,37 +819,12 @@ class PrimvsCVFinder:
 
 
 
-    def run_classifier(self):
-        """
-        Run the trained classifier on all filtered data to identify CV candidates.
-        If no model is available, this will train one first.
-        """
-        if not hasattr(self, 'model') or self.model is None:
-            print("No trained model available. Training now...")
-            self.train_classifier()
 
-        print("Running classifier on all filtered data...")
-        
-        # Get predictions and probabilities
-        cv_probs = self.model.predict_proba(self.scaled_features)[:, 1]
-        
-        # Add to filtered data
-        self.filtered_data['cv_prob'] = cv_probs
-        
-        # Plot probability distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(cv_probs, bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
+
+
+
+
+
         
     def select_candidates(self):
         """
@@ -948,8 +845,21 @@ class PrimvsCVFinder:
         self.filtered_data['is_cv_candidate'] = True
         
         # Save the classifier probability directly
-        self.filtered_data['cv_confidence'] = self.filtered_data['cv_prob']
+
+        # Only select candidates with probability >= 0.5
+        prob_threshold = 0.7
+        high_prob_mask = self.filtered_data['cv_prob'] >= prob_threshold
+        high_prob_count = high_prob_mask.sum()
         
+        print(f"Found {high_prob_count} candidates with probability >= {prob_threshold}")
+        
+        # Filter to only high probability candidates to save processing time
+        self.filtered_data['is_cv_candidate'] = high_prob_mask
+        self.cv_candidates = self.filtered_data[high_prob_mask].copy()
+        
+        # Set confidence directly from classifier probability
+        self.cv_candidates['confidence'] = self.cv_candidates['cv_prob']
+                
         # Use all the filtered data instead of just high confidence candidates
         self.cv_candidates = self.filtered_data.copy()
         
@@ -1032,6 +942,174 @@ class PrimvsCVFinder:
         print(f"Processed {len(self.cv_candidates)} sources with classification scores")
         return True
 
+
+    def save_candidates(self):
+        """Save the CV candidates to CSV and FITS files."""
+        if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
+            print("No CV candidates to save.")
+            return False
+        
+        print(f"Saving {len(self.cv_candidates)} CV candidates...")
+        
+        # Save to CSV
+        csv_path = os.path.join(self.output_dir, 'cv_candidates.csv')
+        self.cv_candidates.to_csv(csv_path, index=False)
+        print(f"Saved candidates to CSV: {csv_path}")
+        
+        # Save to FITS
+        fits_path = os.path.join(self.output_dir, 'cv_candidates.fits')
+        table = Table.from_pandas(self.cv_candidates)
+        table.write(fits_path, overwrite=True)
+        print(f"Saved candidates to FITS: {fits_path}")
+
+        return True
+
+
+
+
+    def extract_features(self):
+        """
+        Extract and normalize features for CV detection, including enhanced CV-specific features
+        and contrastive curves embeddings.
+        """
+        if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
+            print("No filtered data available. Call apply_initial_filters() first.")
+            return None
+        
+        print("Extracting features for CV detection...")
+        
+        # Create a copy of the filtered data to add new features
+        enhanced_data = self.filtered_data.copy()
+        
+        # Add period-related features that better capture CV behavior
+        enhanced_data['period_hours'] = enhanced_data['true_period'] * 24.0  # Convert to hours
+        enhanced_data['inverse_period'] = 1.0 / enhanced_data['true_period']  # Frequency
+        enhanced_data['period_to_amp_ratio'] = enhanced_data['true_period'] / enhanced_data['true_amplitude']
+        enhanced_data['log_period'] = np.log10(enhanced_data['true_period'])
+        
+        # Add CV-specific features
+        
+        # Period gap feature (2-3 hours gap is significant in CV evolution)
+        period_hours = enhanced_data['true_period'] * 24.0
+        enhanced_data['in_period_gap'] = ((period_hours >= 2) & (period_hours <= 3)).astype(int)
+        
+        # Flickering indicator (CVs show rapid, stochastic variability)
+        if all(col in enhanced_data.columns for col in ['std_nxs', 'lag_auto']):
+            enhanced_data['flickering_index'] = enhanced_data['std_nxs'] * (1 - enhanced_data['lag_auto'])
+        
+        # Outburst likelihood feature
+        if all(col in enhanced_data.columns for col in ['skew', 'kurt']):
+            enhanced_data['outburst_indicator'] = enhanced_data['skew'] * enhanced_data['kurt'] * enhanced_data['true_amplitude']
+        
+        # Add color-based features specifically for CVs if color data is available
+        # CVs often show blue excess due to accretion disk
+        color_cols = ['Z-K', 'Y-K', 'J-K', 'H-K']
+        if all(col in enhanced_data.columns for col in color_cols):
+            print("Adding color-based features...")
+            enhanced_data['color_slope'] = (enhanced_data['Z-K'] - enhanced_data['J-K']) / 2.0  # Slope of SED
+            enhanced_data['nir_excess'] = enhanced_data['H-K'] - 0.2 * enhanced_data['J-K']  # Near-IR excess parameter
+        
+        # Add variability shape features
+        if 'Cody_M' in enhanced_data.columns and 'true_amplitude' in enhanced_data.columns:
+            enhanced_data['asymmetry_amp'] = enhanced_data['Cody_M'] * enhanced_data['true_amplitude']
+        
+        # Update the filtered data with new features
+        self.filtered_data = enhanced_data
+        
+        # Filter feature list to include only available columns
+        # First, add our new features to the feature list
+        new_features = [
+            'period_hours', 'inverse_period', 'period_to_amp_ratio', 
+            'in_period_gap', 'flickering_index', 'outburst_indicator',
+            'color_slope', 'nir_excess', 'asymmetry_amp'
+        ]
+        extended_features = self.cv_features.copy()
+        extended_features.extend([f for f in new_features if f in enhanced_data.columns])
+        
+        # Now get only available columns
+        available_features = [f for f in extended_features if f in enhanced_data.columns]
+        
+        # Extract contrastive curves embeddings if available
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in enhanced_data.columns]
+        
+        if embedding_features:
+            print(f"Found {len(embedding_features)} contrastive curves embedding features")
+            available_features.extend(embedding_features)
+        else:
+            print("No contrastive curves embeddings found in the data")
+        
+        # Extract feature matrix
+        X = enhanced_data[available_features].copy()
+        
+        # Handle missing values
+        for col in X.columns:
+            if X[col].isnull().any():
+                if X[col].dtype in [np.float64, np.int64]:
+                    X[col] = X[col].fillna(X[col].median())
+                else:
+                    X[col] = X[col].fillna(X[col].mode()[0] if len(X[col].mode()) > 0 else 0)
+        
+        # Scale features (but not embedding features which are already normalized)
+        self.scaler = StandardScaler()
+        cols_to_scale = [col for col in X.columns if col not in embedding_features]
+        
+        if cols_to_scale:
+            X_scaled = X.copy()
+            X_scaled[cols_to_scale] = self.scaler.fit_transform(X[cols_to_scale])
+        else:
+            X_scaled = X.copy()
+        
+        self.features = X
+        self.scaled_features = X_scaled
+        self.feature_names = available_features
+        
+        print(f"Extracted {len(available_features)} features for classification")
+        for feat_category, feats in [
+            ("Period-related", ['true_period', 'period_hours', 'inverse_period', 'log_period']),
+            ("Amplitude-related", ['true_amplitude', 'period_to_amp_ratio']),
+            ("Shape-related", ['Cody_M', 'skew', 'kurt', 'asymmetry_amp']),
+            ("Color-related", ['color_slope', 'nir_excess']),
+            ("CV-specific", ['in_period_gap', 'flickering_index', 'outburst_indicator'])
+        ]:
+            present_feats = [f for f in feats if f in available_features]
+            if present_feats:
+                print(f"  - {feat_category}: {', '.join(present_feats)}")
+        
+        return X_scaled
+
+
+    def run_classifier(self):
+        """
+        Run the trained classifier on all filtered data to identify CV candidates.
+        If no model is available, this will train one first.
+        """
+        if not hasattr(self, 'model') or self.model is None:
+            print("No trained model available. Training now...")
+            self.train_classifier()
+
+        print("Running classifier on all filtered data...")
+        
+        # Get predictions and probabilities
+        cv_probs = self.model.predict_proba(self.scaled_features)[:, 1]
+        
+        # Add to filtered data
+        self.filtered_data['cv_prob'] = cv_probs
+        
+        # Plot probability distribution
+        plt.figure(figsize=(10, 6))
+        plt.hist(cv_probs, bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+        plt.xlabel('CV Probability')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Probabilities')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
+        plt.close()
+        
+        return True
 
 
 
@@ -1138,6 +1216,13 @@ class PrimvsCVFinder:
             'n_estimators': [10],#, 100, 500],
             'max_depth': [5],#, 10, 100, 200],
             'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
+            'min_child_weight': [1],#, 3, 5],  # Helps with imbalanced data
+            'gamma': [0],#, 0.1, 0.2],  # Minimum loss reduction
+            'subsample': [0.8],#, 0.9, 1.0],  # Prevents overfitting
+        }
+
+
+
         }
         xgb_trad = xgb.XGBClassifier(
             objective='binary:logistic',
@@ -1324,109 +1409,6 @@ class PrimvsCVFinder:
         print("Two-stage classifier training complete.")
         return True
 
-
-
-
-
-
-    def run_pipeline(self, skip_training=False):
-        """Run the complete CV finder pipeline with option to skip training."""
-        start_time = time.time()
-        
-        print("\n" + "="*80)
-        print("RUNNING PRIMVS CV FINDER PIPELINE")
-        print("="*80 + "\n")
-        
-        # Step 1: Load PRIMVS data
-        self.load_primvs_data()
-        
-        # Step 2: Apply initial filters
-        self.apply_initial_filters()
-
-        # Step 3: Extract features for classification
-        self.extract_features()
-
-        # Step 4: Train or load model
-        if not skip_training:
-            print("Training new classification model...")
-            self.train_two_stage_classifier()
-        else:
-            print("Loading existing classification model...")
-            model_path = os.path.join(self.output_dir, 'cv_classifier_meta.joblib')
-            if os.path.exists(model_path):
-                self.model = joblib.load(model_path)
-                # Load the traditional and embedding models too if needed
-                trad_path = os.path.join(self.output_dir, 'cv_classifier_traditional.joblib')
-                emb_path = os.path.join(self.output_dir, 'cv_classifier_embedding.joblib')
-                pca_path = os.path.join(self.output_dir, 'embedding_pca.joblib')
-                
-                if os.path.exists(trad_path):
-                    self.model_trad = joblib.load(trad_path)
-                if os.path.exists(emb_path):
-                    self.model_emb = joblib.load(emb_path)
-                if os.path.exists(pca_path):
-                    self.pca = joblib.load(pca_path)
-                    
-                # Apply the model to our data
-                self.run_classifier()
-                print("Successfully loaded existing model")
-            else:
-                print(f"Warning: No model found at {model_path}, training new model")
-                self.train_two_stage_classifier()
-
-        # Step 5: Select candidates
-        self.select_candidates()
-        
-        # Step 6: Save results and generate plots
-        self.save_candidates()
-        self.post_processing_plots()
-
-        end_time = time.time()
-        runtime = end_time - start_time
-        
-        print("\n" + "="*80)
-        print(f"PIPELINE COMPLETED in {timedelta(seconds=int(runtime))}")
-        print(f"Found {len(self.cv_candidates)} CV candidates")
-        print(f"Results saved to: {self.output_dir}")
-        print("="*80 + "\n")
-        
-        return True
-
-
-    def run_pipeline(self):
-        """Run the complete CV finder pipeline with two-stage classification."""
-        start_time = time.time()
-        
-        print("\n" + "="*80)
-        print("RUNNING PRIMVS CV FINDER PIPELINE WITH TWO-STAGE CLASSIFICATION")
-        print("="*80 + "\n")
-        
-        # Step 1: Load PRIMVS data
-        self.load_primvs_data()
-        
-        # Step 2: Apply initial filters
-        self.apply_initial_filters()
-
-        # Step 3: Extract features for classification
-        self.extract_features()
-
-        self.train_two_stage_classifier()
-
-        self.select_candidates()
-        
-        self.save_candidates()
-        self.post_processing_plots()
-
-        end_time = time.time()
-        runtime = end_time - start_time
-        
-        print("\n" + "="*80)
-        print(f"PIPELINE COMPLETED in {timedelta(seconds=int(runtime))}")
-        print(f"Found {len(self.cv_candidates)} CV candidates")
-        print(f"Results saved to: {self.output_dir}")
-        print("="*80 + "\n")
-        
-        return True
 
 
 
