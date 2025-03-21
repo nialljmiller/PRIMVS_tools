@@ -556,6 +556,8 @@ class PrimvsCVFinder:
 
 
 
+
+
     def analyze_period_gap_distribution(self):
         """Analyze CV candidate distribution around the period gap"""
         
@@ -646,6 +648,15 @@ class PrimvsCVFinder:
         
         plt.tight_layout()
         plt.savefig(os.path.join(self.output_dir, 'metallicity_period_analysis.png'), dpi=300)
+
+
+
+
+
+
+
+
+
 
 
 
@@ -780,70 +791,19 @@ class PrimvsCVFinder:
 
 
     def extract_features(self):
-        """
-        Extract and normalize features for CV detection, including enhanced CV-specific features
-        and contrastive curves embeddings.
-        """
+        """Extract and normalize features for CV detection, including contrastive curves embeddings."""
         if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
             print("No filtered data available. Call apply_initial_filters() first.")
             return None
         
         print("Extracting features for CV detection...")
         
-        # Create a copy of the filtered data to add new features
-        enhanced_data = self.filtered_data.copy()
-        
-        # Add period-related features that better capture CV behavior
-        enhanced_data['period_hours'] = enhanced_data['true_period'] * 24.0  # Convert to hours
-        enhanced_data['inverse_period'] = 1.0 / enhanced_data['true_period']  # Frequency
-        enhanced_data['period_to_amp_ratio'] = enhanced_data['true_period'] / enhanced_data['true_amplitude']
-        enhanced_data['log_period'] = np.log10(enhanced_data['true_period'])
-        
-        # Add CV-specific features
-        
-        # Period gap feature (2-3 hours gap is significant in CV evolution)
-        period_hours = enhanced_data['true_period'] * 24.0
-        enhanced_data['in_period_gap'] = ((period_hours >= 2) & (period_hours <= 3)).astype(int)
-        
-        # Flickering indicator (CVs show rapid, stochastic variability)
-        if all(col in enhanced_data.columns for col in ['std_nxs', 'lag_auto']):
-            enhanced_data['flickering_index'] = enhanced_data['std_nxs'] * (1 - enhanced_data['lag_auto'])
-        
-        # Outburst likelihood feature
-        if all(col in enhanced_data.columns for col in ['skew', 'kurt']):
-            enhanced_data['outburst_indicator'] = enhanced_data['skew'] * enhanced_data['kurt'] * enhanced_data['true_amplitude']
-        
-        # Add color-based features specifically for CVs if color data is available
-        # CVs often show blue excess due to accretion disk
-        color_cols = ['Z-K', 'Y-K', 'J-K', 'H-K']
-        if all(col in enhanced_data.columns for col in color_cols):
-            print("Adding color-based features...")
-            enhanced_data['color_slope'] = (enhanced_data['Z-K'] - enhanced_data['J-K']) / 2.0  # Slope of SED
-            enhanced_data['nir_excess'] = enhanced_data['H-K'] - 0.2 * enhanced_data['J-K']  # Near-IR excess parameter
-        
-        # Add variability shape features
-        if 'Cody_M' in enhanced_data.columns and 'true_amplitude' in enhanced_data.columns:
-            enhanced_data['asymmetry_amp'] = enhanced_data['Cody_M'] * enhanced_data['true_amplitude']
-        
-        # Update the filtered data with new features
-        self.filtered_data = enhanced_data
-        
         # Filter feature list to include only available columns
-        # First, add our new features to the feature list
-        new_features = [
-            'period_hours', 'inverse_period', 'period_to_amp_ratio', 
-            'in_period_gap', 'flickering_index', 'outburst_indicator',
-            'color_slope', 'nir_excess', 'asymmetry_amp'
-        ]
-        extended_features = self.cv_features.copy()
-        extended_features.extend([f for f in new_features if f in enhanced_data.columns])
-        
-        # Now get only available columns
-        available_features = [f for f in extended_features if f in enhanced_data.columns]
+        available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
         
         # Extract contrastive curves embeddings if available
         cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in enhanced_data.columns]
+        embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
         
         if embedding_features:
             print(f"Found {len(embedding_features)} contrastive curves embedding features")
@@ -852,7 +812,7 @@ class PrimvsCVFinder:
             print("No contrastive curves embeddings found in the data")
         
         # Extract feature matrix
-        X = enhanced_data[available_features].copy()
+        X = self.filtered_data[available_features].copy()
         
         # Handle missing values
         for col in X.columns:
@@ -875,18 +835,6 @@ class PrimvsCVFinder:
         self.features = X
         self.scaled_features = X_scaled
         self.feature_names = available_features
-        
-        print(f"Extracted {len(available_features)} features for classification")
-        for feat_category, feats in [
-            ("Period-related", ['true_period', 'period_hours', 'inverse_period', 'log_period']),
-            ("Amplitude-related", ['true_amplitude', 'period_to_amp_ratio']),
-            ("Shape-related", ['Cody_M', 'skew', 'kurt', 'asymmetry_amp']),
-            ("Color-related", ['color_slope', 'nir_excess']),
-            ("CV-specific", ['in_period_gap', 'flickering_index', 'outburst_indicator'])
-        ]:
-            present_feats = [f for f in feats if f in available_features]
-            if present_feats:
-                print(f"  - {feat_category}: {', '.join(present_feats)}")
         
         return X_scaled
 
@@ -977,8 +925,6 @@ class PrimvsCVFinder:
         
         return True
         
-
-
     def select_candidates(self):
         """
         Process all data and append calculated CV classification scores and embeddings info,
@@ -997,27 +943,6 @@ class PrimvsCVFinder:
         # Set candidate flag for all rows, no filtering
         self.filtered_data['is_cv_candidate'] = True
         
-
-
-        print("Selecting final CV candidates (probability >= 0.5 only)...")
-
-        # Only select candidates with probability >= 0.5
-        prob_threshold = 0.5
-        high_prob_mask = self.filtered_data['cv_prob'] >= prob_threshold
-        high_prob_count = high_prob_mask.sum()
-        
-        print(f"Found {high_prob_count} candidates with probability >= {prob_threshold}")
-        
-        # Filter to only high probability candidates to save processing time
-        self.filtered_data['is_cv_candidate'] = high_prob_mask
-        self.cv_candidates = self.filtered_data[high_prob_mask].copy()
-        
-        # Set confidence directly from classifier probability
-        self.cv_candidates['confidence'] = self.cv_candidates['cv_prob']
-        
-
-
-
         # Save the classifier probability directly
         self.filtered_data['cv_confidence'] = self.filtered_data['cv_prob']
         
@@ -1103,145 +1028,6 @@ class PrimvsCVFinder:
         print(f"Processed {len(self.cv_candidates)} sources with classification scores")
         return True
 
-    def select_candidates(self):
-            """
-            Select final CV candidates primarily using XGBoost classification results when available,
-            with embedding proximity as a secondary factor to refine the selection.
-            """
-            if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
-                print("No filtered data available. Call apply_initial_filters() first.")
-                return False
-            
-            print("Selecting final CV candidates...")
-        
-            print("Using XGBoost classifier probabilities for candidate selection")
-            
-            # Identify high confidence candidates
-            high_confidence_threshold = 0.7
-            high_confidence_mask = self.filtered_data['cv_prob'] >= high_confidence_threshold
-            medium_confidence_threshold = 0.5
-            medium_confidence_mask = (self.filtered_data['cv_prob'] >= medium_confidence_threshold) & (self.filtered_data['cv_prob'] < high_confidence_threshold)
-            
-            high_confidence_count = high_confidence_mask.sum()
-            medium_confidence_count = medium_confidence_mask.sum()
-            
-            print(f"Found {high_confidence_count} high confidence candidates (prob >= {high_confidence_threshold})")
-            print(f"Found {medium_confidence_count} medium confidence candidates ({medium_confidence_threshold} <= prob < {high_confidence_threshold})")
-            
-            # Create combined mask for all candidates
-            candidate_mask = self.filtered_data['cv_prob'] >= medium_confidence_threshold
-            
-            # Set candidate flag
-            self.filtered_data['is_cv_candidate'] = candidate_mask
-            
-            # Add confidence level classification
-            self.filtered_data['confidence_level'] = 'low'
-            self.filtered_data.loc[medium_confidence_mask, 'confidence_level'] = 'medium'
-            self.filtered_data.loc[high_confidence_mask, 'confidence_level'] = 'high'
-            
-            # Set confidence directly from classifier probability
-            self.filtered_data['confidence'] = self.filtered_data['cv_prob']
-        
-            self.cv_candidates = self.filtered_data[self.filtered_data['is_cv_candidate']].copy()
-            
-            # If embedding information is available, use it to refine the rankings
-            cc_embedding_cols = [str(i) for i in range(64)]
-            embedding_features = [col for col in cc_embedding_cols if col in self.cv_candidates.columns]
-            
-            if embedding_features and self.known_cv_file is not None and len(embedding_features) >= 10:
-                print("Refining candidate rankings using embedding proximity to known CVs...")
-                
-                # Load known CV IDs
-                known_ids = self.load_known_cvs()
-                
-                if known_ids is not None and len(known_ids) > 0:
-                    # Determine ID column for matching
-                    id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-                    id_col = None
-                    
-                    for col in id_columns:
-                        if col in self.cv_candidates.columns:
-                            id_col = col
-                            break
-                    
-                    if id_col is not None:
-                        # Flag known CVs in candidates
-                        self.cv_candidates['is_known_cv'] = self.cv_candidates[id_col].astype(str).isin(known_ids)
-                        
-                        # Extract embeddings and reduce dimensionality
-                        from sklearn.decomposition import PCA
-                        
-                        # Extract embeddings for candidates and known CVs
-                        all_embeddings = self.cv_candidates[embedding_features].values
-                        
-                        # Apply PCA
-                        pca = PCA(n_components=3)
-                        all_embeddings_3d = pca.fit_transform(all_embeddings)
-                        
-                        # Add PCA dimensions
-                        self.cv_candidates['pca_1'] = all_embeddings_3d[:, 0]
-                        self.cv_candidates['pca_2'] = all_embeddings_3d[:, 1]
-                        self.cv_candidates['pca_3'] = all_embeddings_3d[:, 2]
-                        
-                        # Split known CVs and candidates
-                        known_cvs = self.cv_candidates[self.cv_candidates['is_known_cv']]
-                        candidates = self.cv_candidates[~self.cv_candidates['is_known_cv']]
-                        
-                        if len(known_cvs) > 0 and len(candidates) > 0:
-                            # Calculate embedding distances
-                            from scipy.spatial.distance import cdist
-                            
-                            known_points = known_cvs[['pca_1', 'pca_2', 'pca_3']].values
-                            candidate_points = candidates[['pca_1', 'pca_2', 'pca_3']].values
-                            
-                            # Calculate minimum distance from each candidate to any known CV
-                            distances = cdist(candidate_points, known_points, 'euclidean')
-                            min_distances = np.min(distances, axis=1)
-                            
-                            # Add distance to nearest known CV
-                            candidates['distance_to_nearest_cv'] = min_distances
-                            
-                            # Normalized distance (0-1 scale, 0 is closest)
-                            max_dist = min_distances.max()
-                            if max_dist > 0:
-                                candidates['norm_distance'] = min_distances / max_dist
-                            else:
-                                candidates['norm_distance'] = 0
-                            
-                            # Compute embedding similarity score (inverse of normalized distance)
-                            candidates['embedding_similarity'] = 1 - candidates['norm_distance']
-                            
-                            # Blend classifier confidence with embedding similarity (weighted average)
-                            # Weight classifier confidence more heavily
-                            classifier_weight = 0.8
-                            embedding_weight = 0.2
-                            
-                            if 'confidence' in candidates.columns:
-                                candidates['blended_score'] = (
-                                    classifier_weight * candidates['confidence'] + 
-                                    embedding_weight * candidates['embedding_similarity']
-                                )
-                            else:
-                                candidates['blended_score'] = candidates['embedding_similarity']
-                            
-                            # Update main candidates dataframe with these scores
-                            self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'distance_to_nearest_cv'] = candidates['distance_to_nearest_cv'].values
-                            self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'embedding_similarity'] = candidates['embedding_similarity'].values
-                            
-                            if 'blended_score' in candidates.columns:
-                                self.cv_candidates.loc[~self.cv_candidates['is_known_cv'], 'blended_score'] = candidates['blended_score'].values
-                                
-                                # Replace confidence with blended score for ranking, but keep original confidence
-                                self.cv_candidates['original_confidence'] = self.cv_candidates['confidence']
-                                self.cv_candidates['confidence'] = self.cv_candidates['blended_score']
-                            
-                            print(f"Enhanced candidate scoring with embedding proximity information")
-            
-            # Sort by confidence (which may now be the blended score)
-            self.cv_candidates = self.cv_candidates.sort_values('confidence', ascending=False)
-            
-            print(f"Selected {len(self.cv_candidates)} CV candidates")
-            return True
 
 
 
@@ -1345,14 +1131,10 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         print("Tuning traditional feature model...")
         param_grid_trad = {
-            'n_estimators': [100],#, 200, 500],
-            'max_depth': [3],#, 5, 7, 10],
-            'learning_rate': [0.01],#, 0.05, 0.1],
-            'min_child_weight': [1],#, 3, 5],  # Helps with imbalanced data
-            'gamma': [0],#, 0.1, 0.2],  # Minimum loss reduction
-            'subsample': [0.8],#, 0.9, 1.0],  # Prevents overfitting
+            'n_estimators': [10, 100, 500],
+            'max_depth': [5, 10, 100, 200],
+            'learning_rate': [0.1, 0.05, 0.01, 0.001],
         }
-
         xgb_trad = xgb.XGBClassifier(
             objective='binary:logistic',
             scale_pos_weight=pos_weight,
@@ -1365,7 +1147,7 @@ class PrimvsCVFinder:
             xgb_trad,
             param_grid_trad,
             scoring='roc_auc',
-            cv=2,
+            cv=4,
             verbose=1
         )
         grid_trad.fit(X_trad_train, y_train)
@@ -1383,13 +1165,16 @@ class PrimvsCVFinder:
             'Feature': traditional_features,
             'Importance': best_trad.feature_importances_
         }).sort_values('Importance', ascending=False)
-        print("\nTop 10 traditional features:")
+        print("\nTop 5 traditional features:")
         imp_sum = 0
         for i, (_, row) in enumerate(trad_importance.head(10).iterrows()):
             print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-            imp_sum =+ row['Importance']
-            
-        print('Top 10 features account for :', imp_sum)            
+            imp_sum = imp_sum + row['Importance']
+
+        print('Top 10 features account for :', imp_sum)  
+
+
+
         # --------------------------------------------------------------------------------
         # 7) Stage 2: Embedding Model Tuning (with PCA)
         # --------------------------------------------------------------------------------
@@ -1406,9 +1191,9 @@ class PrimvsCVFinder:
 
             print("Tuning embedding feature model...")
             param_grid_emb = {
-                'n_estimators': [10],#, 200, 500],
-                'max_depth': [3],#, 10, 100, 200],
-                'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
+                'n_estimators': [10, 200, 500],
+                'max_depth': [3, 10, 100, 200],
+                'learning_rate': [0.1, 0.05, 0.01, 0.001],
             }
             xgb_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
@@ -1422,7 +1207,7 @@ class PrimvsCVFinder:
                 xgb_emb,
                 param_grid_emb,
                 scoring='roc_auc',
-                cv=2,
+                cv=3,
                 verbose=1
             )
             grid_emb.fit(X_emb_train_pca, y_train)
@@ -1626,10 +1411,7 @@ class PrimvsCVFinder:
         self.select_candidates()
         
         self.save_candidates()
-        
         self.post_processing_plots()
-        self.analyze_period_gap_distribution()
-        self.analyze_metallicity_effects()
 
         end_time = time.time()
         runtime = end_time - start_time
@@ -1650,6 +1432,49 @@ class PrimvsCVFinder:
 
 
 
+
+
+
+
+
+
+    def run_pipeline(self):
+        """Run the complete CV finder pipeline with two-stage classification."""
+        start_time = time.time()
+        
+        print("\n" + "="*80)
+        print("RUNNING PRIMVS CV FINDER PIPELINE WITH TWO-STAGE CLASSIFICATION")
+        print("="*80 + "\n")
+        
+        # Step 1: Load PRIMVS data
+        self.load_primvs_data()
+        
+        # Step 2: Apply initial filters
+        self.apply_initial_filters()
+
+        # Step 3: Extract features for classification
+        self.extract_features()
+
+        self.train_two_stage_classifier()
+
+        self.select_candidates()
+        
+        self.save_candidates()
+        
+        self.post_processing_plots()
+        self.analyze_period_gap_distribution()
+        self.analyze_metallicity_effects()
+
+        end_time = time.time()
+        runtime = end_time - start_time
+        
+        print("\n" + "="*80)
+        print(f"PIPELINE COMPLETED in {timedelta(seconds=int(runtime))}")
+        print(f"Found {len(self.cv_candidates)} CV candidates")
+        print(f"Results saved to: {self.output_dir}")
+        print("="*80 + "\n")
+        
+        return True
 
 
 
@@ -1695,3 +1520,51 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
