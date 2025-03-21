@@ -555,6 +555,104 @@ class PrimvsCVFinder:
         print(f"Enhanced post-processing complete. Summary written to: {summary_path}")
 
 
+
+    def analyze_period_gap_distribution(self):
+        """Analyze CV candidate distribution around the period gap"""
+        
+        if 'true_period' not in self.cv_candidates.columns:
+            return
+        
+        period_hours = self.cv_candidates['true_period'] * 24.0
+        
+        # Define period bins with focus on the gap
+        period_bins = [0, 1, 1.5, 1.9, 2.1, 2.3, 2.5, 2.7, 2.9, 3.1, 4, 6, 12, 24]
+        
+        # Calculate distribution
+        period_dist, _ = np.histogram(period_hours, bins=period_bins)
+        
+        # Plot with focus on period gap
+        plt.figure(figsize=(12, 6))
+        plt.bar(range(len(period_dist)), period_dist, alpha=0.7)
+        plt.xticks(range(len(period_dist)), 
+                   [f"{period_bins[i]:.1f}-{period_bins[i+1]:.1f}" for i in range(len(period_dist))],
+                   rotation=45)
+        
+        # Highlight the period gap
+        gap_start_idx = period_bins.index(1.9)
+        gap_end_idx = period_bins.index(3.1)
+        for i in range(gap_start_idx, gap_end_idx):
+            plt.bar(i, period_dist[i], color='red', alpha=0.7)
+        
+        plt.axvline(gap_start_idx - 0.5, color='r', linestyle='--', alpha=0.5)
+        plt.axvline(gap_end_idx - 0.5, color='r', linestyle='--', alpha=0.5)
+        
+        plt.xlabel('Period Range (hours)')
+        plt.ylabel('Number of CV Candidates')
+        plt.title('Period Distribution of CV Candidates with Gap Highlighted')
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, 'period_gap_analysis.png'), dpi=300)
+
+
+    def analyze_metallicity_effects(self):
+        """Analyze CV distribution along bulge metallicity gradient"""
+        
+        if 'l' not in self.cv_candidates.columns or 'b' not in self.cv_candidates.columns:
+            return
+        
+        # Define metallicity regions based on Galactic position (approximate)
+        self.cv_candidates['region'] = 'Other'
+        
+        # Central bulge (metal-rich)
+        central_mask = (self.cv_candidates['l'] > -5) & (self.cv_candidates['l'] < 5) & \
+                       (self.cv_candidates['b'] > -5) & (self.cv_candidates['b'] < 5)
+        self.cv_candidates.loc[central_mask, 'region'] = 'Central_Bulge'
+        self.cv_candidates.loc[central_mask, 'metallicity'] = 0.3  # [Fe/H] ~ +0.3
+        
+        # Inner bulge
+        inner_mask = (self.cv_candidates['l'] > -10) & (self.cv_candidates['l'] < 10) & \
+                     (self.cv_candidates['b'] > -10) & (self.cv_candidates['b'] < 10) & \
+                     ~central_mask
+        self.cv_candidates.loc[inner_mask, 'region'] = 'Inner_Bulge'
+        self.cv_candidates.loc[inner_mask, 'metallicity'] = 0.1  # [Fe/H] ~ +0.1
+        
+        # Outer bulge
+        outer_mask = (self.cv_candidates['l'] > -20) & (self.cv_candidates['l'] < 20) & \
+                     (self.cv_candidates['b'] > -15) & (self.cv_candidates['b'] < 15) & \
+                     ~central_mask & ~inner_mask
+        self.cv_candidates.loc[outer_mask, 'region'] = 'Outer_Bulge'
+        self.cv_candidates.loc[outer_mask, 'metallicity'] = -0.1  # [Fe/H] ~ -0.1
+        
+        # Bulge-halo interface
+        interface_mask = ~central_mask & ~inner_mask & ~outer_mask
+        self.cv_candidates.loc[interface_mask, 'region'] = 'Bulge_Halo_Interface'
+        self.cv_candidates.loc[interface_mask, 'metallicity'] = -0.4  # [Fe/H] ~ -0.4
+        
+        # Analyze period gap by metallicity
+        plt.figure(figsize=(12, 8))
+        
+        for i, region in enumerate(['Central_Bulge', 'Inner_Bulge', 'Outer_Bulge', 'Bulge_Halo_Interface']):
+            mask = self.cv_candidates['region'] == region
+            if mask.sum() < 5:
+                continue
+                
+            period_hours = self.cv_candidates.loc[mask, 'true_period'] * 24.0
+            plt.subplot(2, 2, i+1)
+            plt.hist(np.log10(period_hours), bins=20, alpha=0.7)
+            plt.axvspan(np.log10(2), np.log10(3), alpha=0.2, color='red', label='Period Gap')
+            plt.title(f"{region} ([Fe/H]={self.cv_candidates.loc[mask, 'metallicity'].iloc[0]})")
+            plt.xlabel('log(Period [hours])')
+            plt.ylabel('Count')
+            plt.legend()
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, 'metallicity_period_analysis.png'), dpi=300)
+
+
+
+
+
+
+
     def save_candidates(self):
         """Save the CV candidates to CSV and FITS files."""
         if not hasattr(self, 'cv_candidates') or len(self.cv_candidates) == 0:
@@ -682,19 +780,70 @@ class PrimvsCVFinder:
 
 
     def extract_features(self):
-        """Extract and normalize features for CV detection, including contrastive curves embeddings."""
+        """
+        Extract and normalize features for CV detection, including enhanced CV-specific features
+        and contrastive curves embeddings.
+        """
         if not hasattr(self, 'filtered_data') or len(self.filtered_data) == 0:
             print("No filtered data available. Call apply_initial_filters() first.")
             return None
         
         print("Extracting features for CV detection...")
         
+        # Create a copy of the filtered data to add new features
+        enhanced_data = self.filtered_data.copy()
+        
+        # Add period-related features that better capture CV behavior
+        enhanced_data['period_hours'] = enhanced_data['true_period'] * 24.0  # Convert to hours
+        enhanced_data['inverse_period'] = 1.0 / enhanced_data['true_period']  # Frequency
+        enhanced_data['period_to_amp_ratio'] = enhanced_data['true_period'] / enhanced_data['true_amplitude']
+        enhanced_data['log_period'] = np.log10(enhanced_data['true_period'])
+        
+        # Add CV-specific features
+        
+        # Period gap feature (2-3 hours gap is significant in CV evolution)
+        period_hours = enhanced_data['true_period'] * 24.0
+        enhanced_data['in_period_gap'] = ((period_hours >= 2) & (period_hours <= 3)).astype(int)
+        
+        # Flickering indicator (CVs show rapid, stochastic variability)
+        if all(col in enhanced_data.columns for col in ['std_nxs', 'lag_auto']):
+            enhanced_data['flickering_index'] = enhanced_data['std_nxs'] * (1 - enhanced_data['lag_auto'])
+        
+        # Outburst likelihood feature
+        if all(col in enhanced_data.columns for col in ['skew', 'kurt']):
+            enhanced_data['outburst_indicator'] = enhanced_data['skew'] * enhanced_data['kurt'] * enhanced_data['true_amplitude']
+        
+        # Add color-based features specifically for CVs if color data is available
+        # CVs often show blue excess due to accretion disk
+        color_cols = ['Z-K', 'Y-K', 'J-K', 'H-K']
+        if all(col in enhanced_data.columns for col in color_cols):
+            print("Adding color-based features...")
+            enhanced_data['color_slope'] = (enhanced_data['Z-K'] - enhanced_data['J-K']) / 2.0  # Slope of SED
+            enhanced_data['nir_excess'] = enhanced_data['H-K'] - 0.2 * enhanced_data['J-K']  # Near-IR excess parameter
+        
+        # Add variability shape features
+        if 'Cody_M' in enhanced_data.columns and 'true_amplitude' in enhanced_data.columns:
+            enhanced_data['asymmetry_amp'] = enhanced_data['Cody_M'] * enhanced_data['true_amplitude']
+        
+        # Update the filtered data with new features
+        self.filtered_data = enhanced_data
+        
         # Filter feature list to include only available columns
-        available_features = [f for f in self.cv_features if f in self.filtered_data.columns]
+        # First, add our new features to the feature list
+        new_features = [
+            'period_hours', 'inverse_period', 'period_to_amp_ratio', 
+            'in_period_gap', 'flickering_index', 'outburst_indicator',
+            'color_slope', 'nir_excess', 'asymmetry_amp'
+        ]
+        extended_features = self.cv_features.copy()
+        extended_features.extend([f for f in new_features if f in enhanced_data.columns])
+        
+        # Now get only available columns
+        available_features = [f for f in extended_features if f in enhanced_data.columns]
         
         # Extract contrastive curves embeddings if available
         cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.filtered_data.columns]
+        embedding_features = [col for col in cc_embedding_cols if col in enhanced_data.columns]
         
         if embedding_features:
             print(f"Found {len(embedding_features)} contrastive curves embedding features")
@@ -703,7 +852,7 @@ class PrimvsCVFinder:
             print("No contrastive curves embeddings found in the data")
         
         # Extract feature matrix
-        X = self.filtered_data[available_features].copy()
+        X = enhanced_data[available_features].copy()
         
         # Handle missing values
         for col in X.columns:
@@ -726,6 +875,18 @@ class PrimvsCVFinder:
         self.features = X
         self.scaled_features = X_scaled
         self.feature_names = available_features
+        
+        print(f"Extracted {len(available_features)} features for classification")
+        for feat_category, feats in [
+            ("Period-related", ['true_period', 'period_hours', 'inverse_period', 'log_period']),
+            ("Amplitude-related", ['true_amplitude', 'period_to_amp_ratio']),
+            ("Shape-related", ['Cody_M', 'skew', 'kurt', 'asymmetry_amp']),
+            ("Color-related", ['color_slope', 'nir_excess']),
+            ("CV-specific", ['in_period_gap', 'flickering_index', 'outburst_indicator'])
+        ]:
+            present_feats = [f for f in feats if f in available_features]
+            if present_feats:
+                print(f"  - {feat_category}: {', '.join(present_feats)}")
         
         return X_scaled
 
@@ -816,6 +977,8 @@ class PrimvsCVFinder:
         
         return True
         
+
+
     def select_candidates(self):
         """
         Process all data and append calculated CV classification scores and embeddings info,
@@ -833,6 +996,27 @@ class PrimvsCVFinder:
         
         # Set candidate flag for all rows, no filtering
         self.filtered_data['is_cv_candidate'] = True
+        
+
+
+        print("Selecting final CV candidates (probability >= 0.5 only)...")
+
+        # Only select candidates with probability >= 0.5
+        prob_threshold = 0.5
+        high_prob_mask = self.filtered_data['cv_prob'] >= prob_threshold
+        high_prob_count = high_prob_mask.sum()
+        
+        print(f"Found {high_prob_count} candidates with probability >= {prob_threshold}")
+        
+        # Filter to only high probability candidates to save processing time
+        self.filtered_data['is_cv_candidate'] = high_prob_mask
+        self.cv_candidates = self.filtered_data[high_prob_mask].copy()
+        
+        # Set confidence directly from classifier probability
+        self.cv_candidates['confidence'] = self.cv_candidates['cv_prob']
+        
+
+
         
         # Save the classifier probability directly
         self.filtered_data['cv_confidence'] = self.filtered_data['cv_prob']
@@ -918,267 +1102,6 @@ class PrimvsCVFinder:
         
         print(f"Processed {len(self.cv_candidates)} sources with classification scores")
         return True
-
-
-
-    def train_two_stage_classifier(self):
-        """
-        Train a two-stage classifier combining traditional feature-based models with
-        embedding-based models for optimal CV candidate selection.
-        
-        This approach maintains interpretability while leveraging the representational
-        power of contrastive curve embeddings through an ensemble methodology.
-        """
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            print("No features available. Call extract_features() first.")
-            return False
-        
-        print("Training two-stage CV classifier...")
-        
-        # Retrieve known CV identifiers
-        known_ids = self.load_known_cvs()
-        
-        if known_ids is None or len(known_ids) == 0:
-            print("Error: No known CVs available for training. Classifier aborted.")
-            return False
-        
-        # Determine candidate identifier column
-        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-        id_col = None
-        
-        for col in id_columns:
-            if col in self.filtered_data.columns:
-                id_col = col
-                break
-        
-        if id_col is None:
-            print("Error: No suitable identifier column found in candidate data.")
-            return False
-        
-        print(f"Using identifier column '{id_col}' for matching")
-        
-        # Convert both known IDs and candidate IDs to strings for consistent matching
-        candidate_ids = self.filtered_data[id_col].astype(str)
-        
-        # Create binary classification labels
-        y = candidate_ids.isin(known_ids).astype(int)
-        positive_count = y.sum()
-        
-        print(f"Found {positive_count} matches between known CVs and candidate sources")
-        
-        if positive_count < 10:
-            print(f"Warning: Very few positive examples ({positive_count}). Classification may be unreliable.")
-            if positive_count < 3:
-                print("Error: Insufficient positive examples for training. Aborting classifier.")
-                return False
-        
-        # Split features into traditional and embedding sets
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
-        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-        
-        print(f"Traditional features: {len(traditional_features)}")
-        print(f"Embedding features: {len(embedding_features)}")
-        
-        # Extract feature sets as numpy arrays to avoid indexing issues
-        X_trad = self.scaled_features[traditional_features].values
-        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
-        
-        # Split data for training and validation using indices
-        # We'll use array indexing rather than DataFrame iloc to avoid the observed error
-        X_indices = np.arange(len(X_trad))
-        train_indices, val_indices = train_test_split(
-            X_indices, test_size=0.25, random_state=42, stratify=y
-        )
-        
-        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
-        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        
-        if X_emb is not None:
-            X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
-        
-        # Create class weights to handle imbalance
-        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
-        
-        # STAGE 1: Train model with traditional features
-        print("\nStage 1: Training model with traditional features...")
-        
-        model_trad = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        model_trad.fit(
-            X_trad_train, y_train,
-            #eval_set=[(X_trad_val, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=20,
-            #verbose=False
-        )
-        
-        # Evaluate traditional model
-        y_pred_trad = model_trad.predict(X_trad_val)
-        prob_trad = model_trad.predict_proba(X_trad_val)[:, 1]
-        
-        print("\nTraditional Feature Model Performance:")
-        print(classification_report(y_val, y_pred_trad))
-        
-        # Get feature importance for traditional model
-        trad_importance = pd.DataFrame({
-            'Feature': traditional_features,
-            'Importance': model_trad.feature_importances_
-        }).sort_values('Importance', ascending=False)
-        
-        print("\nTop 5 traditional features:")
-        for i, (_, row) in enumerate(trad_importance.head(5).iterrows()):
-            print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-        
-
-        print("\nStage 2: Training model with embedding features...")
-        
-        # Apply PCA to reduce dimensionality of embeddings while preserving variance
-        from sklearn.decomposition import PCA
-        
-        # Determine optimal number of components (explaining ~90% variance)
-        pca = PCA().fit(X_emb_train)
-        explained_variance = np.cumsum(pca.explained_variance_ratio_)
-        n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-        print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-        
-        # Apply PCA transformation
-        pca = PCA(n_components=n_components)
-        X_emb_train_pca = pca.fit_transform(X_emb_train)
-        X_emb_val_pca = pca.transform(X_emb_val)
-        
-        # Train embedding model
-        model_emb = xgb.XGBClassifier(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        model_emb.fit(
-            X_emb_train_pca, y_train,
-            #eval_set=[(X_emb_val_pca, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=20,
-            #verbose=False
-        )
-        
-        # Evaluate embedding model
-        y_pred_emb = model_emb.predict(X_emb_val_pca)
-        prob_emb = model_emb.predict_proba(X_emb_val_pca)[:, 1]
-        
-        print("\nEmbedding Feature Model Performance:")
-        print(classification_report(y_val, y_pred_emb))
-        
-        # STAGE 3: Train meta-model (stacking)
-        print("\nStage 3: Training meta-model to combine predictions...")
-        
-        # Create meta-features (predictions from base models)
-        meta_features_train = np.column_stack([
-            model_trad.predict_proba(X_trad_train)[:, 1],
-            model_emb.predict_proba(X_emb_train_pca)[:, 1]
-        ])
-        
-        meta_features_val = np.column_stack([
-            prob_trad,
-            prob_emb
-        ])
-        
-        # Train meta-model
-        meta_model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=2,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        
-        meta_model.fit(
-            meta_features_train, y_train,
-            #eval_set=[(meta_features_val, y_val)],
-            #eval_metric='auc',
-            #early_stopping_rounds=10,
-            #verbose=False
-        )
-        
-        # Evaluate meta-model
-        y_pred_meta = meta_model.predict(meta_features_val)
-        
-        print("\nMeta-Model Performance:")
-        print(classification_report(y_val, y_pred_meta))
-        
-        # Calculate blend weights
-        blend_weights = meta_model.feature_importances_
-        print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-        
-        # STAGE 4: Apply to all data
-        print("\nApplying two-stage classifier to all data...")
-        
-        # Prepare PCA for full dataset
-        X_emb_full_pca = pca.transform(X_emb) if X_emb is not None else None
-        
-        # Get predictions from both models
-        trad_probs = model_trad.predict_proba(X_trad)[:, 1]
-        emb_probs = model_emb.predict_proba(X_emb_full_pca)[:, 1]
-        
-        # Combine using meta-model
-        meta_features_full = np.column_stack([trad_probs, emb_probs])
-        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-        
-        # Store models for later use
-        self.model_trad = model_trad
-        self.model_emb = model_emb
-        self.model_meta = meta_model
-        self.pca = pca
-        
-        # Add predictions to filtered data
-        self.filtered_data['cv_prob_trad'] = trad_probs
-        self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = final_probs
-        
-        # Save traditional feature names for later interpretation
-        self.traditional_features = traditional_features
-        
-        # Save models
-        joblib.dump(model_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        joblib.dump(model_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-        joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
-        
-        # Set the ensemble as the primary model
-        self.model = meta_model
-        
-
-            
-        # Plot probability distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
-        plt.yscale('log')  # Set y-axis to log scale
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
-        plt.close()
-        
-        return True
-
 
 
 
@@ -1283,10 +1206,14 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         print("Tuning traditional feature model...")
         param_grid_trad = {
-            'n_estimators': [10],#, 100, 500],
-            'max_depth': [5],#, 10, 100, 200],
-            'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
+            'n_estimators': [100, 200, 500],
+            'max_depth': [3, 5, 7, 10],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'min_child_weight': [1, 3, 5],  # Helps with imbalanced data
+            'gamma': [0, 0.1, 0.2],  # Minimum loss reduction
+            'subsample': [0.8, 0.9, 1.0],  # Prevents overfitting
         }
+
         xgb_trad = xgb.XGBClassifier(
             objective='binary:logistic',
             scale_pos_weight=pos_weight,
@@ -1337,9 +1264,9 @@ class PrimvsCVFinder:
 
             print("Tuning embedding feature model...")
             param_grid_emb = {
-                'n_estimators': [10],#, 200, 500],
-                'max_depth': [3],#, 10, 100, 200],
-                'learning_rate': [0.1],#, 0.05, 0.01, 0.001],
+                'n_estimators': [10, 200, 500],
+                'max_depth': [3, 10, 100, 200],
+                'learning_rate': [0.1, 0.05, 0.01, 0.001],
             }
             xgb_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
@@ -1557,7 +1484,10 @@ class PrimvsCVFinder:
         self.select_candidates()
         
         self.save_candidates()
+        
         self.post_processing_plots()
+        self.analyze_period_gap_distribution()
+        self.analyze_metallicity_effects()
 
         end_time = time.time()
         runtime = end_time - start_time
