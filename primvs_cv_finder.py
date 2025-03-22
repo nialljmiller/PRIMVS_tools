@@ -1472,7 +1472,7 @@ class PrimvsCVFinder:
                 gamma=gamma,
                 subsample=subsample
             )
-            score = cross_val_score(model, X_trad_train, y_train, cv=4, scoring='roc_auc').mean()
+            score = cross_val_score(model, X_trad_train, y_train, cv=3, scoring='roc_auc').mean()
             return -score  # minimize negative ROC-AUC
 
         # Bounds for: n_estimators, max_depth, learning_rate, min_child_weight, gamma, subsample
@@ -1486,7 +1486,7 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional feature model using differential evolution...")
-        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=30, polish=True)
+        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=10, polish=True)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
@@ -1541,9 +1541,9 @@ class PrimvsCVFinder:
             explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
             n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
             print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-            pca = PCA(n_components=n_components)
-            X_emb_train_pca = pca.fit_transform(X_emb_train)
-            X_emb_val_pca = pca.transform(X_emb_val)
+            #pca = PCA(n_components=n_components)
+            X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
+            X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
 
             def objective_scipy_emb(params):
                 # For embedding model tuning: n_estimators, max_depth, learning_rate
@@ -1572,7 +1572,7 @@ class PrimvsCVFinder:
             ]
 
             print("Optimizing embedding feature model using differential evolution...")
-            result_emb = spo.differential_evolution(objective_scipy_emb, bounds_emb, maxiter=30, polish=True)
+            result_emb = spo.differential_evolution(objective_scipy_emb, bounds_emb, maxiter=10, polish=True)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (CV):", -result_emb.fun)
 
@@ -1608,7 +1608,7 @@ class PrimvsCVFinder:
         trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
         if best_emb is not None:
             # If using PCA, transform the full training embeddings
-            X_emb_train_pca_full = pca.transform(X_emb_train)
+            X_emb_train_pca_full = X_emb_train#pca.transform(X_emb_train)
             emb_probs_train = best_emb.predict_proba(X_emb_train_pca_full)[:, 1]
         else:
             emb_probs_train = np.zeros_like(trad_probs_train)
@@ -1641,10 +1641,7 @@ class PrimvsCVFinder:
         print("Applying two-stage classifier to all data...")
         trad_probs = best_trad.predict_proba(X_trad)[:, 1]
         if best_emb is not None:
-            if pca is not None:
-                X_emb_full_pca = pca.transform(X_emb)
-            else:
-                X_emb_full_pca = X_emb
+            X_emb_full_pca = X_emb
             emb_probs = best_emb.predict_proba(X_emb_full_pca)[:, 1]
         else:
             emb_probs = np.zeros_like(trad_probs)
