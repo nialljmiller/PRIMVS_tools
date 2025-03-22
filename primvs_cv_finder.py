@@ -1354,54 +1354,6 @@ class PrimvsCVFinder:
 
 
 
-    def objective_scipy_trad(self,params):
-        # Unpack parameters, rounding where needed
-        n_estimators = int(np.round(params[0]))
-        max_depth = int(np.round(params[1]))
-        learning_rate = params[2]
-        min_child_weight = int(np.round(params[3]))
-        gamma = params[4]
-        subsample = params[5]
-        model = xgb.XGBClassifier(
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            use_label_encoder=False,
-            eval_metric='auc',
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            min_child_weight=min_child_weight,
-            gamma=gamma,
-            subsample=subsample
-        )
-        score = cross_val_score(model, X_trad_train, y_train, cv=3, scoring='roc_auc', n_jobs=-1).mean()
-        return -score  # minimize negative ROC-AUC
-
-
-
-    def objective_scipy_emb(self,params):
-        # For embedding model tuning: n_estimators, max_depth, learning_rate
-        n_estimators = int(np.round(params[0]))
-        max_depth = int(np.round(params[1]))
-        learning_rate = params[2]
-        model = xgb.XGBClassifier(
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            use_label_encoder=False,
-            eval_metric='auc',
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate
-        )
-        score = cross_val_score(model, X_emb_train_pca, y_train, cv=3, scoring='roc_auc').mean()
-        return -score
-
-
-
 
 
 
@@ -1507,6 +1459,54 @@ class PrimvsCVFinder:
 
 
 
+
+        def objective_scipy_trad(params):
+            # Unpack parameters, rounding where needed
+            n_estimators = int(np.round(params[0]))
+            max_depth = int(np.round(params[1]))
+            learning_rate = params[2]
+            min_child_weight = int(np.round(params[3]))
+            gamma = params[4]
+            subsample = params[5]
+            model = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42,
+                use_label_encoder=False,
+                eval_metric='auc',
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
+                min_child_weight=min_child_weight,
+                gamma=gamma,
+                subsample=subsample
+            )
+            score = cross_val_score(model, X_trad_train, y_train, cv=2, scoring='roc_auc', n_jobs=-1).mean()
+            return -score  # minimize negative ROC-AUC
+
+
+
+        def objective_scipy_emb(params):
+            # For embedding model tuning: n_estimators, max_depth, learning_rate
+            n_estimators = int(np.round(params[0]))
+            max_depth = int(np.round(params[1]))
+            learning_rate = params[2]
+            model = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42,
+                use_label_encoder=False,
+                eval_metric='auc',
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate
+            )
+            score = cross_val_score(model, X_emb_train_pca, y_train, cv=2, scoring='roc_auc', n_jobs=-1).mean()
+            return -score
+
+
         # Bounds for: n_estimators, max_depth, learning_rate, min_child_weight, gamma, subsample
         bounds_trad = [
             (10, 500),     # n_estimators
@@ -1518,7 +1518,7 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional feature model using differential evolution...")
-        result_trad = spo.differential_evolution(self.objective_scipy_trad, bounds_trad, maxiter=10, polish=True, disp=True, workers=-1)
+        result_trad = spo.differential_evolution(self.objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
@@ -1585,7 +1585,7 @@ class PrimvsCVFinder:
             ]
 
             print("Optimizing embedding feature model using differential evolution...")
-            result_emb = spo.differential_evolution(self.objective_scipy_emb, bounds_emb, maxiter=10, polish=True, disp=True)
+            result_emb = spo.differential_evolution(self.objective_scipy_emb, bounds_emb, maxiter=5, polish=True, disp=True)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (CV):", -result_emb.fun)
 
