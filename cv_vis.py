@@ -17,13 +17,11 @@ from sklearn.decomposition import PCA
 import umap
 from mpl_toolkits.mplot3d import Axes3D
 
-
 # -------------------------
-# TESSCycle8Overlay class (for plotting footprints)
+# TESSCycle8Overlay class (for spatial plotting)
 # -------------------------
 class TESSCycle8Overlay:
     """TESS Cycle 8 camera footprint visualization for CV candidates"""
-    
     def __init__(self):
         # TESS Year 8 camera positions (RA, Dec, Roll) in degrees
         self.camera_positions = {
@@ -85,8 +83,7 @@ class TESSCycle8Overlay:
         labels = []
         for i, color in enumerate(camera_colors):
             if i in camera_indices:
-                handles.append(plt.Line2D([], [], color=color, marker='s', 
-                                          linestyle='None', markersize=10, alpha=0.6))
+                handles.append(plt.Line2D([], [], color=color, marker='s', linestyle='None', markersize=10, alpha=0.6))
                 labels.append(f'Camera {i+1}')
         if handles and labels:
             ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
@@ -101,23 +98,17 @@ class TESSCycle8Overlay:
         rotated_b = vertices_l * np.sin(roll_rad) + vertices_b * np.cos(roll_rad)
         vertices_l = l + rotated_l
         vertices_b = b + rotated_b
-        polygon = Polygon(np.column_stack([vertices_l, vertices_b]),
-                          alpha=alpha, color=color, closed=True, label=label)
+        polygon = Polygon(np.column_stack([vertices_l, vertices_b]), alpha=alpha, color=color, closed=True, label=label)
         ax.add_patch(polygon)
         if sector:
-            text = ax.text(l, b, str(sector), fontsize=8, ha='center', va='center',
-                           color='white', fontweight='bold')
-            text.set_path_effects([
-                patheffects.Stroke(linewidth=2, foreground='black'),
-                patheffects.Normal()
-            ])
+            text = ax.text(l, b, str(sector), fontsize=8, ha='center', va='center', color='white', fontweight='bold')
+            text.set_path_effects([patheffects.Stroke(linewidth=2, foreground='black'), patheffects.Normal()])
 
 # -------------------------
-# Helper function to overlay TESS footprints in Equatorial coordinates
+# Helper function for Equatorial TESS Overlay
 # -------------------------
 def add_tess_overlay_equatorial(ax, alpha=0.2, size=12):
     camera_colors = ['red', 'purple', 'blue', 'green']
-    from matplotlib.patches import Polygon
     tess = TESSCycle8Overlay()
     for sector, cameras in tess.camera_positions.items():
         for i, (ra, dec, roll) in enumerate(cameras):
@@ -128,21 +119,17 @@ def add_tess_overlay_equatorial(ax, alpha=0.2, size=12):
             rotated_dec = vertices_ra * np.sin(roll_rad) + vertices_dec * np.cos(roll_rad)
             vertices_ra = ra + rotated_ra
             vertices_dec = dec + rotated_dec
-            polygon = Polygon(np.column_stack([vertices_ra, vertices_dec]),
-                              alpha=alpha, color=camera_colors[i % len(camera_colors)],
-                              closed=True)
+            polygon = Polygon(np.column_stack([vertices_ra, vertices_dec]), alpha=alpha, color=camera_colors[i % len(camera_colors)], closed=True)
             ax.add_patch(polygon)
-            ax.text(ra, dec, str(sector), fontsize=8, ha='center', va='center',
-                    color='white', fontweight='bold',
-                    path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
-                                  patheffects.Normal()])
+            ax.text(ra, dec, str(sector), fontsize=8, ha='center', va='center', color='white', fontweight='bold',
+                    path_effects=[patheffects.Stroke(linewidth=2, foreground='black'), patheffects.Normal()])
     handles = [plt.Line2D([], [], color=color, marker='s', linestyle='None', markersize=10, alpha=0.6) for color in camera_colors]
     labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
     ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
     return ax
 
 # -------------------------
-# PrimvsTessCrossMatch Pipeline Class
+# Cross-match and Target List Pipeline Class
 # -------------------------
 class PrimvsTessCrossMatch:
     """
@@ -162,7 +149,7 @@ class PrimvsTessCrossMatch:
         self.cv_candidates = None
         self.filtered_candidates = None
         self.crossmatch_results = None
-        self.target_list = None  # final 100 targets
+        self.target_list = None  # Final 100 targets
     
     def load_cv_candidates(self):
         try:
@@ -172,10 +159,8 @@ class PrimvsTessCrossMatch:
                 candidates = pd.read_csv(self.cv_candidates_file)
             else:
                 raise ValueError(f"Unsupported file format: {self.cv_candidates_file}")
-            
             self.cv_candidates = candidates
             print(f"Loaded {len(candidates)} total CV candidates")
-            
             if 'cv_prob' in candidates.columns:
                 self.filtered_candidates = candidates[candidates['cv_prob'] >= self.cv_prob_threshold].copy()
                 print(f"Filtered to {len(self.filtered_candidates)} candidates with cv_prob >= {self.cv_prob_threshold}")
@@ -188,7 +173,6 @@ class PrimvsTessCrossMatch:
             else:
                 print("Warning: No CV probability column found. Using all candidates.")
                 self.filtered_candidates = candidates.copy()
-            
             filtered_path = os.path.join(self.output_dir, 'filtered_candidates.csv')
             self.filtered_candidates.to_csv(filtered_path, index=False)
             print(f"Saved filtered candidates to: {filtered_path}")
@@ -201,7 +185,6 @@ class PrimvsTessCrossMatch:
         if self.filtered_candidates is None:
             print("No filtered candidates available. Call load_cv_candidates() first.")
             return False
-        
         print("Cross-matching with TESS Input Catalog...")
         if 'ra' in self.filtered_candidates.columns and 'dec' in self.filtered_candidates.columns:
             ra_col, dec_col = 'ra', 'dec'
@@ -210,10 +193,8 @@ class PrimvsTessCrossMatch:
         else:
             print("Error: Could not find RA/Dec columns in the candidates file")
             return False
-        
         coords = SkyCoord(ra=self.filtered_candidates[ra_col].values * u.degree, 
                           dec=self.filtered_candidates[dec_col].values * u.degree)
-        
         results = self.filtered_candidates.copy()
         results['in_tic'] = False
         results['tic_id'] = np.nan
@@ -222,7 +203,6 @@ class PrimvsTessCrossMatch:
         results['has_tess_data'] = False
         results['tess_sectors'] = None
         results['not_in_tic_reason'] = None
-        
         print(f"Cross-matching {len(coords)} filtered candidates...")
         for i, (idx, coord) in enumerate(tqdm(zip(results.index, coords), total=len(coords))):
             try:
@@ -263,8 +243,9 @@ class PrimvsTessCrossMatch:
                         results.loc[idx, 'not_in_tic_reason'] = 'unknown'
             except Exception as e:
                 print(f"Error processing candidate {i}: {e}")
-        
         self.crossmatch_results = results
+        # Update the candidate list with enriched info for later plotting.
+        self.cv_candidates = self.crossmatch_results.copy()
         crossmatch_path = os.path.join(self.output_dir, 'tess_crossmatch_results.csv')
         results.to_csv(crossmatch_path, index=False)
         in_tic_count = results['in_tic'].sum()
@@ -348,14 +329,14 @@ class PrimvsTessCrossMatch:
             print("No cross-match results available. Call perform_crossmatch() first.")
             return False
         print("Generating target list for TESS proposal...")
-        # Select only objects with a TIC match.
+        # Use only objects with a TIC match
         pool = self.crossmatch_results[self.crossmatch_results['in_tic'] == True].copy()
         if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
             pool['composite_score'] = pool['cv_prob'] / pool['tic_tmag']
         else:
             pool['composite_score'] = 0.0
             print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
-        # Ensure known CVs are flagged
+        # Ensure 'is_known_cv' exists
         if 'is_known_cv' not in pool.columns:
             pool['is_known_cv'] = False
             print("Warning: is_known_cv column not found; assuming all are unknown.")
@@ -364,11 +345,9 @@ class PrimvsTessCrossMatch:
         others = others.sort_values('composite_score', ascending=False)
         num_needed = 100 - len(known)
         if num_needed < 0:
-            # In the unlikely event that known CVs exceed 100, select top 100 known by composite score.
             final_targets = known.sort_values('composite_score', ascending=False).head(100)
         else:
             final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
-        # If final list is less than 100, warn the user.
         if len(final_targets) < 100:
             print(f"Warning: Final target list has only {len(final_targets)} targets.")
         else:
@@ -379,7 +358,7 @@ class PrimvsTessCrossMatch:
         print(f"Generated target list with {len(self.target_list)} sources (100 targets expected).")
         print(f"Full target list saved to: {target_list_path}")
         # Create a simplified version for proposal submission.
-        proposal_columns = ['priority', 'sourceid', 'tic_id', 'ra', 'dec', 'tic_tmag', 'cv_prob', 'composite_score']
+        proposal_columns = ['tic_id', 'cv_prob', 'tic_tmag', 'composite_score']
         proposal_columns = [col for col in proposal_columns if col in self.target_list.columns]
         proposal_targets = self.target_list[proposal_columns].copy()
         proposal_targets['target'] = proposal_targets['tic_id'].apply(lambda x: f"TIC {x}")
@@ -409,13 +388,9 @@ class PrimvsTessCrossMatch:
         if 'is_known_cv' not in all_candidates.columns:
             all_candidates['is_known_cv'] = False
         known_candidates = all_candidates[all_candidates['is_known_cv'] == True]
-        if self.target_list is None:
-            print("Target list not generated; cannot plot target list group.")
-            targets = pd.DataFrame()
-        else:
-            targets = self.target_list.copy()
+        targets = self.target_list if self.target_list is not None else pd.DataFrame()
 
-        # Spatial Plot in Galactic Coordinates with TESS Overlay
+        # Spatial Plot in Galactic Coordinates with TESS overlay
         plt.figure(figsize=(12,10))
         hb = plt.hexbin(all_candidates['l'], all_candidates['b'], gridsize=75, cmap='Greys', bins='log')
         plt.colorbar(hb, label='log10(count)')
@@ -473,7 +448,7 @@ class PrimvsTessCrossMatch:
         plt.savefig(os.path.join(plots_dir, "bailey_diagram_groups.png"), dpi=300)
         plt.close()
 
-        # 2D PCA of Embedding Space (if embedding features exist)
+        # 2D PCA of Embedding Space (if available)
         embedding_features = [str(i) for i in range(64)]
         available_features = [col for col in embedding_features if col in all_candidates.columns]
         if len(available_features) >= 3:
@@ -484,8 +459,7 @@ class PrimvsTessCrossMatch:
             all_candidates['pca_1'] = pca_result[:, 0]
             all_candidates['pca_2'] = pca_result[:, 1]
             if not targets.empty:
-                # Map PCA results for target list by matching TIC IDs
-                target_pca = all_candidates[all_candidates['tic_id'].isin(targets['tic_id'])]
+                target_pca = all_candidates[all_candidates.index.isin(targets.index)]
             else:
                 target_pca = pd.DataFrame()
             plt.figure(figsize=(10,8))
@@ -555,7 +529,7 @@ class PrimvsTessCrossMatch:
 # Main Execution
 # -------------------------
 def main():
-    cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"  # or CSV
+    cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"  # or CSV file
     output_dir = "../PRIMVS/cv_results/tess_crossmatch_results"
     cv_prob_threshold = 0.984
     search_radius = 5.0  # arcseconds
