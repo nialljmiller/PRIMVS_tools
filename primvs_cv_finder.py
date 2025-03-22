@@ -1474,7 +1474,7 @@ class PrimvsCVFinder:
             print(f"Dual Annealing iteration complete: best value so far = {f}")
             return False  # return True to stop early if you wish
 
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3, disp=True, callback=callback_func)
+        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3, callback=callback_func)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
