@@ -1482,7 +1482,7 @@ class PrimvsCVFinder:
                 gamma=gamma,
                 subsample=subsample
             )
-            score = cross_val_score(model, X_trad_train, y_train, cv=2, scoring='roc_auc', n_jobs=-1).mean()
+            score = cross_val_score(model, X_trad_train, y_train, cv=2, scoring='roc_auc').mean()
             return -score  # minimize negative ROC-AUC
 
 
@@ -1503,7 +1503,7 @@ class PrimvsCVFinder:
                 max_depth=max_depth,
                 learning_rate=learning_rate
             )
-            score = cross_val_score(model, X_emb_train_pca, y_train, cv=2, scoring='roc_auc', n_jobs=-1).mean()
+            score = cross_val_score(model, X_emb_train_pca, y_train, cv=2, scoring='roc_auc').mean()
             return -score
 
 
