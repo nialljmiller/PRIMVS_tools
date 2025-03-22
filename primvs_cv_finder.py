@@ -1352,8 +1352,6 @@ class PrimvsCVFinder:
 
 
 
-
-
     def train_two_stage_classifier(self):
         """
         Train a two-stage classifier combining traditional feature-based models with
@@ -1366,12 +1364,13 @@ class PrimvsCVFinder:
         import numpy as np
         import pandas as pd
         import xgboost as xgb
-        from sklearn.model_selection import train_test_split, GridSearchCV
+        from sklearn.model_selection import train_test_split, cross_val_score
         from sklearn.metrics import classification_report
         from sklearn.decomposition import PCA
         import joblib
         import matplotlib.pyplot as plt
-        
+        import scipy.optimize as spo  # classic optimizer from SciPy
+
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
 
@@ -1381,7 +1380,7 @@ class PrimvsCVFinder:
         if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
             logger.error("No features available. Call extract_features() first.")
             return False
-        
+
         print("Training two-stage CV classifier...")
 
         # --------------------------------------------------------------------------------
@@ -1391,7 +1390,7 @@ class PrimvsCVFinder:
         if known_ids is None or len(known_ids) == 0:
             logger.error("No known CVs available for training. Classifier aborted.")
             return False
-        
+
         # --------------------------------------------------------------------------------
         # 3) Identify ID column and create binary labels
         # --------------------------------------------------------------------------------
@@ -1404,14 +1403,13 @@ class PrimvsCVFinder:
         if id_col is None:
             logger.error("No suitable identifier column found in candidate data.")
             return False
-        
+
         print(f"Using identifier column '{id_col}' for matching")
         candidate_ids = self.filtered_data[id_col].astype(str)
-        
         y = candidate_ids.isin(known_ids).astype(int)
         positive_count = y.sum()
         print(f"Found {positive_count} matches between known CVs and candidate sources")
-        
+
         if positive_count < 10:
             logger.warning(f"Very few positive examples ({positive_count}). Classification may be unreliable.")
             if positive_count < 3:
@@ -1424,7 +1422,7 @@ class PrimvsCVFinder:
         cc_embedding_cols = [str(i) for i in range(64)]
         embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
         traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-        
+
         print(f"Traditional features: {len(traditional_features)}")
         print(f"Embedding features: {len(embedding_features)}")
 
@@ -1440,7 +1438,7 @@ class PrimvsCVFinder:
         )
         X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
         y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        
+
         if X_emb is not None:
             X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
 
@@ -1448,45 +1446,81 @@ class PrimvsCVFinder:
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
         # --------------------------------------------------------------------------------
-        # 6) Stage 1: Traditional Model Tuning
+        # 6) Stage 1: Traditional Model Tuning using SciPy Differential Evolution
         # --------------------------------------------------------------------------------
-        print("Tuning traditional feature model...")
-        param_grid_trad = {
-            'n_estimators': [10, 100, 500],
-            'max_depth': [5, 10, 100, 200],
-            'learning_rate': [0.1, 0.05, 0.01, 0.001],
-            'min_child_weight': [1, 3, 5],  # Helps with imbalanced data
-            'gamma': [0, 0.1, 0.2],  # Minimum loss reduction
-            'subsample': [0.8, 0.9, 1.0],  # Prevents overfitting
-        }
+        from sklearn.model_selection import cross_val_score
 
+        def objective_scipy_trad(params):
+            # Unpack parameters, rounding where needed
+            n_estimators = int(np.round(params[0]))
+            max_depth = int(np.round(params[1]))
+            learning_rate = params[2]
+            min_child_weight = int(np.round(params[3]))
+            gamma = params[4]
+            subsample = params[5]
+            model = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42,
+                use_label_encoder=False,
+                eval_metric='auc',
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
+                min_child_weight=min_child_weight,
+                gamma=gamma,
+                subsample=subsample
+            )
+            score = cross_val_score(model, X_trad_train, y_train, cv=4, scoring='roc_auc').mean()
+            return -score  # minimize negative ROC-AUC
 
-        xgb_trad = xgb.XGBClassifier(
+        # Bounds for: n_estimators, max_depth, learning_rate, min_child_weight, gamma, subsample
+        bounds_trad = [
+            (10, 500),     # n_estimators
+            (3, 10),       # max_depth
+            (0.001, 0.1),  # learning_rate
+            (1, 5),        # min_child_weight
+            (0, 0.3),      # gamma
+            (0.8, 1.0)     # subsample
+        ]
+
+        print("Optimizing traditional feature model using differential evolution...")
+        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=30, polish=True)
+        print("Optimal traditional parameters:", result_trad.x)
+        print("Best ROC-AUC (CV):", -result_trad.fun)
+
+        # Unpack best parameters
+        opt_n_estimators = int(np.round(result_trad.x[0]))
+        opt_max_depth = int(np.round(result_trad.x[1]))
+        opt_learning_rate = result_trad.x[2]
+        opt_min_child_weight = int(np.round(result_trad.x[3]))
+        opt_gamma = result_trad.x[4]
+        opt_subsample = result_trad.x[5]
+
+        best_trad = xgb.XGBClassifier(
             objective='binary:logistic',
             scale_pos_weight=pos_weight,
             n_jobs=-1,
             random_state=42,
             use_label_encoder=False,
-            eval_metric='auc'
+            eval_metric='auc',
+            n_estimators=opt_n_estimators,
+            max_depth=opt_max_depth,
+            learning_rate=opt_learning_rate,
+            min_child_weight=opt_min_child_weight,
+            gamma=opt_gamma,
+            subsample=opt_subsample
         )
-        grid_trad = GridSearchCV(
-            xgb_trad,
-            param_grid_trad,
-            scoring='roc_auc',
-            cv=4,
-            verbose=1
-        )
-        grid_trad.fit(X_trad_train, y_train)
-        best_trad = grid_trad.best_estimator_
-        print(f"Best traditional model params: {grid_trad.best_params_}")
+        best_trad.fit(X_trad_train, y_train)
 
-        # Evaluate on validation
+        # Evaluate traditional model on validation set
         y_pred_trad = best_trad.predict(X_trad_val)
         prob_trad = best_trad.predict_proba(X_trad_val)[:, 1]
         print("\nTraditional Feature Model Performance:")
         print(classification_report(y_val, y_pred_trad))
 
-        # Optional: feature importance
+        # Optional: Feature importance (Top 5)
         trad_importance = pd.DataFrame({
             'Feature': traditional_features,
             'Importance': best_trad.feature_importances_
@@ -1495,14 +1529,11 @@ class PrimvsCVFinder:
         imp_sum = 0
         for i, (_, row) in enumerate(trad_importance.head(10).iterrows()):
             print(f"  {i+1}. {row['Feature']}: {row['Importance']:.4f}")
-            imp_sum = imp_sum + row['Importance']
-
-        print('Top 10 features account for :', imp_sum)  
-
-
+            imp_sum += row['Importance']
+        print('Top 10 features account for:', imp_sum)
 
         # --------------------------------------------------------------------------------
-        # 7) Stage 2: Embedding Model Tuning (with PCA)
+        # 7) Stage 2: Embedding Model Tuning (with PCA and Differential Evolution)
         # --------------------------------------------------------------------------------
         if X_emb is not None and len(embedding_features) > 0:
             print("Reducing embedding dimensionality via PCA to capture ~90% variance...")
@@ -1510,43 +1541,62 @@ class PrimvsCVFinder:
             explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
             n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
             print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-
             pca = PCA(n_components=n_components)
-            X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
-            X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
+            X_emb_train_pca = pca.fit_transform(X_emb_train)
+            X_emb_val_pca = pca.transform(X_emb_val)
 
-            print("Tuning embedding feature model...")
-            param_grid_emb = {
-                'n_estimators': [10, 200, 500],
-                'max_depth': [3, 10, 100, 200],
-                'learning_rate': [0.1, 0.05, 0.01, 0.001],
-            }
-            xgb_emb = xgb.XGBClassifier(
+            def objective_scipy_emb(params):
+                # For embedding model tuning: n_estimators, max_depth, learning_rate
+                n_estimators = int(np.round(params[0]))
+                max_depth = int(np.round(params[1]))
+                learning_rate = params[2]
+                model = xgb.XGBClassifier(
+                    objective='binary:logistic',
+                    scale_pos_weight=pos_weight,
+                    n_jobs=-1,
+                    random_state=42,
+                    use_label_encoder=False,
+                    eval_metric='auc',
+                    n_estimators=n_estimators,
+                    max_depth=max_depth,
+                    learning_rate=learning_rate
+                )
+                score = cross_val_score(model, X_emb_train_pca, y_train, cv=3, scoring='roc_auc').mean()
+                return -score
+
+            # Bounds for: n_estimators, max_depth, learning_rate for the embedding model
+            bounds_emb = [
+                (10, 500),    # n_estimators
+                (3, 200),     # max_depth (wider range to allow for more complexity)
+                (0.001, 0.1)  # learning_rate
+            ]
+
+            print("Optimizing embedding feature model using differential evolution...")
+            result_emb = spo.differential_evolution(objective_scipy_emb, bounds_emb, maxiter=30, polish=True)
+            print("Optimal embedding parameters:", result_emb.x)
+            print("Best ROC-AUC (CV):", -result_emb.fun)
+
+            opt_n_estimators_emb = int(np.round(result_emb.x[0]))
+            opt_max_depth_emb = int(np.round(result_emb.x[1]))
+            opt_learning_rate_emb = result_emb.x[2]
+
+            best_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
                 scale_pos_weight=pos_weight,
                 n_jobs=-1,
                 random_state=42,
                 use_label_encoder=False,
-                eval_metric='auc'
+                eval_metric='auc',
+                n_estimators=opt_n_estimators_emb,
+                max_depth=opt_max_depth_emb,
+                learning_rate=opt_learning_rate_emb
             )
-            grid_emb = GridSearchCV(
-                xgb_emb,
-                param_grid_emb,
-                scoring='roc_auc',
-                cv=3,
-                verbose=1
-            )
-            grid_emb.fit(X_emb_train_pca, y_train)
-            best_emb = grid_emb.best_estimator_
-            print(f"Best embedding model params: {grid_emb.best_params_}")
-
+            best_emb.fit(X_emb_train_pca, y_train)
             y_pred_emb = best_emb.predict(X_emb_val_pca)
             prob_emb = best_emb.predict_proba(X_emb_val_pca)[:, 1]
             print("\nEmbedding Feature Model Performance:")
             print(classification_report(y_val, y_pred_emb))
-
         else:
-            # If no embeddings, default to zeros
             pca = None
             best_emb = None
             prob_emb = np.zeros_like(prob_trad)
@@ -1555,15 +1605,13 @@ class PrimvsCVFinder:
         # 8) Stage 3: Meta-Model (Stacking)
         # --------------------------------------------------------------------------------
         print("Training meta-model to blend predictions...")
-
-        # Build meta-features from training sets
         trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
         if best_emb is not None:
-            X_emb_train_pca_full = X_emb_train#pca.transform(X_emb_train)
+            # If using PCA, transform the full training embeddings
+            X_emb_train_pca_full = pca.transform(X_emb_train)
             emb_probs_train = best_emb.predict_proba(X_emb_train_pca_full)[:, 1]
         else:
             emb_probs_train = np.zeros_like(trad_probs_train)
-
         meta_features_train = np.column_stack([trad_probs_train, emb_probs_train])
         meta_features_val = np.column_stack([prob_trad, prob_emb])
 
@@ -1584,7 +1632,6 @@ class PrimvsCVFinder:
         print("\nMeta-Model Performance:")
         print(classification_report(y_val, y_pred_meta))
 
-        # Check how it's weighting the two base models
         blend_weights = meta_model.feature_importances_
         print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
 
@@ -1592,26 +1639,26 @@ class PrimvsCVFinder:
         # 9) Apply to Full Dataset
         # --------------------------------------------------------------------------------
         print("Applying two-stage classifier to all data...")
-
-        # Get probabilities from both base models on the entire dataset
         trad_probs = best_trad.predict_proba(X_trad)[:, 1]
         if best_emb is not None:
-            X_emb_full_pca = X_emb#pca.transform(X_emb)
+            if pca is not None:
+                X_emb_full_pca = pca.transform(X_emb)
+            else:
+                X_emb_full_pca = X_emb
             emb_probs = best_emb.predict_proba(X_emb_full_pca)[:, 1]
         else:
             emb_probs = np.zeros_like(trad_probs)
 
-        # Combine using the meta-model
         meta_features_full = np.column_stack([trad_probs, emb_probs])
         final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
 
-        # Store references
+        # Store models and PCA for later use
         self.model_trad = best_trad
         self.model_emb = best_emb
         self.model_meta = meta_model
         self.pca = pca
 
-        # Add predictions to self.filtered_data
+        # Add predictions to the filtered data
         self.filtered_data['cv_prob_trad'] = trad_probs
         self.filtered_data['cv_prob_emb'] = emb_probs
         self.filtered_data['cv_prob'] = final_probs
@@ -1624,7 +1671,8 @@ class PrimvsCVFinder:
         joblib.dump(best_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
         if best_emb is not None:
             joblib.dump(best_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-            #joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
+            # Optionally save the PCA if needed:
+            # joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
         joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
 
         # --------------------------------------------------------------------------------
@@ -1637,7 +1685,7 @@ class PrimvsCVFinder:
         plt.xlabel('CV Probability')
         plt.ylabel('Number of Sources')
         plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
-        plt.yscale('log')  # Log scale for better visibility
+        plt.yscale('log')
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
@@ -1645,8 +1693,6 @@ class PrimvsCVFinder:
 
         print("Two-stage classifier training complete.")
         return True
-
-
 
 
 
