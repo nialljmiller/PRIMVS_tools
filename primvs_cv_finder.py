@@ -1429,7 +1429,7 @@ class PrimvsCVFinder:
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
         # NEW: Create a small tuning subset (5% of training data)
-        opt_frac = 0.05
+        opt_frac = 0.25
         opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
         X_trad_train_opt = X_trad_train[opt_idx_trad]
         y_train_opt = y_train[opt_idx_trad]
@@ -1482,7 +1482,11 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional model using dual annealing...")
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3)
+        def callback_func(x, f, context):
+            print(f"Dual Annealing iteration complete: best value so far = {f}")
+            return False  # return True to stop early if you wish
+
+        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3, callback=callback_func)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (holdout):", -result_trad.fun)
 
