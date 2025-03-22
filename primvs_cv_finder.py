@@ -1518,7 +1518,7 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional feature model using differential evolution...")
-        result_trad = spo.differential_evolution(self.objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
+        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
@@ -1585,7 +1585,7 @@ class PrimvsCVFinder:
             ]
 
             print("Optimizing embedding feature model using differential evolution...")
-            result_emb = spo.differential_evolution(self.objective_scipy_emb, bounds_emb, maxiter=5, polish=True, disp=True)
+            result_emb = spo.differential_evolution(objective_scipy_emb, bounds_emb, maxiter=5, polish=True, disp=True)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (CV):", -result_emb.fun)
 
