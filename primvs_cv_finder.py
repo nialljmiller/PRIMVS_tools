@@ -1723,7 +1723,7 @@ class PrimvsCVFinder:
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
         # NEW: Create a small tuning subset (10% of training data)
-        opt_frac = 0.1
+        opt_frac = 0.01
 
         opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
         X_trad_train_opt = X_trad_train[opt_idx_trad]
@@ -1872,10 +1872,10 @@ class PrimvsCVFinder:
         # 8) Meta-Model (Stacking) with Cross-Validated Stacking and Probability Calibration
         print("Training meta-model to blend predictions with cross-validated stacking and calibration...")
         # Calibrate base classifiers for more reliable probability estimates
-        calibrated_trad = CalibratedClassifierCV(best_trad, cv='prefit', method='sigmoid')
+        calibrated_trad = CalibratedClassifierCV(best_trad, cv=skf, method='sigmoid')
         calibrated_trad.fit(X_trad_train, y_train)
         if best_emb is not None:
-            calibrated_emb = CalibratedClassifierCV(best_emb, cv='prefit', method='sigmoid')
+            calibrated_emb = CalibratedClassifierCV(best_emb, cv=skf, method='sigmoid')
             calibrated_emb.fit(X_emb_train, y_train)
         else:
             calibrated_emb = None
