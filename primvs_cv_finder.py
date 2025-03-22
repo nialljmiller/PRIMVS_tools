@@ -2119,6 +2119,187 @@ class PrimvsCVFinder:
 
 
 
+    def train_two_stage_classifier(self):
+        """
+        Train a two-stage classifier combining traditional feature-based models with
+        embedding-based models for optimal CV candidate selection.
+        """
+        import numpy as np
+        import pandas as pd
+        import xgboost as xgb
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import classification_report, roc_auc_score
+        import joblib
+        import matplotlib.pyplot as plt
+        import os
+        
+        print("Training two-stage CV classifier...")
+        
+        # 1) Load known CV IDs
+        known_ids = self.load_known_cvs()
+        
+        # 2) Create binary labels
+        candidate_ids = self.filtered_data['sourceid'].astype(str)
+        y = candidate_ids.isin(known_ids).astype(int)
+        print(f"Found {y.sum()} known CVs in dataset")
+        
+        # 3) Separate Traditional and Embedding features
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
+        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+        
+        print(f"Traditional features: {len(traditional_features)}")
+        print(f"Embedding features: {len(embedding_features)}")
+        
+        X_trad = self.scaled_features[traditional_features].values
+        X_emb = self.scaled_features[embedding_features].values
+        
+        # 4) Train-test split
+        X_indices = np.arange(len(X_trad))
+        train_indices, val_indices = train_test_split(
+            X_indices, test_size=0.25, random_state=42, stratify=y
+        )
+        
+        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
+        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
+        X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
+        
+        # Get class weight
+        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train)
+        
+        # 5) Train Traditional Model
+        print("\nTraining model with traditional features...")
+        trad_model = xgb.XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.05,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        trad_model.fit(X_trad_train, y_train)
+        
+        # 6) Train Embedding Model
+        print("\nTraining model with embedding features...")
+        emb_model = xgb.XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.05,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        emb_model.fit(X_emb_train, y_train)
+        
+        # 7) Train Meta-Model
+        print("\nTraining meta-model...")
+        
+        # Create meta-features
+        meta_features_train = np.column_stack([
+            trad_model.predict_proba(X_trad_train)[:, 1],
+            emb_model.predict_proba(X_emb_train)[:, 1]
+        ])
+        
+        meta_features_val = np.column_stack([
+            trad_model.predict_proba(X_trad_val)[:, 1],
+            emb_model.predict_proba(X_emb_val)[:, 1]
+        ])
+        
+        # Train meta-model
+        meta_model = xgb.XGBClassifier(
+            n_estimators=50,
+            max_depth=3,
+            learning_rate=0.1,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        meta_model.fit(meta_features_train, y_train)
+        
+        # Calculate AUC for all three models on validation set
+        trad_probs_val = trad_model.predict_proba(X_trad_val)[:, 1]
+        emb_probs_val = emb_model.predict_proba(X_emb_val)[:, 1]
+        meta_probs_val = meta_model.predict_proba(meta_features_val)[:, 1]
+        
+        trad_auc = roc_auc_score(y_val, trad_probs_val)
+        emb_auc = roc_auc_score(y_val, emb_probs_val)
+        meta_auc = roc_auc_score(y_val, meta_probs_val)
+        
+        print("\n" + "=" * 50)
+        print("MODEL PERFORMANCE (AUC)")
+        print("=" * 50)
+        print(f"Traditional Feature Model AUC: {trad_auc:.4f}")
+        print(f"Embedding Feature Model AUC:  {emb_auc:.4f}")
+        print(f"Meta-Model (Combined) AUC:    {meta_auc:.4f}")
+        print("=" * 50)
+        
+        # 8) Apply to all data - THIS IS THE IMPORTANT PART
+        print("\nApplying two-stage classifier to all data...")
+        
+        # Get predictions from both models FOR ALL DATA
+        trad_probs = trad_model.predict_proba(X_trad)[:, 1]
+        emb_probs = emb_model.predict_proba(X_emb)[:, 1]
+        
+        # Combine using meta-model FOR ALL DATA
+        meta_features_full = np.column_stack([trad_probs, emb_probs])
+        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
+        
+        # Display feature importance
+        print("\nTop traditional features by importance:")
+        importance = trad_model.feature_importances_
+        indices = np.argsort(importance)[::-1]
+        for i in range(min(5, len(traditional_features))):
+            print(f"  {i+1}. {traditional_features[indices[i]]}: {importance[indices[i]]:.4f}")
+        
+        # 9) Store models and assign scores to ALL data points
+        self.model_trad = trad_model
+        self.model_emb = emb_model
+        self.model_meta = meta_model
+        self.model = meta_model  # For compatibility
+        
+        # Add predictions to filtered_data for ALL sources
+        self.filtered_data['cv_prob_trad'] = trad_probs
+        self.filtered_data['cv_prob_emb'] = emb_probs
+        self.filtered_data['cv_prob'] = final_probs
+        
+        # Find the 100th best candidate and print its confidence
+        sorted_probs = np.sort(final_probs)[::-1]  # Sort in descending order
+        if len(sorted_probs) >= 100:
+            confidence_100th = sorted_probs[99]  # 0-indexed, so 99 is the 100th
+            print(f"\nConfidence score of 100th best candidate: {confidence_100th:.4f}")
+        else:
+            print(f"\nNote: Dataset contains fewer than 100 candidates. Last candidate confidence: {sorted_probs[-1]:.4f}")
+        
+        # Save models
+        os.makedirs(self.output_dir, exist_ok=True)
+        joblib.dump(trad_model, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
+        joblib.dump(emb_model, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
+        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
+        
+        # Plot probability distribution
+        plt.figure(figsize=(10, 6))
+        plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+        plt.xlabel('CV Probability')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
+        plt.yscale('log')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
+        plt.close()
+        
+        print("Two-stage classifier training complete.")
+        return True
+
+
     def run_pipeline(self):
         """Run the complete CV finder pipeline with two-stage classification."""
         start_time = time.time()
