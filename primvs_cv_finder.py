@@ -1440,7 +1440,7 @@ class PrimvsCVFinder:
 
         opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
         X_emb_train_opt = X_emb_train[opt_idx_emb]
-        y_emb_train_opt = y_train[opt_idx_trad]
+        y_emb_train_opt = y_train[opt_idx_emb]
         X_train_small_emb, X_val_small_emb, y_train_small_emb, y_val_small_emb = train_test_split(
             X_emb_train_opt, y_emb_train_opt, test_size=0.5, random_state=42
         )
@@ -1543,10 +1543,12 @@ class PrimvsCVFinder:
             bounds_emb = [
                 (10, 200),   # n_estimators
                 (3, 100),    # max_depth
-                (0.001, 0.05)# learning_rate
+                (0.001, 0.1)# learning_rate
             ]
+
+
             print("Optimizing embedding model using dual annealing...")
-            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3, callback=callback_func)
+            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=4, callback=callback_func)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (holdout):", -result_emb.fun)
 
@@ -1557,7 +1559,7 @@ class PrimvsCVFinder:
             best_emb = xgb.XGBClassifier(
                 objective='binary:logistic',
                 scale_pos_weight=pos_weight,
-                n_jobs=-1,
+                n_jobs=64,
                 random_state=42,
                 use_label_encoder=False,
                 eval_metric='auc',
