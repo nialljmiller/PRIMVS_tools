@@ -1487,7 +1487,7 @@ class PrimvsCVFinder:
             print(f"Dual Annealing iteration complete: best value so far = {f}")
             return False  # return True to stop early if you wish
 
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3, callback=callback_func)
+        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=10, callback=callback_func)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (holdout):", -result_trad.fun)
 
@@ -1548,7 +1548,7 @@ class PrimvsCVFinder:
 
 
             print("Optimizing embedding model using dual annealing...")
-            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=4, callback=callback_func)
+            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=10, callback=callback_func)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (holdout):", -result_emb.fun)
 
