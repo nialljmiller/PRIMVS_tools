@@ -1518,7 +1518,7 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional feature model using differential evolution...")
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=10)
+        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3)
 
         #result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
         print("Optimal traditional parameters:", result_trad.x)
@@ -1586,7 +1586,7 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing embedding feature model using differential evolution...")
-        result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=10)
+        result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3)
         print("Optimal embedding parameters:", result_emb.x)
         print("Best ROC-AUC (CV):", -result_emb.fun)
 
