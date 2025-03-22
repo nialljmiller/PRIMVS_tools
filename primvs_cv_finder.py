@@ -1352,20 +1352,22 @@ class PrimvsCVFinder:
 
 
 
+
     def train_two_stage_classifier(self):
         """
         Train a two-stage classifier combining traditional feature-based models with
         embedding-based models for optimal CV candidate selection.
-        
-        This fast version uses a 10% tuning subset for hyperparameter optimization with
-        dual annealing and then trains on the full training data. No PCA is used.
+
+        This fast version uses a 5% tuning subset with a holdout evaluation (instead
+        of full CV) and a simplified (narrower) search space for hyperparameter optimization.
+        No PCA is used.
         """
         import logging
         import numpy as np
         import pandas as pd
         import xgboost as xgb
-        from sklearn.model_selection import train_test_split, cross_val_score
-        from sklearn.metrics import classification_report
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import classification_report, roc_auc_score
         import joblib
         import matplotlib.pyplot as plt
         import scipy.optimize as spo
@@ -1426,16 +1428,23 @@ class PrimvsCVFinder:
         # Handle class imbalance
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
-        # NEW: Create a small subset for hyperparameter optimization (10% of training data)
-        opt_frac = 0.1
+        # NEW: Create a small tuning subset (5% of training data)
+        opt_frac = 0.05
         opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
         X_trad_train_opt = X_trad_train[opt_idx_trad]
         y_train_opt = y_train[opt_idx_trad]
+        # Instead of CV, do a simple holdout split on the tuning subset (50/50)
+        X_train_small, X_val_small, y_train_small, y_val_small = train_test_split(
+            X_trad_train_opt, y_train_opt, test_size=0.5, random_state=42
+        )
         if X_emb is not None:
             opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
             X_emb_train_opt = X_emb_train[opt_idx_emb]
+            X_train_small_emb, X_val_small_emb, y_train_small_emb, y_val_small_emb = train_test_split(
+                X_emb_train_opt, y_train_opt, test_size=0.5, random_state=42
+            )
 
-        # 6) Traditional Model Tuning using Dual Annealing on the subset
+        # 6) Traditional Model Tuning using Dual Annealing (holdout evaluation)
         def objective_scipy_trad(params):
             n_estimators = int(np.round(params[0]))
             max_depth = int(np.round(params[1]))
@@ -1446,7 +1455,7 @@ class PrimvsCVFinder:
             model = xgb.XGBClassifier(
                 objective='binary:logistic',
                 scale_pos_weight=pos_weight,
-                n_jobs=-1,
+                n_jobs=64,
                 random_state=42,
                 use_label_encoder=False,
                 eval_metric='auc',
@@ -1457,26 +1466,25 @@ class PrimvsCVFinder:
                 gamma=gamma,
                 subsample=subsample
             )
-            score = cross_val_score(model, X_trad_train_opt, y_train_opt, cv=2, scoring='roc_auc', n_jobs=-1).mean()
-            return -score
+            model.fit(X_train_small, y_train_small)
+            prob = model.predict_proba(X_val_small)[:, 1]
+            auc = roc_auc_score(y_val_small, prob)
+            return -auc
 
+        # Simplified search space for faster tuning
         bounds_trad = [
-            (10, 500),    # n_estimators
-            (3, 10),      # max_depth
-            (0.001, 0.1), # learning_rate
-            (1, 5),       # min_child_weight
-            (0, 0.3),     # gamma
+            (10, 200),    # n_estimators
+            (3, 6),       # max_depth
+            (0.001, 0.05),# learning_rate
+            (1, 3),       # min_child_weight
+            (0, 0.2),     # gamma
             (0.8, 1.0)    # subsample
         ]
 
         print("Optimizing traditional model using dual annealing...")
-        def callback_func(x, f, context):
-            print(f"Dual Annealing iteration complete: best value so far = {f}")
-            return False  # return True to stop early if you wish
-
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3, callback=callback_func)
+        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3)
         print("Optimal traditional parameters:", result_trad.x)
-        print("Best ROC-AUC (CV):", -result_trad.fun)
+        print("Best ROC-AUC (holdout):", -result_trad.fun)
 
         opt_n_estimators = int(np.round(result_trad.x[0]))
         opt_max_depth = int(np.round(result_trad.x[1]))
@@ -1505,7 +1513,7 @@ class PrimvsCVFinder:
         print("\nTraditional Feature Model Performance:")
         print(classification_report(y_val, y_pred_trad))
 
-        # 7) Embedding Model Tuning (no PCA; use raw embedding features)
+        # 7) Embedding Model Tuning (if available) using holdout eval, no PCA
         if X_emb is not None and len(embedding_features) > 0:
             def objective_scipy_emb(params):
                 n_estimators = int(np.round(params[0]))
@@ -1514,7 +1522,7 @@ class PrimvsCVFinder:
                 model = xgb.XGBClassifier(
                     objective='binary:logistic',
                     scale_pos_weight=pos_weight,
-                    n_jobs=-1,
+                    n_jobs=64,
                     random_state=42,
                     use_label_encoder=False,
                     eval_metric='auc',
@@ -1522,18 +1530,20 @@ class PrimvsCVFinder:
                     max_depth=max_depth,
                     learning_rate=learning_rate
                 )
-                score = cross_val_score(model, X_emb_train_opt, y_train_opt, cv=2, scoring='roc_auc', n_jobs=-1).mean()
-                return -score
+                model.fit(X_train_small_emb, y_train_small_emb)
+                prob = model.predict_proba(X_val_small_emb)[:, 1]
+                auc = roc_auc_score(y_val_small_emb, prob)
+                return -auc
 
             bounds_emb = [
-                (10, 500),   # n_estimators
-                (3, 200),    # max_depth
-                (0.001, 0.1) # learning_rate
+                (10, 200),   # n_estimators
+                (3, 100),    # max_depth
+                (0.001, 0.05)# learning_rate
             ]
             print("Optimizing embedding model using dual annealing...")
             result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3)
             print("Optimal embedding parameters:", result_emb.x)
-            print("Best ROC-AUC (CV):", -result_emb.fun)
+            print("Best ROC-AUC (holdout):", -result_emb.fun)
 
             opt_n_estimators_emb = int(np.round(result_emb.x[0]))
             opt_max_depth_emb = int(np.round(result_emb.x[1]))
@@ -1626,7 +1636,6 @@ class PrimvsCVFinder:
 
         print("Two-stage classifier training complete.")
         return True
-
 
 
 
