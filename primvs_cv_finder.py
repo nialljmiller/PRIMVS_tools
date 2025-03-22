@@ -1355,9 +1355,6 @@ class PrimvsCVFinder:
 
 
 
-
-
-
     def train_two_stage_classifier(self):
         """
         Train a two-stage classifier combining traditional feature-based models with
@@ -1452,13 +1449,21 @@ class PrimvsCVFinder:
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
         # --------------------------------------------------------------------------------
-        # 6) Stage 1: Traditional Model Tuning using SciPy Differential Evolution
+        # NEW: Create a small subset for hyperparameter optimization
+        # --------------------------------------------------------------------------------
+        opt_frac = 0.1  # Use 10% of the training data for tuning
+        opt_indices_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
+        X_trad_train_opt = X_trad_train[opt_indices_trad]
+        y_train_opt = y_train[opt_indices_trad]
+
+        if X_emb is not None:
+            opt_indices_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
+            X_emb_train_opt = X_emb_train[opt_indices_emb]
+
+        # --------------------------------------------------------------------------------
+        # 6) Stage 1: Traditional Model Tuning using SciPy Dual Annealing
         # --------------------------------------------------------------------------------
         from sklearn.model_selection import cross_val_score
-
-
-
-
 
         def objective_scipy_trad(params):
             # Unpack parameters, rounding where needed
@@ -1482,30 +1487,9 @@ class PrimvsCVFinder:
                 gamma=gamma,
                 subsample=subsample
             )
-            score = cross_val_score(model, X_trad_train, y_train, cv=2, scoring='roc_auc').mean()
+            # Use the optimization subset instead of the full training set
+            score = cross_val_score(model, X_trad_train_opt, y_train_opt, cv=2, scoring='roc_auc', n_jobs=-1).mean()
             return -score  # minimize negative ROC-AUC
-
-
-
-        def objective_scipy_emb(params):
-            # For embedding model tuning: n_estimators, max_depth, learning_rate
-            n_estimators = int(np.round(params[0]))
-            max_depth = int(np.round(params[1]))
-            learning_rate = params[2]
-            model = xgb.XGBClassifier(
-                objective='binary:logistic',
-                scale_pos_weight=pos_weight,
-                n_jobs=-1,
-                random_state=42,
-                use_label_encoder=False,
-                eval_metric='auc',
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                learning_rate=learning_rate
-            )
-            score = cross_val_score(model, X_emb_train_pca, y_train, cv=2, scoring='roc_auc').mean()
-            return -score
-
 
         # Bounds for: n_estimators, max_depth, learning_rate, min_child_weight, gamma, subsample
         bounds_trad = [
@@ -1517,10 +1501,8 @@ class PrimvsCVFinder:
             (0.8, 1.0)     # subsample
         ]
 
-        print("Optimizing traditional feature model using differential evolution...")
+        print("Optimizing traditional feature model using dual annealing...")
         result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=3)
-
-        #result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
@@ -1546,6 +1528,7 @@ class PrimvsCVFinder:
             gamma=opt_gamma,
             subsample=opt_subsample
         )
+        # Now train on the full training set
         best_trad.fit(X_trad_train, y_train)
 
         # Evaluate traditional model on validation set
@@ -1567,16 +1550,37 @@ class PrimvsCVFinder:
         print('Top 10 features account for:', imp_sum)
 
         # --------------------------------------------------------------------------------
-        # 7) Stage 2: Embedding Model Tuning (with PCA and Differential Evolution)
+        # 7) Stage 2: Embedding Model Tuning (with PCA and Dual Annealing)
         # --------------------------------------------------------------------------------
         print("Reducing embedding dimensionality via PCA to capture ~90% variance...")
         pca_full = PCA().fit(X_emb_train)
         explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
         n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
         print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-        #pca = PCA(n_components=n_components)
-        X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
-        X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
+        # PCA is commented out, so we continue without transformation:
+        X_emb_train_pca = X_emb_train  # For tuning, we use the same data
+        X_emb_val_pca = X_emb_val
+
+        def objective_scipy_emb(params):
+            # For embedding model tuning: n_estimators, max_depth, learning_rate
+            n_estimators = int(np.round(params[0]))
+            max_depth = int(np.round(params[1]))
+            learning_rate = params[2]
+            model = xgb.XGBClassifier(
+                objective='binary:logistic',
+                scale_pos_weight=pos_weight,
+                n_jobs=-1,
+                random_state=42,
+                use_label_encoder=False,
+                eval_metric='auc',
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate
+            )
+            # Use an optimization subset for embedding as well
+            # (Assuming X_emb_train_opt was defined above)
+            score = cross_val_score(model, X_emb_train_opt, y_train_opt, cv=2, scoring='roc_auc', n_jobs=-1).mean()
+            return -score
 
         # Bounds for: n_estimators, max_depth, learning_rate for the embedding model
         bounds_emb = [
@@ -1585,7 +1589,7 @@ class PrimvsCVFinder:
             (0.001, 0.1)  # learning_rate
         ]
 
-        print("Optimizing embedding feature model using differential evolution...")
+        print("Optimizing embedding feature model using dual annealing...")
         result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3)
         print("Optimal embedding parameters:", result_emb.x)
         print("Best ROC-AUC (CV):", -result_emb.fun)
@@ -1617,9 +1621,7 @@ class PrimvsCVFinder:
         print("Training meta-model to blend predictions...")
         trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
         if best_emb is not None:
-            # If using PCA, transform the full training embeddings
-            X_emb_train_pca_full = X_emb_train#pca.transform(X_emb_train)
-            emb_probs_train = best_emb.predict_proba(X_emb_train_pca_full)[:, 1]
+            emb_probs_train = best_emb.predict_proba(X_emb_train)[:, 1]
         else:
             emb_probs_train = np.zeros_like(trad_probs_train)
         meta_features_train = np.column_stack([trad_probs_train, emb_probs_train])
@@ -1651,21 +1653,18 @@ class PrimvsCVFinder:
         print("Applying two-stage classifier to all data...")
         trad_probs = best_trad.predict_proba(X_trad)[:, 1]
         if best_emb is not None:
-            X_emb_full_pca = X_emb
-            emb_probs = best_emb.predict_proba(X_emb_full_pca)[:, 1]
+            emb_probs = best_emb.predict_proba(X_emb)[:, 1]
         else:
             emb_probs = np.zeros_like(trad_probs)
 
         meta_features_full = np.column_stack([trad_probs, emb_probs])
         final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
 
-        # Store models and PCA for later use
         self.model_trad = best_trad
         self.model_emb = best_emb
         self.model_meta = meta_model
-        self.pca = pca
+        self.pca = None  # PCA is not used
 
-        # Add predictions to the filtered data
         self.filtered_data['cv_prob_trad'] = trad_probs
         self.filtered_data['cv_prob_emb'] = emb_probs
         self.filtered_data['cv_prob'] = final_probs
@@ -1678,8 +1677,6 @@ class PrimvsCVFinder:
         joblib.dump(best_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
         if best_emb is not None:
             joblib.dump(best_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-            # Optionally save the PCA if needed:
-            # joblib.dump(pca, os.path.join(self.output_dir, 'embedding_pca.joblib'))
         joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
 
         # --------------------------------------------------------------------------------
@@ -1700,10 +1697,6 @@ class PrimvsCVFinder:
 
         print("Two-stage classifier training complete.")
         return True
-
-
-
-
 
 
 
