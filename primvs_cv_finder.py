@@ -1355,1038 +1355,6 @@ class PrimvsCVFinder:
 
     def train_two_stage_classifier(self):
         """
-        Train a two-stage classifier combining traditional feature-based models with
-        embedding-based models for optimal CV candidate selection.
-
-        This fast version uses a 5% tuning subset with a holdout evaluation (instead
-        of full CV) and a simplified (narrower) search space for hyperparameter optimization.
-        No PCA is used.
-        """
-        import logging
-        import numpy as np
-        import pandas as pd
-        import xgboost as xgb
-        from sklearn.model_selection import train_test_split
-        from sklearn.metrics import classification_report, roc_auc_score
-        import joblib
-        import matplotlib.pyplot as plt
-        import scipy.optimize as spo
-
-        logging.basicConfig(level=logging.INFO)
-        logger = logging.getLogger(__name__)
-
-        # 1) Check for features
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            logger.error("No features available. Call extract_features() first.")
-            return False
-
-        print("Training two-stage CV classifier...")
-
-        # 2) Load known CV IDs
-        known_ids = self.load_known_cvs()
-        if known_ids is None or len(known_ids) == 0:
-            logger.error("No known CVs available for training. Classifier aborted.")
-            return False
-
-        # 3) Identify ID column and create binary labels
-        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-        id_col = next((col for col in id_columns if col in self.filtered_data.columns), None)
-        if id_col is None:
-            logger.error("No suitable identifier column found in candidate data.")
-            return False
-
-        print(f"Using identifier column '{id_col}' for matching")
-        candidate_ids = self.filtered_data[id_col].astype(str)
-        y = candidate_ids.isin(known_ids).astype(int)
-        positive_count = y.sum()
-        print(f"Found {positive_count} matches between known CVs and candidate sources")
-        if positive_count < 10:
-            logger.warning(f"Very few positive examples ({positive_count}). Classification may be unreliable.")
-            if positive_count < 3:
-                logger.error("Insufficient positive examples for training. Aborting classifier.")
-                return False
-
-        # 4) Separate Traditional and Embedding features
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
-        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-
-        print(f"Traditional features: {len(traditional_features)}")
-        print(f"Embedding features: {len(embedding_features)}")
-
-        X_trad = self.scaled_features[traditional_features].values
-        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
-
-        # 5) Train-test split
-        X_indices = np.arange(len(X_trad))
-        train_indices, val_indices = train_test_split(X_indices, test_size=0.25, random_state=42, stratify=y)
-        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
-        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        if X_emb is not None:
-            X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
-
-        # Handle class imbalance
-        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
-
-        # NEW: Create a small tuning subset (5% of training data)
-        opt_frac = 0.01
-
-        opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
-        X_trad_train_opt = X_trad_train[opt_idx_trad]
-        y_trad_train_opt = y_train[opt_idx_trad]
-        X_train_small, X_val_small, y_train_small, y_val_small = train_test_split(
-            X_trad_train_opt, y_trad_train_opt, test_size=0.5, random_state=42
-        )
-
-        opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
-        X_emb_train_opt = X_emb_train[opt_idx_emb]
-        y_emb_train_opt = y_train[opt_idx_emb]
-        X_train_small_emb, X_val_small_emb, y_train_small_emb, y_val_small_emb = train_test_split(
-            X_emb_train_opt, y_emb_train_opt, test_size=0.5, random_state=42
-        )
-
-        # 6) Traditional Model Tuning using Dual Annealing (holdout evaluation)
-        def objective_scipy_trad(params):
-            n_estimators = int(np.round(params[0]))
-            max_depth = int(np.round(params[1]))
-            learning_rate = params[2]
-            min_child_weight = int(np.round(params[3]))
-            gamma = params[4]
-            subsample = params[5]
-            model = xgb.XGBClassifier(
-                objective='binary:logistic',
-                scale_pos_weight=pos_weight,
-                n_jobs=64,
-                random_state=42,
-                use_label_encoder=False,
-                eval_metric='auc',
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                learning_rate=learning_rate,
-                min_child_weight=min_child_weight,
-                gamma=gamma,
-                subsample=subsample
-            )
-            model.fit(X_train_small, y_train_small)
-            prob = model.predict_proba(X_val_small)[:, 1]
-            auc = roc_auc_score(y_val_small, prob)
-            return -auc
-
-        # Simplified search space for faster tuning
-        bounds_trad = [
-            (10, 200),    # n_estimators
-            (3, 6),       # max_depth
-            (0.001, 0.05),# learning_rate
-            (1, 3),       # min_child_weight
-            (0, 0.2),     # gamma
-            (0.8, 1.0)    # subsample
-        ]
-
-        print("Optimizing traditional model using dual annealing...")
-        def callback_func(x, f, context):
-            print(f"Dual Annealing iteration complete: best value so far = {f}")
-            return False  # return True to stop early if you wish
-
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=10, callback=callback_func)
-        print("Optimal traditional parameters:", result_trad.x)
-        print("Best ROC-AUC (holdout):", -result_trad.fun)
-
-        opt_n_estimators = int(np.round(result_trad.x[0]))
-        opt_max_depth = int(np.round(result_trad.x[1]))
-        opt_learning_rate = result_trad.x[2]
-        opt_min_child_weight = int(np.round(result_trad.x[3]))
-        opt_gamma = result_trad.x[4]
-        opt_subsample = result_trad.x[5]
-
-        best_trad = xgb.XGBClassifier(
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            use_label_encoder=False,
-            eval_metric='auc',
-            n_estimators=opt_n_estimators,
-            max_depth=opt_max_depth,
-            learning_rate=opt_learning_rate,
-            min_child_weight=opt_min_child_weight,
-            gamma=opt_gamma,
-            subsample=opt_subsample
-        )
-        best_trad.fit(X_trad_train, y_train)
-        y_pred_trad = best_trad.predict(X_trad_val)
-        prob_trad = best_trad.predict_proba(X_trad_val)[:, 1]
-        print("\nTraditional Feature Model Performance:")
-        print(classification_report(y_val, y_pred_trad))
-
-        # 7) Embedding Model Tuning (if available) using holdout eval, no PCA
-        if X_emb is not None and len(embedding_features) > 0:
-            def objective_scipy_emb(params):
-                n_estimators = int(np.round(params[0]))
-                max_depth = int(np.round(params[1]))
-                learning_rate = params[2]
-                model = xgb.XGBClassifier(
-                    objective='binary:logistic',
-                    scale_pos_weight=pos_weight,
-                    n_jobs=64,
-                    random_state=42,
-                    use_label_encoder=False,
-                    eval_metric='auc',
-                    n_estimators=n_estimators,
-                    max_depth=max_depth,
-                    learning_rate=learning_rate
-                )
-                model.fit(X_train_small_emb, y_train_small_emb)
-                prob = model.predict_proba(X_val_small_emb)[:, 1]
-                auc = roc_auc_score(y_val_small_emb, prob)
-                return -auc
-
-            bounds_emb = [
-                (10, 200),   # n_estimators
-                (3, 100),    # max_depth
-                (0.001, 0.1)# learning_rate
-            ]
-
-
-            print("Optimizing embedding model using dual annealing...")
-            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=10, callback=callback_func)
-            print("Optimal embedding parameters:", result_emb.x)
-            print("Best ROC-AUC (holdout):", -result_emb.fun)
-
-            opt_n_estimators_emb = int(np.round(result_emb.x[0]))
-            opt_max_depth_emb = int(np.round(result_emb.x[1]))
-            opt_learning_rate_emb = result_emb.x[2]
-
-            best_emb = xgb.XGBClassifier(
-                objective='binary:logistic',
-                scale_pos_weight=pos_weight,
-                n_jobs=64,
-                random_state=42,
-                use_label_encoder=False,
-                eval_metric='auc',
-                n_estimators=opt_n_estimators_emb,
-                max_depth=opt_max_depth_emb,
-                learning_rate=opt_learning_rate_emb
-            )
-            best_emb.fit(X_emb_train, y_train)
-            y_pred_emb = best_emb.predict(X_emb_val)
-            prob_emb = best_emb.predict_proba(X_emb_val)[:, 1]
-            print("\nEmbedding Feature Model Performance:")
-            print(classification_report(y_val, y_pred_emb))
-        else:
-            best_emb = None
-            prob_emb = np.zeros_like(prob_trad)
-
-        # 8) Meta-Model (Stacking)
-        print("Training meta-model to blend predictions...")
-        trad_probs_train = best_trad.predict_proba(X_trad_train)[:, 1]
-        if best_emb is not None:
-            emb_probs_train = best_emb.predict_proba(X_emb_train)[:, 1]
-        else:
-            emb_probs_train = np.zeros_like(trad_probs_train)
-        meta_features_train = np.column_stack([trad_probs_train, emb_probs_train])
-        meta_features_val = np.column_stack([prob_trad, prob_emb])
-        meta_model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=2,
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            eval_metric='auc'
-        )
-        meta_model.fit(meta_features_train, y_train)
-        y_pred_meta = meta_model.predict(meta_features_val)
-        print("\nMeta-Model Performance:")
-        print(classification_report(y_val, y_pred_meta))
-        blend_weights = meta_model.feature_importances_
-        print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-
-        # 9) Apply to Full Dataset
-        print("Applying two-stage classifier to all data...")
-        trad_probs = best_trad.predict_proba(X_trad)[:, 1]
-        if best_emb is not None:
-            emb_probs = best_emb.predict_proba(X_emb)[:, 1]
-        else:
-            emb_probs = np.zeros_like(trad_probs)
-        meta_features_full = np.column_stack([trad_probs, emb_probs])
-        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-
-        self.model_trad = best_trad
-        self.model_emb = best_emb
-        self.model_meta = meta_model
-        self.filtered_data['cv_prob_trad'] = trad_probs
-        self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = final_probs
-
-        # 10) Save Models
-        import os
-        os.makedirs(self.output_dir, exist_ok=True)
-        joblib.dump(best_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        if best_emb is not None:
-            joblib.dump(best_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-
-        # 11) Plot Probability Distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(final_probs, bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
-        plt.yscale('log')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
-        plt.close()
-
-        print("Two-stage classifier training complete.")
-        return True
-
-
-
-
-    def train_two_stage_classifier(self):
-        """
-        Train a two-stage classifier combining traditional feature-based models with
-        embedding-based models for optimal CV candidate selection.
-
-        This version uses cross-validated stacking, probability calibration (using cv),
-        and a meta-model with less aggressive regularization to properly blend both models.
-        """
-        import logging
-        import numpy as np
-        import pandas as pd
-        import xgboost as xgb
-        from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_predict
-        from sklearn.metrics import classification_report, roc_auc_score
-        from sklearn.calibration import CalibratedClassifierCV
-        import joblib
-        import matplotlib.pyplot as plt
-        import scipy.optimize as spo
-        import os
-
-        logging.basicConfig(level=logging.INFO)
-        logger = logging.getLogger(__name__)
-
-        # 1) Check for features
-        if not hasattr(self, 'scaled_features') or len(self.scaled_features) == 0:
-            logger.error("No features available. Call extract_features() first.")
-            return False
-
-        print("Training two-stage CV classifier...")
-
-        # 2) Load known CV IDs
-        known_ids = self.load_known_cvs()
-        if known_ids is None or len(known_ids) == 0:
-            logger.error("No known CVs available for training. Classifier aborted.")
-            return False
-
-        # 3) Identify ID column and create binary labels
-        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
-        id_col = next((col for col in id_columns if col in self.filtered_data.columns), None)
-        if id_col is None:
-            logger.error("No suitable identifier column found in candidate data.")
-            return False
-
-        print(f"Using identifier column '{id_col}' for matching")
-        candidate_ids = self.filtered_data[id_col].astype(str)
-        y = candidate_ids.isin(known_ids).astype(int)
-        positive_count = y.sum()
-        print(f"Found {positive_count} matches between known CVs and candidate sources")
-        if positive_count < 10:
-            logger.warning(f"Very few positive examples ({positive_count}). Classification may be unreliable.")
-            if positive_count < 3:
-                logger.error("Insufficient positive examples for training. Aborting classifier.")
-                return False
-
-        # 4) Separate Traditional and Embedding features
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
-        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-
-        print(f"Traditional features: {len(traditional_features)}")
-        print(f"Embedding features: {len(embedding_features)}")
-
-        X_trad = self.scaled_features[traditional_features].values
-        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
-
-        # 5) Train-test split
-        X_indices = np.arange(len(X_trad))
-        train_indices, val_indices = train_test_split(X_indices, test_size=0.25, random_state=42, stratify=y)
-        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
-        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        if X_emb is not None:
-            X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
-
-        # Handle class imbalance
-        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
-
-        # NEW: Create a small tuning subset (10% of training data)
-        opt_frac = 0.2
-
-        opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
-        X_trad_train_opt = X_trad_train[opt_idx_trad]
-        y_trad_train_opt = y_train[opt_idx_trad]
-        X_train_small, X_val_small, y_train_small, y_val_small = train_test_split(
-            X_trad_train_opt, y_trad_train_opt, test_size=0.5, random_state=42
-        )
-
-        opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
-        X_emb_train_opt = X_emb_train[opt_idx_emb]
-        y_emb_train_opt = y_train[opt_idx_emb]
-        X_train_small_emb, X_val_small_emb, y_train_small_emb, y_val_small_emb = train_test_split(
-            X_emb_train_opt, y_emb_train_opt, test_size=0.5, random_state=42
-        )
-
-        # 6) Traditional Model Tuning using Dual Annealing (holdout evaluation)
-        def objective_scipy_trad(params):
-            n_estimators = int(np.round(params[0]))
-            max_depth = int(np.round(params[1]))
-            learning_rate = params[2]
-            min_child_weight = int(np.round(params[3]))
-            gamma = params[4]
-            subsample = params[5]
-            model = xgb.XGBClassifier(
-                objective='binary:logistic',
-                scale_pos_weight=pos_weight,
-                n_jobs=64,
-                random_state=42,
-                use_label_encoder=False,
-                eval_metric='auc',
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                learning_rate=learning_rate,
-                min_child_weight=min_child_weight,
-                gamma=gamma,
-                subsample=subsample
-            )
-            model.fit(X_train_small, y_train_small)
-            prob = model.predict_proba(X_val_small)[:, 1]
-            auc = roc_auc_score(y_val_small, prob)
-            return -auc
-
-        # Simplified search space for faster tuning
-        bounds_trad = [
-            (10, 200),    # n_estimators
-            (3, 6),       # max_depth
-            (0.001, 0.05),# learning_rate
-            (1, 3),       # min_child_weight
-            (0, 0.2),     # gamma
-            (0.8, 1.0)    # subsample
-        ]
-
-        print("Optimizing traditional model using dual annealing...")
-        def callback_func(x, f, context):
-            print(f"Dual Annealing iteration complete: best value so far = {f}")
-            return False  # keep going
-
-        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=30, callback=callback_func)
-        print("Optimal traditional parameters:", result_trad.x)
-        print("Best ROC-AUC (holdout):", -result_trad.fun)
-
-        opt_n_estimators = int(np.round(result_trad.x[0]))
-        opt_max_depth = int(np.round(result_trad.x[1]))
-        opt_learning_rate = result_trad.x[2]
-        opt_min_child_weight = int(np.round(result_trad.x[3]))
-        opt_gamma = result_trad.x[4]
-        opt_subsample = result_trad.x[5]
-
-        best_trad = xgb.XGBClassifier(
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            use_label_encoder=False,
-            eval_metric='auc',
-            n_estimators=opt_n_estimators,
-            max_depth=opt_max_depth,
-            learning_rate=opt_learning_rate,
-            min_child_weight=opt_min_child_weight,
-            gamma=opt_gamma,
-            subsample=opt_subsample
-        )
-        best_trad.fit(X_trad_train, y_train)
-        y_pred_trad = best_trad.predict(X_trad_val)
-        prob_trad = best_trad.predict_proba(X_trad_val)[:, 1]
-        print("\nTraditional Feature Model Performance:")
-        print(classification_report(y_val, y_pred_trad))
-
-        # 7) Embedding Model Tuning (if available) using holdout eval, no PCA
-        if X_emb is not None and len(embedding_features) > 0:
-            def objective_scipy_emb(params):
-                n_estimators = int(np.round(params[0]))
-                max_depth = int(np.round(params[1]))
-                learning_rate = params[2]
-                model = xgb.XGBClassifier(
-                    objective='binary:logistic',
-                    scale_pos_weight=pos_weight,
-                    n_jobs=64,
-                    random_state=42,
-                    use_label_encoder=False,
-                    eval_metric='auc',
-                    n_estimators=n_estimators,
-                    max_depth=max_depth,
-                    learning_rate=learning_rate
-                )
-                model.fit(X_train_small_emb, y_train_small_emb)
-                prob = model.predict_proba(X_val_small_emb)[:, 1]
-                auc = roc_auc_score(y_val_small_emb, prob)
-                return -auc
-
-            bounds_emb = [
-                (10, 200),   # n_estimators
-                (3, 100),    # max_depth
-                (0.001, 0.1) # learning_rate
-            ]
-
-            print("Optimizing embedding model using dual annealing...")
-            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=40, callback=callback_func)
-            print("Optimal embedding parameters:", result_emb.x)
-            print("Best ROC-AUC (holdout):", -result_emb.fun)
-
-            opt_n_estimators_emb = int(np.round(result_emb.x[0]))
-            opt_max_depth_emb = int(np.round(result_emb.x[1]))
-            opt_learning_rate_emb = result_emb.x[2]
-
-            best_emb = xgb.XGBClassifier(
-                objective='binary:logistic',
-                scale_pos_weight=pos_weight,
-                n_jobs=64,
-                random_state=42,
-                use_label_encoder=False,
-                eval_metric='auc',
-                n_estimators=opt_n_estimators_emb,
-                max_depth=opt_max_depth_emb,
-                learning_rate=opt_learning_rate_emb
-            )
-            best_emb.fit(X_emb_train, y_train)
-            y_pred_emb = best_emb.predict(X_emb_val)
-            prob_emb = best_emb.predict_proba(X_emb_val)[:, 1]
-            print("\nEmbedding Feature Model Performance:")
-            print(classification_report(y_val, y_pred_emb))
-        else:
-            best_emb = None
-            prob_emb = np.zeros_like(prob_trad)
-
-        # 8) Meta-Model (Stacking) with Cross-Validated Stacking and Calibration
-        print("Training meta-model to blend predictions with cross-validated stacking and calibration...")
-        skf_meta = StratifiedKFold(n_splits=2, shuffle=True, random_state=42)
-        
-        # Use cross-validation for calibration instead of prefit mode
-        calibrated_trad = CalibratedClassifierCV(best_trad, cv=skf_meta, method='sigmoid')
-        calibrated_trad.fit(X_trad_train, y_train)
-        if best_emb is not None:
-            calibrated_emb = CalibratedClassifierCV(best_emb, cv=skf_meta, method='sigmoid')
-            calibrated_emb.fit(X_emb_train, y_train)
-        else:
-            calibrated_emb = None
-
-        # Use cross_val_predict to obtain out-of-fold predictions for the meta-model
-        trad_oof = cross_val_predict(calibrated_trad, X_trad_train, y_train, cv=skf_meta, method='predict_proba')[:, 1]
-        if calibrated_emb is not None:
-            emb_oof = cross_val_predict(calibrated_emb, X_emb_train, y_train, cv=skf_meta, method='predict_proba')[:, 1]
-        else:
-            emb_oof = np.zeros_like(trad_oof)
-        meta_features_train = np.column_stack([trad_oof, emb_oof])
-
-        # Train the meta-model with slightly less aggressive regularization
-        meta_model = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=3,  # a bit more flexible
-            learning_rate=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            eval_metric='auc'
-        )
-        meta_model.fit(meta_features_train, y_train)
-
-        # Validate meta-model using calibrated predictions on the holdout set
-        trad_probs_val = calibrated_trad.predict_proba(X_trad_val)[:, 1]
-        if calibrated_emb is not None:
-            emb_probs_val = calibrated_emb.predict_proba(X_emb_val)[:, 1]
-        else:
-            emb_probs_val = np.zeros_like(trad_probs_val)
-        meta_features_val = np.column_stack([trad_probs_val, emb_probs_val])
-        y_pred_meta = meta_model.predict(meta_features_val)
-        print("\nMeta-Model Performance:")
-        print(classification_report(y_val, y_pred_meta))
-        blend_weights = meta_model.feature_importances_
-        print(f"\nModel blend weights: Traditional {blend_weights[0]:.2f}, Embedding {blend_weights[1]:.2f}")
-
-        # 9) Apply to Full Dataset using calibrated models
-        print("Applying two-stage classifier to all data...")
-        trad_probs = calibrated_trad.predict_proba(X_trad)[:, 1]
-        if calibrated_emb is not None:
-            emb_probs = calibrated_emb.predict_proba(X_emb)[:, 1]
-        else:
-            emb_probs = np.zeros_like(trad_probs)
-        meta_features_full = np.column_stack([trad_probs, emb_probs])
-        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
-
-        self.model_trad = best_trad
-        self.model_emb = best_emb
-        self.model_meta = meta_model
-        self.filtered_data['cv_prob_trad'] = trad_probs
-        self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = final_probs
-
-        # 10) Save Models
-        os.makedirs(self.output_dir, exist_ok=True)
-        joblib.dump(best_trad, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        if best_emb is not None:
-            joblib.dump(best_emb, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-
-        # 11) Plot Probability Distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(final_probs, bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
-        plt.yscale('log')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
-        plt.close()
-
-        print("Two-stage classifier training complete.")
-        return True
-
-
-
-
-
-    def train_two_stage_classifier(self):
-        """
-        Optimized two-stage classifier using best hyperparameters found in previous runs:
-        1. Pre-tuned XGBoost for traditional features
-        2. Pre-tuned XGBoost for embedding features 
-        3. Fixed neural network meta-model with proper AUC optimization
-        """
-        import numpy as np
-        import pandas as pd
-        import xgboost as xgb
-        import time
-        from sklearn.model_selection import train_test_split
-        from sklearn.metrics import classification_report, roc_auc_score
-        import joblib
-        import matplotlib.pyplot as plt
-        import os
-        
-        # For the neural network meta-model
-        import tensorflow as tf
-        from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import Dense, Dropout
-        from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-        
-        print("\n" + "="*80)
-        print("TRAINING OPTIMIZED TWO-STAGE CV CLASSIFIER")
-        print("="*80 + "\n")
-        
-        start_time = time.time()
-        
-        # 1) Load known CV IDs
-        known_ids = self.load_known_cvs()
-        
-        # 2) Create binary labels
-        candidate_ids = self.filtered_data['sourceid'].astype(str)
-        y = candidate_ids.isin(known_ids).astype(int)
-        print(f"Found {y.sum()} known CVs in dataset of {len(y)} candidates ({100*y.sum()/len(y):.2f}%)")
-        
-        # 3) Separate Traditional and Embedding features
-        cc_embedding_cols = [str(i) for i in range(64)]
-        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
-        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
-        
-        print(f"Traditional features: {len(traditional_features)}")
-        print(f"Embedding features: {len(embedding_features)}")
-        
-        X_trad = self.scaled_features[traditional_features].values
-        X_emb = self.scaled_features[embedding_features].values
-        
-        # 4) Train-test split
-        X_indices = np.arange(len(X_trad))
-        train_indices, val_indices = train_test_split(
-            X_indices, test_size=0.25, random_state=42, stratify=y
-        )
-        
-        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
-        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
-        X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
-        
-        # Get class weight
-        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train)
-        
-        # ========================================================
-        # 5) CREATE TRADITIONAL FEATURES MODEL WITH BEST HYPERPARAMETERS
-        # ========================================================
-        print("\n" + "="*50)
-        print("TRADITIONAL FEATURES MODEL (BEST PARAMS)")
-        print("="*50)
-        
-        # Use best parameters from previous grid search
-        trad_model = xgb.XGBClassifier(
-            n_estimators=1000,
-            max_depth=3,
-            learning_rate=0.01,
-            min_child_weight=1,
-            subsample=0.7,
-            colsample_bytree=0.7,
-            gamma=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            use_label_encoder=False
-        )
-        
-        print("Training traditional model with best hyperparameters...")
-        trad_model.fit(X_trad_train, y_train, verbose=True)
-        
-        # ========================================================
-        # 6) CREATE EMBEDDING FEATURES MODEL WITH BEST HYPERPARAMETERS
-        # ========================================================
-        print("\n" + "="*50)
-        print("EMBEDDING FEATURES MODEL (BEST PARAMS)")
-        print("="*50)
-        
-        # Use best parameters from previous grid search
-        emb_model = xgb.XGBClassifier(
-            n_estimators=1000, 
-            max_depth=7,
-            learning_rate=0.05,
-            min_child_weight=5,
-            subsample=0.7,
-            colsample_bytree=0.8,
-            gamma=0.1,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42,
-            use_label_encoder=False
-        )
-        
-        print("Training embedding model with best hyperparameters...")
-        emb_model.fit(X_emb_train, y_train, verbose=True)
-        
-        # ========================================================
-        # 7) CREATE META-FEATURES 
-        # ========================================================
-        print("\n" + "="*50)
-        print("PREPARING META-FEATURES")
-        print("="*50)
-        
-        # Generate base model predictions for training
-        trad_probs_train = trad_model.predict_proba(X_trad_train)[:, 1]
-        emb_probs_train = emb_model.predict_proba(X_emb_train)[:, 1]
-        
-        # Generate base model predictions for validation
-        trad_probs_val = trad_model.predict_proba(X_trad_val)[:, 1]
-        emb_probs_val = emb_model.predict_proba(X_emb_val)[:, 1]
-        
-        # Keep the meta-features simple to avoid overfitting
-        meta_features_train = np.column_stack([
-            trad_probs_train, 
-            emb_probs_train
-        ])
-        
-        meta_features_val = np.column_stack([
-            trad_probs_val, 
-            emb_probs_val
-        ])
-        
-        # Check validation AUC for base models
-        trad_auc = roc_auc_score(y_val, trad_probs_val)
-        emb_auc = roc_auc_score(y_val, emb_probs_val)
-        
-        print(f"Traditional model validation AUC: {trad_auc:.4f}")
-        print(f"Embedding model validation AUC: {emb_auc:.4f}")
-        
-        # ========================================================
-        # 8) TRY DIFFERENT META-MODEL APPROACHES 
-        # ========================================================
-        print("\n" + "="*50)
-        print("TESTING DIFFERENT META-MODEL APPROACHES")
-        print("="*50)
-        
-        # METHOD 1: SIMPLE XGBoost META-MODEL
-        meta_xgb = xgb.XGBClassifier(
-            n_estimators=100,
-            max_depth=2,
-            learning_rate=0.05,
-            objective='binary:logistic',
-            scale_pos_weight=pos_weight,
-            n_jobs=-1,
-            random_state=42
-        )
-        meta_xgb.fit(meta_features_train, y_train)
-        meta_xgb_probs_val = meta_xgb.predict_proba(meta_features_val)[:, 1]
-        xgb_meta_auc = roc_auc_score(y_val, meta_xgb_probs_val)
-        print(f"XGBoost meta-model validation AUC: {xgb_meta_auc:.4f}")
-        
-        # METHOD 2: SIMPLE NEURAL NETWORK
-        nn_start_time = time.time()
-        print("\nTraining simple neural network meta-model...")
-        
-        # Callbacks for early stopping
-        callbacks = [
-            EarlyStopping(
-                monitor='val_auc', 
-                patience=10, 
-                mode='max',
-                restore_best_weights=True, 
-                verbose=1
-            ),
-            ReduceLROnPlateau(
-                monitor='val_auc', 
-                factor=0.5, 
-                patience=5, 
-                mode='max', 
-                min_lr=0.00001, 
-                verbose=1
-            )
-        ]
-        
-        # Create a simple neural network
-        simple_nn = Sequential([
-            Dense(8, input_shape=(meta_features_train.shape[1],), activation='relu'),
-            Dropout(0.2),
-            Dense(4, activation='relu'),
-            Dense(1, activation='sigmoid')
-        ])
-        
-        simple_nn.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-            loss='binary_crossentropy',
-            metrics=[tf.keras.metrics.AUC(name='auc')]
-        )
-        
-        simple_nn.summary()
-        
-        # Train the model
-        history = simple_nn.fit(
-            meta_features_train, y_train,
-            validation_data=(meta_features_val, y_val),
-            epochs=50,
-            batch_size=64,
-            callbacks=callbacks,
-            verbose=2
-        )
-        
-        simple_nn_time = time.time() - nn_start_time
-        print(f"\nSimple neural network meta-model training completed in {simple_nn_time:.2f} seconds")
-        
-        # METHOD 3: WEIGHTED AVERAGE (as fallback)
-        # Use best performing model weight more heavily
-        if trad_auc > emb_auc:
-            weight_trad = 0.9
-            weight_emb = 0.1
-        else:
-            weight_trad = 0.1
-            weight_emb = 0.9
-        
-        weighted_probs_val = weight_trad * trad_probs_val + weight_emb * emb_probs_val
-        weighted_auc = roc_auc_score(y_val, weighted_probs_val)
-        print(f"Weighted average validation AUC: {weighted_auc:.4f}")
-        
-        # METHOD 4: CHECK IF INVERSE META-MODEL PREDICTIONS WORK BETTER
-        meta_nn_probs_val = simple_nn.predict(meta_features_val, verbose=0).flatten()
-        nn_auc = roc_auc_score(y_val, meta_nn_probs_val)
-        nn_auc_inverse = roc_auc_score(y_val, 1 - meta_nn_probs_val)
-        
-        if nn_auc_inverse > nn_auc:
-            print(f"Inverted NN AUC is better: {nn_auc_inverse:.4f} vs {nn_auc:.4f}")
-            meta_nn_probs_val = 1 - meta_nn_probs_val
-            nn_auc = nn_auc_inverse
-        else:
-            print(f"Original NN AUC: {nn_auc:.4f}, Inverted: {nn_auc_inverse:.4f}")
-        
-        # ========================================================
-        # 9) SELECT BEST META-MODEL & APPLY TO ALL DATA
-        # ========================================================
-        print("\n" + "="*50)
-        print("SELECTING BEST META-MODEL & APPLYING TO ALL DATA")
-        print("="*50)
-        
-        # Compare all approaches and select best
-        all_models = {
-            "traditional": (trad_model, trad_auc),
-            "embedding": (emb_model, emb_auc),
-            "xgb_meta": (meta_xgb, xgb_meta_auc),
-            "simple_nn": (simple_nn, nn_auc),
-            "weighted_avg": (None, weighted_auc)
-        }
-        
-        best_model_name = max(all_models, key=lambda k: all_models[k][1])
-        best_auc = all_models[best_model_name][1]
-        
-        print(f"Best model is {best_model_name} with AUC: {best_auc:.4f}")
-        
-        # Apply the best approach to all data
-        print("\nApplying the best approach to all data...")
-        
-        # Get predictions from both base models for all data
-        trad_probs = trad_model.predict_proba(X_trad)[:, 1]
-        emb_probs = emb_model.predict_proba(X_emb)[:, 1]
-        
-        # Create meta-features for all data
-        meta_features_full = np.column_stack([
-            trad_probs, 
-            emb_probs
-        ])
-        
-        # Set final probabilities based on best approach
-        if best_model_name == "traditional":
-            final_probs = trad_probs
-            print("Using traditional model predictions as final")
-        elif best_model_name == "embedding":
-            final_probs = emb_probs
-            print("Using embedding model predictions as final")
-        elif best_model_name == "xgb_meta":
-            final_probs = meta_xgb.predict_proba(meta_features_full)[:, 1]
-            print("Using XGBoost meta-model predictions as final")
-        elif best_model_name == "simple_nn":
-            final_probs = simple_nn.predict(meta_features_full, verbose=0).flatten()
-            # Check if inversion was better
-            if nn_auc_inverse > nn_auc:
-                final_probs = 1 - final_probs
-                print("Using inverted neural network meta-model predictions as final")
-            else:
-                print("Using neural network meta-model predictions as final")
-        else:  # weighted_avg
-            final_probs = weight_trad * trad_probs + weight_emb * emb_probs
-            print(f"Using weighted average predictions as final (trad:{weight_trad:.2f}, emb:{weight_emb:.2f})")
-        
-        # Display feature importance for traditional model
-        print("\nTop traditional features by importance:")
-        importance = trad_model.feature_importances_
-        indices = np.argsort(importance)[::-1]
-        for i in range(min(10, len(traditional_features))):
-            print(f"  {i+1}. {traditional_features[indices[i]]}: {importance[indices[i]]:.4f}")
-        
-        # ========================================================
-        # 10) STORE MODELS AND PROBABILITIES
-        # ========================================================
-        # Store models for later use
-        self.model_trad = trad_model
-        self.model_emb = emb_model
-        
-        if best_model_name == "simple_nn":
-            self.model_meta = simple_nn
-        elif best_model_name == "xgb_meta":
-            self.model_meta = meta_xgb
-        else:
-            # For other approaches, store primary model as meta
-            self.model_meta = trad_model if best_model_name == "traditional" else emb_model
-        
-        # For compatibility
-        self.model = self.model_meta
-        
-        # Add predictions to filtered_data
-        self.filtered_data['cv_prob_trad'] = trad_probs
-        self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = final_probs
-        
-        # Find the top candidates
-        sorted_indices = np.argsort(final_probs)[::-1]  # Sort in descending order
-        sorted_probs = final_probs[sorted_indices]
-        
-        print("\n" + "="*50)
-        print("CANDIDATE CONFIDENCE LEVELS")
-        print("="*50)
-        
-        if len(sorted_probs) >= 100:
-            print(f"Top candidate confidence:    {sorted_probs[0]:.4f}")
-            print(f"10th candidate confidence:   {sorted_probs[9]:.4f}")
-            print(f"50th candidate confidence:   {sorted_probs[49]:.4f}")
-            print(f"100th candidate confidence:  {sorted_probs[99]:.4f}")
-            if len(sorted_probs) >= 200:
-                print(f"200th candidate confidence:  {sorted_probs[199]:.4f}")
-        else:
-            print(f"Top candidate confidence:    {sorted_probs[0]:.4f}")
-            print(f"Last candidate confidence:   {sorted_probs[-1]:.4f}")
-        print("="*50)
-        
-        # Save models
-        os.makedirs(self.output_dir, exist_ok=True)
-        joblib.dump(trad_model, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        joblib.dump(emb_model, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        
-        # For neural network, save in TensorFlow format
-        if best_model_name == "simple_nn":
-            simple_nn.save(os.path.join(self.output_dir, 'cv_classifier_meta_nn'))
-        # For XGBoost meta model
-        elif best_model_name == "xgb_meta":
-            joblib.dump(meta_xgb, os.path.join(self.output_dir, 'cv_classifier_meta_xgb.joblib'))
-        
-        # Plot training history for neural network
-        if best_model_name == "simple_nn":
-            plt.figure(figsize=(12, 5))
-            plt.subplot(1, 2, 1)
-            plt.plot(history.history['loss'], label='Training Loss')
-            plt.plot(history.history['val_loss'], label='Validation Loss')
-            plt.xlabel('Epoch')
-            plt.ylabel('Loss')
-            plt.title('Loss Curves')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            
-            plt.subplot(1, 2, 2)
-            plt.plot(history.history['auc'], label='Training AUC')
-            plt.plot(history.history['val_auc'], label='Validation AUC')
-            plt.xlabel('Epoch')
-            plt.ylabel('AUC')
-            plt.title('AUC Curves')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.output_dir, 'neural_network_training_history.png'), dpi=300)
-            plt.close()
-        
-        # Plot probability distribution
-        plt.figure(figsize=(10, 6))
-        plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
-        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
-        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability')
-        plt.ylabel('Number of Sources')
-        plt.title('Distribution of CV Probabilities')
-        plt.yscale('log')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
-        plt.close()
-        
-        # Compare model predictions
-        plt.figure(figsize=(10, 8))
-        plt.scatter(trad_probs, emb_probs, c=final_probs, cmap='viridis', 
-                    alpha=0.6, s=5, edgecolors='none')
-        plt.colorbar(label='Final Probability')
-        plt.xlabel('Traditional Model Probability')
-        plt.ylabel('Embedding Model Probability')
-        plt.title('Comparison of Model Predictions')
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(self.output_dir, 'model_prediction_comparison.png'), dpi=300)
-        plt.close()
-        
-        total_time = time.time() - start_time
-        print(f"\nTwo-stage classifier training completed in {total_time:.2f} seconds")
-        print(f"All results saved to: {self.output_dir}")
-        
-        return True        
-
-
-
-
-    def train_two_stage_classifier(self):
-        """
         Streamlined two-stage classifier that combines traditional features and embeddings
         using weighted averaging - simple, robust, and effective.
         """
@@ -2535,6 +1503,220 @@ class PrimvsCVFinder:
 
 
 
+
+
+
+
+    def plot_roc_curves(self):
+        """
+        Create ROC curves comparing the traditional, embedding, and ensemble models.
+        
+        This function evaluates all three models on the validation set and generates
+        ROC curves with AUC scores to visualize their relative performance.
+        """
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from sklearn.metrics import roc_curve, auc, roc_auc_score
+        from sklearn.model_selection import train_test_split
+        import os
+        
+        print("Generating ROC curve comparison...")
+        
+        # Check if we have the models
+        if not hasattr(self, 'model_trad') or self.model_trad is None:
+            print("Error: Traditional model not available. Train the classifier first.")
+            return False
+            
+        if not hasattr(self, 'model_emb') or self.model_emb is None:
+            print("Error: Embedding model not available. Train the classifier first.")
+            return False
+        
+        # Prepare the data
+        known_ids = self.load_known_cvs()
+        if known_ids is None or len(known_ids) == 0:
+            print("Error: No known CVs available for evaluation.")
+            return False
+        
+        # Determine ID column for matching
+        id_columns = ['sourceid', 'primvs_id', 'source_id', 'id']
+        id_col = None
+        for col in id_columns:
+            if col in self.filtered_data.columns:
+                id_col = col
+                break
+        
+        if id_col is None:
+            print("Error: No suitable identifier column found in data.")
+            return False
+        
+        # Create binary classification labels
+        candidate_ids = self.filtered_data[id_col].astype(str)
+        y = candidate_ids.isin(known_ids).astype(int)
+        
+        # Split features into traditional and embedding sets
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in cc_embedding_cols if col in self.scaled_features.columns]
+        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+        
+        # Extract feature sets
+        X_trad = self.scaled_features[traditional_features].values
+        X_emb = self.scaled_features[embedding_features].values if embedding_features else None
+        
+        # Split data for validation
+        X_indices = np.arange(len(X_trad))
+        train_indices, val_indices = train_test_split(
+            X_indices, test_size=0.25, random_state=42, stratify=y
+        )
+        
+        X_trad_val = X_trad[val_indices]
+        y_val = y.iloc[val_indices].values
+        
+        # Get predictions from traditional model
+        y_score_trad = self.model_trad.predict_proba(X_trad_val)[:, 1]
+        
+        # Get predictions from embedding model if available
+        if X_emb is not None and hasattr(self, 'model_emb') and self.model_emb is not None:
+            X_emb_val = X_emb[val_indices]
+            
+            # Apply PCA transformation if necessary
+            if hasattr(self, 'pca') and self.pca is not None:
+                X_emb_val_pca = self.pca.transform(X_emb_val)
+                y_score_emb = self.model_emb.predict_proba(X_emb_val_pca)[:, 1]
+            else:
+                y_score_emb = self.model_emb.predict_proba(X_emb_val)[:, 1]
+        else:
+            y_score_emb = np.zeros_like(y_score_trad)
+        
+        # Get ensemble predictions
+        meta_features_val = np.column_stack([y_score_trad, y_score_emb])
+        y_score_ensemble = self.model_meta.predict_proba(meta_features_val)[:, 1] if hasattr(self, 'model_meta') else None
+        
+        # If we don't have a meta model, try to determine the ensemble weights from CV probabilities
+        if y_score_ensemble is None and 'cv_prob_trad' in self.filtered_data and 'cv_prob_emb' in self.filtered_data:
+            # Estimate weights by looking at the full dataset
+            trad_probs = self.filtered_data['cv_prob_trad'].values
+            emb_probs = self.filtered_data['cv_prob_emb'].values
+            cv_probs = self.filtered_data['cv_prob'].values
+            
+            # Simple linear regression to estimate weights
+            from sklearn.linear_model import LinearRegression
+            X_weights = np.column_stack([trad_probs, emb_probs])
+            reg = LinearRegression(fit_intercept=False).fit(X_weights, cv_probs)
+            
+            # Apply estimated weights to validation set
+            trad_weight = reg.coef_[0]
+            emb_weight = reg.coef_[1]
+            y_score_ensemble = trad_weight * y_score_trad + emb_weight * y_score_emb
+            
+            print(f"Estimated ensemble weights: Traditional {trad_weight:.2f}, Embedding {emb_weight:.2f}")
+        
+        # If still no ensemble, use simple average
+        if y_score_ensemble is None:
+            y_score_ensemble = 0.5 * y_score_trad + 0.5 * y_score_emb
+            print("Using simple average for ensemble model (0.5/0.5)")
+        
+        # Calculate ROC curve and AUC for each model
+        fpr_trad, tpr_trad, _ = roc_curve(y_val, y_score_trad)
+        roc_auc_trad = auc(fpr_trad, tpr_trad)
+        
+        fpr_emb, tpr_emb, _ = roc_curve(y_val, y_score_emb)
+        roc_auc_emb = auc(fpr_emb, tpr_emb)
+        
+        fpr_ens, tpr_ens, _ = roc_curve(y_val, y_score_ensemble)
+        roc_auc_ens = auc(fpr_ens, tpr_ens)
+        
+        # Plot all ROC curves
+        plt.figure(figsize=(10, 8))
+        
+        # Plot Traditional model
+        plt.plot(
+            fpr_trad, tpr_trad,
+            lw=2, label=f'Traditional Model (AUC = {roc_auc_trad:.3f})',
+            color='blue'
+        )
+        
+        # Plot Embedding model
+        plt.plot(
+            fpr_emb, tpr_emb,
+            lw=2, label=f'Embedding Model (AUC = {roc_auc_emb:.3f})',
+            color='green'
+        )
+        
+        # Plot Ensemble model
+        plt.plot(
+            fpr_ens, tpr_ens,
+            lw=2, label=f'Ensemble Model (AUC = {roc_auc_ens:.3f})',
+            color='red'
+        )
+        
+        # Plot diagonal
+        plt.plot([0, 1], [0, 1], 'k--', lw=2)
+        
+        # Set plot properties
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curves: CV Classification Models Comparison')
+        plt.legend(loc="lower right")
+        plt.grid(True, alpha=0.3)
+        
+        # Save the plot
+        os.makedirs(self.output_dir, exist_ok=True)
+        plt.savefig(os.path.join(self.output_dir, 'roc_curves_comparison.png'), dpi=300)
+        plt.close()
+        
+        print(f"ROC curve comparison saved to {os.path.join(self.output_dir, 'roc_curves_comparison.png')}")
+        
+        # Also create a zoomed-in view of the top-left corner
+        plt.figure(figsize=(10, 8))
+        
+        # Plot Traditional model
+        plt.plot(
+            fpr_trad, tpr_trad,
+            lw=2, label=f'Traditional Model (AUC = {roc_auc_trad:.3f})',
+            color='blue'
+        )
+        
+        # Plot Embedding model
+        plt.plot(
+            fpr_emb, tpr_emb,
+            lw=2, label=f'Embedding Model (AUC = {roc_auc_emb:.3f})',
+            color='green'
+        )
+        
+        # Plot Ensemble model
+        plt.plot(
+            fpr_ens, tpr_ens,
+            lw=2, label=f'Ensemble Model (AUC = {roc_auc_ens:.3f})',
+            color='red'
+        )
+        
+        # Plot diagonal
+        plt.plot([0, 1], [0, 1], 'k--', lw=2)
+        
+        # Set plot properties for zoomed view
+        plt.xlim([0.0, 0.3])
+        plt.ylim([0.7, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curves: CV Models Comparison (Zoomed)')
+        plt.legend(loc="lower right")
+        plt.grid(True, alpha=0.3)
+        
+        # Save the zoomed plot
+        plt.savefig(os.path.join(self.output_dir, 'roc_curves_comparison_zoomed.png'), dpi=300)
+        plt.close()
+        
+        print(f"Zoomed ROC curve comparison saved to {os.path.join(self.output_dir, 'roc_curves_comparison_zoomed.png')}")
+        
+        return True
+
+
+
+
+
+
     def run_pipeline(self):
         """Run the complete CV finder pipeline with two-stage classification."""
         start_time = time.time()
@@ -2561,6 +1743,7 @@ class PrimvsCVFinder:
         self.post_processing_plots()
         self.analyze_period_gap_distribution()
         self.analyze_galactic_regions()
+        self.plot_roc_curves()
 
         end_time = time.time()
         runtime = end_time - start_time
