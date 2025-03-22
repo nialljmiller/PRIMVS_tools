@@ -1960,29 +1960,23 @@ class PrimvsCVFinder:
 
 
 
+
+
     def train_two_stage_classifier(self):
         """
         Train a two-stage classifier combining traditional feature-based models with
         embedding-based models for optimal CV candidate selection.
-        
-        Enhanced version with:
-        - Feature selection for traditional features
-        - Early stopping and calibration for model robustness
-        - Stratified cross-validation and focal loss for small positive class
         """
         import numpy as np
         import pandas as pd
         import xgboost as xgb
-        from sklearn.model_selection import train_test_split, StratifiedKFold
-        from sklearn.feature_selection import VarianceThreshold
+        from sklearn.model_selection import train_test_split
         from sklearn.metrics import classification_report
-        from sklearn.calibration import CalibratedClassifierCV
-        from sklearn.preprocessing import StandardScaler
         import joblib
         import matplotlib.pyplot as plt
         import os
         
-        print("Training two-stage CV classifier (enhanced version)...")
+        print("Training two-stage CV classifier...")
         
         # 1) Load known CV IDs
         known_ids = self.load_known_cvs()
@@ -1997,25 +1991,13 @@ class PrimvsCVFinder:
         embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
         traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
         
-        # 4) Feature selection for traditional features
-        # 4.1) Remove near-zero variance features
-        X_trad_df = pd.DataFrame(self.scaled_features[traditional_features])
-        selector = VarianceThreshold(threshold=0.01)  # Remove features with variance below 0.01
-        selector.fit(X_trad_df)
-        selected_indices = selector.get_support(indices=True)
-        selected_features = [traditional_features[i] for i in selected_indices]
+        print(f"Traditional features: {len(traditional_features)}")
+        print(f"Embedding features: {len(embedding_features)}")
         
-        # 4.2) Keep features if they are particularly useful for CV detection
-        important_cv_features = ['true_period', 'true_amplitude', 'skew', 'kurt', 'p_to_p_var']
-        for feature in important_cv_features:
-            if feature in traditional_features and feature not in selected_features:
-                selected_features.append(feature)
-        
-        print(f"Selected {len(selected_features)} out of {len(traditional_features)} traditional features")
-        X_trad = self.scaled_features[selected_features].values
+        X_trad = self.scaled_features[traditional_features].values
         X_emb = self.scaled_features[embedding_features].values
         
-        # 5) Train-test split
+        # 4) Train-test split
         X_indices = np.arange(len(X_trad))
         train_indices, val_indices = train_test_split(
             X_indices, test_size=0.25, random_state=42, stratify=y
@@ -2025,215 +2007,105 @@ class PrimvsCVFinder:
         y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
         X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
         
-        # Get class weight - high imbalance typical in CV detection
+        # Get class weight
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train)
         
-        # 6) Create evaluation sets for early stopping
-        dtrain_trad = xgb.DMatrix(X_trad_train, label=y_train)
-        dval_trad = xgb.DMatrix(X_trad_val, label=y_val)
-        evallist_trad = [(dtrain_trad, 'train'), (dval_trad, 'eval')]
-        
-        dtrain_emb = xgb.DMatrix(X_emb_train, label=y_train)
-        dval_emb = xgb.DMatrix(X_emb_val, label=y_val)
-        evallist_emb = [(dtrain_emb, 'train'), (dval_emb, 'eval')]
-        
-        # 7) Train Traditional Model with early stopping
+        # 5) Train Traditional Model
         print("\nTraining model with traditional features...")
-        
-        # 7.1) Define parameters with focal loss for imbalanced data
-        alpha = 0.75  # Weight for positive class
-        gamma = 2.0   # Focusing parameter
-        
-        params_trad = {
-            'max_depth': 5,
-            'eta': 0.05,  # learning rate
-            'objective': 'binary:logistic',
-            'tree_method': 'hist',  # Fast histogram-based algorithm
-            'scale_pos_weight': pos_weight,
-            'eval_metric': 'auc',
-            'min_child_weight': 2,
-            'gamma': 0.1,
-            'subsample': 0.8,
-            'colsample_bytree': 0.8,
-            'alpha': 0.1,  # L1 regularization
-            'lambda': 1.0,  # L2 regularization
-            'seed': 42
-        }
-        
-        # 7.2) Train with early stopping
-        trad_booster = xgb.train(
-            params_trad,
-            dtrain_trad,
-            num_boost_round=1000,
-            evals=evallist_trad,
-            early_stopping_rounds=20,
-            verbose_eval=False
+        trad_model = xgb.XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.05,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
         )
         
-        # 7.3) Create classifier wrapper for easier use
-        trad_model = xgb.XGBClassifier()
-        trad_model._Booster = trad_booster
-        trad_model._le = None
+        trad_model.fit(X_trad_train, y_train)
         
-        # 8) Train Embedding Model with early stopping
+        # 6) Train Embedding Model
         print("\nTraining model with embedding features...")
-        
-        params_emb = {
-            'max_depth': 5,
-            'eta': 0.05,
-            'objective': 'binary:logistic',
-            'tree_method': 'hist',
-            'scale_pos_weight': pos_weight,
-            'eval_metric': 'auc',
-            'seed': 42
-        }
-        
-        # 8.1) Train with early stopping
-        emb_booster = xgb.train(
-            params_emb,
-            dtrain_emb,
-            num_boost_round=1000,
-            evals=evallist_emb,
-            early_stopping_rounds=20,
-            verbose_eval=False
+        emb_model = xgb.XGBClassifier(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.05,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
         )
         
-        # 8.2) Create classifier wrapper
-        emb_model = xgb.XGBClassifier()
-        emb_model._Booster = emb_booster
-        emb_model._le = None
+        emb_model.fit(X_emb_train, y_train)
         
-        # 9) Use stratified k-fold CV for meta-model training
-        print("\nTraining meta-model with stratified cross-validation...")
+        # 7) Train Meta-Model
+        print("\nTraining meta-model...")
         
-        n_splits = 5  # Number of folds
-        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        # Create meta-features
+        meta_features_train = np.column_stack([
+            trad_model.predict_proba(X_trad_train)[:, 1],
+            emb_model.predict_proba(X_emb_train)[:, 1]
+        ])
         
-        # 9.1) Create out-of-fold predictions
-        trad_oof_preds = np.zeros(len(X_trad_train))
-        emb_oof_preds = np.zeros(len(X_emb_train))
+        meta_features_val = np.column_stack([
+            trad_model.predict_proba(X_trad_val)[:, 1],
+            emb_model.predict_proba(X_emb_val)[:, 1]
+        ])
         
-        for train_idx, test_idx in skf.split(X_trad_train, y_train):
-            # Train and predict with traditional model
-            fold_dtrain_trad = xgb.DMatrix(X_trad_train[train_idx], label=y_train[train_idx])
-            fold_trad_model = xgb.train(params_trad, fold_dtrain_trad, num_boost_round=trad_booster.best_iteration)
-            fold_dtest_trad = xgb.DMatrix(X_trad_train[test_idx])
-            trad_oof_preds[test_idx] = fold_trad_model.predict(fold_dtest_trad)
-            
-            # Train and predict with embedding model
-            fold_dtrain_emb = xgb.DMatrix(X_emb_train[train_idx], label=y_train[train_idx])
-            fold_emb_model = xgb.train(params_emb, fold_dtrain_emb, num_boost_round=emb_booster.best_iteration)
-            fold_dtest_emb = xgb.DMatrix(X_emb_train[test_idx])
-            emb_oof_preds[test_idx] = fold_emb_model.predict(fold_dtest_emb)
-        
-        # 9.2) Create meta-features from OOF predictions
-        meta_features_train = np.column_stack([trad_oof_preds, emb_oof_preds])
-        
-        # 9.3) Create validation meta-features
-        dval_trad = xgb.DMatrix(X_trad_val)
-        dval_emb = xgb.DMatrix(X_emb_val)
-        val_trad_preds = trad_booster.predict(dval_trad)
-        val_emb_preds = emb_booster.predict(dval_emb)
-        meta_features_val = np.column_stack([val_trad_preds, val_emb_preds])
-        
-        # 9.4) Train meta-model
-        params_meta = {
-            'max_depth': 3,
-            'eta': 0.1,
-            'objective': 'binary:logistic',
-            'tree_method': 'hist',
-            'scale_pos_weight': pos_weight,
-            'eval_metric': 'auc',
-            'seed': 42
-        }
-        
-        dmeta_train = xgb.DMatrix(meta_features_train, label=y_train)
-        dmeta_val = xgb.DMatrix(meta_features_val, label=y_val)
-        
-        meta_booster = xgb.train(
-            params_meta,
-            dmeta_train,
-            num_boost_round=500,
-            evals=[(dmeta_train, 'train'), (dmeta_val, 'eval')],
-            early_stopping_rounds=20,
-            verbose_eval=False
+        # Train meta-model
+        meta_model = xgb.XGBClassifier(
+            n_estimators=50,
+            max_depth=3,
+            learning_rate=0.1,
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42
         )
         
-        meta_model = xgb.XGBClassifier()
-        meta_model._Booster = meta_booster
-        meta_model._le = None
+        meta_model.fit(meta_features_train, y_train)
         
-        # 10) Calibrate final model probabilities (optional but improves reliability)
-        print("\nCalibrating probability estimates...")
-        
-        # 10.1) Get calibrated validation predictions
-        val_meta_preds = meta_booster.predict(dmeta_val)
-        
-        # 10.2) Apply probability calibration using Platt scaling (simplified)
-        # This is a simple approximation of probability calibration
-        from sklearn.linear_model import LogisticRegression
-        calibrator = LogisticRegression(C=1.0, solver='lbfgs')
-        calibrator.fit(val_meta_preds.reshape(-1, 1), y_val)
-        
-        # 11) Apply to all data
+        # 8) Apply to all data - THIS IS THE IMPORTANT PART
         print("\nApplying two-stage classifier to all data...")
         
-        # 11.1) Generate base model predictions
-        dall_trad = xgb.DMatrix(X_trad)
-        dall_emb = xgb.DMatrix(X_emb)
+        # Get predictions from both models FOR ALL DATA
+        trad_probs = trad_model.predict_proba(X_trad)[:, 1]
+        emb_probs = emb_model.predict_proba(X_emb)[:, 1]
         
-        trad_probs = trad_booster.predict(dall_trad)
-        emb_probs = emb_booster.predict(dall_emb)
+        # Combine using meta-model FOR ALL DATA
+        meta_features_full = np.column_stack([trad_probs, emb_probs])
+        final_probs = meta_model.predict_proba(meta_features_full)[:, 1]
         
-        # 11.2) Generate meta-model predictions
-        meta_features_all = np.column_stack([trad_probs, emb_probs])
-        dmeta_all = xgb.DMatrix(meta_features_all)
-        meta_probs_raw = meta_booster.predict(dmeta_all)
-        
-        # 11.3) Calibrate probabilities
-        meta_probs = calibrator.predict_proba(meta_probs_raw.reshape(-1, 1))[:, 1]
-        
-        # 12) Calculate feature importance for interpretability
-        # Get feature importance from traditional model
-        feat_imp = trad_booster.get_score(importance_type='gain')
-        sorted_idx = sorted(feat_imp.items(), key=lambda x: x[1], reverse=True)
+        # Display feature importance
         print("\nTop traditional features by importance:")
-        for idx, (fname, imp) in enumerate(sorted_idx[:5]):
-            try:
-                feat_idx = int(fname.replace('f', ''))
-                feat_name = selected_features[feat_idx]
-            except:
-                feat_name = fname
-            print(f"  {idx+1}. {feat_name}: {imp:.4f}")
+        importance = trad_model.feature_importances_
+        indices = np.argsort(importance)[::-1]
+        for i in range(min(5, len(traditional_features))):
+            print(f"  {i+1}. {traditional_features[indices[i]]}: {importance[indices[i]]:.4f}")
         
-        # 13) Save models and predictions
+        # 9) Store models and assign scores to ALL data points
         self.model_trad = trad_model
         self.model_emb = emb_model
         self.model_meta = meta_model
-        self.calibrator = calibrator
         self.model = meta_model  # For compatibility
-        self.selected_features = selected_features
         
-        # Add predictions to filtered data
+        # Add predictions to filtered_data for ALL sources
         self.filtered_data['cv_prob_trad'] = trad_probs
         self.filtered_data['cv_prob_emb'] = emb_probs
-        self.filtered_data['cv_prob'] = meta_probs
+        self.filtered_data['cv_prob'] = final_probs
         
         # Save models
         os.makedirs(self.output_dir, exist_ok=True)
+        joblib.dump(trad_model, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
+        joblib.dump(emb_model, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
+        joblib.dump(meta_model, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
         
-        joblib.dump(trad_booster, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
-        joblib.dump(emb_booster, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
-        joblib.dump(meta_booster, os.path.join(self.output_dir, 'cv_classifier_meta.joblib'))
-        joblib.dump(calibrator, os.path.join(self.output_dir, 'cv_classifier_calibrator.joblib'))
-        joblib.dump(selected_features, os.path.join(self.output_dir, 'selected_features.joblib'))
-        
-        # 14) Visualizations
+        # Plot probability distribution
         plt.figure(figsize=(10, 6))
         plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
         plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
         plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
-        plt.xlabel('CV Probability (Calibrated)')
+        plt.xlabel('CV Probability')
         plt.ylabel('Number of Sources')
         plt.title('Distribution of CV Probabilities from Two-Stage Classifier')
         plt.yscale('log')
@@ -2242,30 +2114,7 @@ class PrimvsCVFinder:
         plt.savefig(os.path.join(self.output_dir, 'cv_two_stage_probability_distribution.png'), dpi=300)
         plt.close()
         
-        # Add a feature importance plot
-        if len(sorted_idx) > 0:
-            plt.figure(figsize=(12, 6))
-            names = []
-            values = []
-            for i, (fname, imp) in enumerate(sorted_idx[:10]):  # Top 10 features
-                try:
-                    feat_idx = int(fname.replace('f', ''))
-                    names.append(selected_features[feat_idx])
-                except:
-                    names.append(fname)
-                values.append(imp)
-            
-            # Sort by importance
-            sorted_indices = np.argsort(values)
-            plt.barh(range(len(names)), [values[i] for i in sorted_indices], align='center')
-            plt.yticks(range(len(names)), [names[i] for i in sorted_indices])
-            plt.xlabel('Importance (Gain)')
-            plt.title('Top Features for CV Classification')
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.output_dir, 'cv_feature_importance.png'), dpi=300)
-            plt.close()
-        
-        print("Enhanced two-stage classifier training complete.")
+        print("Two-stage classifier training complete.")
         return True
 
 
