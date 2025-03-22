@@ -1429,20 +1429,21 @@ class PrimvsCVFinder:
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
         # NEW: Create a small tuning subset (5% of training data)
-        opt_frac = 0.25
+        opt_frac = 0.025
+
         opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
         X_trad_train_opt = X_trad_train[opt_idx_trad]
-        y_train_opt = y_train[opt_idx_trad]
-        # Instead of CV, do a simple holdout split on the tuning subset (50/50)
+        y_trad_train_opt = y_train[opt_idx_trad]
         X_train_small, X_val_small, y_train_small, y_val_small = train_test_split(
             X_trad_train_opt, y_train_opt, test_size=0.5, random_state=42
         )
-        if X_emb is not None:
-            opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
-            X_emb_train_opt = X_emb_train[opt_idx_emb]
-            X_train_small_emb, X_val_small_emb, y_train_small_emb, y_val_small_emb = train_test_split(
-                X_emb_train_opt, y_train_opt, test_size=0.5, random_state=42
-            )
+
+        opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
+        X_emb_train_opt = X_emb_train[opt_idx_emb]
+        y_emb_train_opt = y_train[opt_idx_trad]
+        X_train_small_emb, X_val_small_emb, y_train_small_emb, y_val_small_emb = train_test_split(
+            X_emb_train_opt, y_emb_train_opt, test_size=0.5, random_state=42
+        )
 
         # 6) Traditional Model Tuning using Dual Annealing (holdout evaluation)
         def objective_scipy_trad(params):
@@ -1545,7 +1546,7 @@ class PrimvsCVFinder:
                 (0.001, 0.05)# learning_rate
             ]
             print("Optimizing embedding model using dual annealing...")
-            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3)
+            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3, disp=True, callback=callback_func)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (holdout):", -result_emb.fun)
 
