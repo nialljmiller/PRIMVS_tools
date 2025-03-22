@@ -1546,7 +1546,7 @@ class PrimvsCVFinder:
                 (0.001, 0.05)# learning_rate
             ]
             print("Optimizing embedding model using dual annealing...")
-            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3, disp=True, callback=callback_func)
+            result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=3, callback=callback_func)
             print("Optimal embedding parameters:", result_emb.x)
             print("Best ROC-AUC (holdout):", -result_emb.fun)
 
