@@ -1435,7 +1435,7 @@ class PrimvsCVFinder:
         X_trad_train_opt = X_trad_train[opt_idx_trad]
         y_trad_train_opt = y_train[opt_idx_trad]
         X_train_small, X_val_small, y_train_small, y_val_small = train_test_split(
-            X_trad_train_opt, y_train_opt, test_size=0.5, random_state=42
+            X_trad_train_opt, y_trad_train_opt, test_size=0.5, random_state=42
         )
 
         opt_idx_emb = np.random.choice(len(X_emb_train), size=int(len(X_emb_train) * opt_frac), replace=False)
