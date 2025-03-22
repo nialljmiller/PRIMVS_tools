@@ -2119,6 +2119,8 @@ class PrimvsCVFinder:
 
 
 
+
+
     def train_two_stage_classifier(self):
         """
         Train a two-stage classifier combining traditional feature-based models with
@@ -2298,6 +2300,420 @@ class PrimvsCVFinder:
         
         print("Two-stage classifier training complete.")
         return True
+
+
+
+
+    def train_two_stage_classifier(self):
+        """
+        Advanced two-stage classifier combining:
+        1. Hyperparameter-tuned XGBoost for traditional features
+        2. Hyperparameter-tuned XGBoost for embedding features
+        3. Neural network meta-model for optimal combination
+        """
+        import numpy as np
+        import pandas as pd
+        import xgboost as xgb
+        import time
+        from sklearn.model_selection import train_test_split, RandomizedSearchCV
+        from sklearn.metrics import classification_report, roc_auc_score
+        import joblib
+        import matplotlib.pyplot as plt
+        import os
+        
+        # For the neural network meta-model
+        import tensorflow as tf
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+        from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+        
+        print("\n" + "="*80)
+        print("TRAINING ADVANCED TWO-STAGE CV CLASSIFIER WITH HYPERPARAMETER TUNING")
+        print("="*80 + "\n")
+        
+        start_time = time.time()
+        
+        # 1) Load known CV IDs
+        known_ids = self.load_known_cvs()
+        
+        # 2) Create binary labels
+        candidate_ids = self.filtered_data['sourceid'].astype(str)
+        y = candidate_ids.isin(known_ids).astype(int)
+        print(f"Found {y.sum()} known CVs in dataset of {len(y)} candidates ({100*y.sum()/len(y):.2f}%)")
+        
+        # 3) Separate Traditional and Embedding features
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
+        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+        
+        print(f"Traditional features: {len(traditional_features)}")
+        print(f"Embedding features: {len(embedding_features)}")
+        
+        X_trad = self.scaled_features[traditional_features].values
+        X_emb = self.scaled_features[embedding_features].values
+        
+        # 4) Train-test split
+        X_indices = np.arange(len(X_trad))
+        train_indices, val_indices = train_test_split(
+            X_indices, test_size=0.25, random_state=42, stratify=y
+        )
+        
+        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
+        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
+        X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
+        
+        # Get class weight
+        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train)
+        
+        # ========================================================
+        # 5) HYPERPARAMETER TUNING FOR TRADITIONAL FEATURES MODEL
+        # ========================================================
+        print("\n" + "="*50)
+        print("HYPERPARAMETER TUNING - TRADITIONAL FEATURES MODEL")
+        print("="*50)
+        
+        # Define parameter grid for traditional model
+        param_grid_trad = {
+            'n_estimators': [100, 500, 1000],
+            'max_depth': [3, 5, 7, 9],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'min_child_weight': [1, 3, 5],
+            'subsample': [0.7, 0.8, 0.9],
+            'colsample_bytree': [0.7, 0.8, 0.9],
+            'gamma': [0, 0.1, 0.2]
+        }
+        
+        # Use RandomizedSearchCV for more efficient search
+        trad_tuning_start = time.time()
+        print("\nStarting hyperparameter search for traditional model...")
+        
+        trad_base = xgb.XGBClassifier(
+            objective='binary:logistic', 
+            scale_pos_weight=pos_weight, 
+            n_jobs=-1, 
+            random_state=42,
+            use_label_encoder=False,
+            eval_metric='auc'
+        )
+        
+        trad_search = RandomizedSearchCV(
+            trad_base,
+            param_distributions=param_grid_trad,
+            n_iter=15,  # Try 15 different combinations
+            scoring='roc_auc',
+            cv=3,
+            verbose=2,
+            random_state=42,
+            n_jobs=-1
+        )
+        
+        trad_search.fit(X_trad_train, y_train)
+        
+        trad_tuning_time = time.time() - trad_tuning_start
+        print(f"\nTraditional model tuning completed in {trad_tuning_time:.2f} seconds")
+        print(f"Best parameters: {trad_search.best_params_}")
+        print(f"Best cross-validation AUC: {trad_search.best_score_:.4f}")
+        
+        # Get the best traditional model
+        trad_model = trad_search.best_estimator_
+        
+        # ========================================================
+        # 6) HYPERPARAMETER TUNING FOR EMBEDDING FEATURES MODEL
+        # ========================================================
+        print("\n" + "="*50)
+        print("HYPERPARAMETER TUNING - EMBEDDING FEATURES MODEL")
+        print("="*50)
+        
+        # Define parameter grid for embedding model
+        param_grid_emb = {
+            'n_estimators': [100, 500, 1000],
+            'max_depth': [3, 5, 7, 9],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'min_child_weight': [1, 3, 5],
+            'subsample': [0.7, 0.8, 0.9],
+            'colsample_bytree': [0.7, 0.8, 0.9],
+            'gamma': [0, 0.1, 0.2]
+        }
+        
+        emb_tuning_start = time.time()
+        print("\nStarting hyperparameter search for embedding model...")
+        
+        emb_base = xgb.XGBClassifier(
+            objective='binary:logistic', 
+            scale_pos_weight=pos_weight, 
+            n_jobs=-1, 
+            random_state=42,
+            use_label_encoder=False,
+            eval_metric='auc'
+        )
+        
+        emb_search = RandomizedSearchCV(
+            emb_base,
+            param_distributions=param_grid_emb,
+            n_iter=15,  # Try 15 different combinations
+            scoring='roc_auc',
+            cv=3,
+            verbose=2,
+            random_state=42,
+            n_jobs=-1
+        )
+        
+        emb_search.fit(X_emb_train, y_train)
+        
+        emb_tuning_time = time.time() - emb_tuning_start
+        print(f"\nEmbedding model tuning completed in {emb_tuning_time:.2f} seconds")
+        print(f"Best parameters: {emb_search.best_params_}")
+        print(f"Best cross-validation AUC: {emb_search.best_score_:.4f}")
+        
+        # Get the best embedding model
+        emb_model = emb_search.best_estimator_
+        
+        # ========================================================
+        # 7) CREATE META-FEATURES FOR NEURAL NETWORK META-MODEL
+        # ========================================================
+        print("\n" + "="*50)
+        print("TRAINING NEURAL NETWORK META-MODEL")
+        print("="*50)
+        
+        # Generate base model predictions for training
+        trad_probs_train = trad_model.predict_proba(X_trad_train)[:, 1]
+        emb_probs_train = emb_model.predict_proba(X_emb_train)[:, 1]
+        
+        # Generate base model predictions for validation
+        trad_probs_val = trad_model.predict_proba(X_trad_val)[:, 1]
+        emb_probs_val = emb_model.predict_proba(X_emb_val)[:, 1]
+        
+        # Create meta-features by stacking the predictions
+        # Add additional engineered features: products, differences, etc.
+        meta_features_train = np.column_stack([
+            trad_probs_train, 
+            emb_probs_train,
+            trad_probs_train * emb_probs_train,  # Interaction term
+            np.abs(trad_probs_train - emb_probs_train),  # Difference magnitude
+            np.maximum(trad_probs_train, emb_probs_train),  # Max confidence
+            np.minimum(trad_probs_train, emb_probs_train)   # Min confidence
+        ])
+        
+        meta_features_val = np.column_stack([
+            trad_probs_val, 
+            emb_probs_val,
+            trad_probs_val * emb_probs_val,
+            np.abs(trad_probs_val - emb_probs_val),
+            np.maximum(trad_probs_val, emb_probs_val),
+            np.minimum(trad_probs_val, emb_probs_val)
+        ])
+        
+        # ========================================================
+        # 8) TRAIN NEURAL NETWORK META-MODEL
+        # ========================================================
+        nn_start_time = time.time()
+        print("\nTraining neural network meta-model...")
+        
+        # Set up callbacks for training
+        callbacks = [
+            EarlyStopping(
+                monitor='val_auc', 
+                patience=20, 
+                mode='max',
+                restore_best_weights=True,
+                verbose=1
+            ),
+            ReduceLROnPlateau(
+                monitor='val_auc', 
+                factor=0.5, 
+                patience=10, 
+                mode='max', 
+                min_lr=0.00001,
+                verbose=1
+            )
+        ]
+        
+        # Create neural network model
+        meta_nn = Sequential([
+            # Input layer
+            Dense(64, input_shape=(meta_features_train.shape[1],)),
+            BatchNormalization(),
+            tf.keras.layers.LeakyReLU(alpha=0.1),
+            Dropout(0.3),
+            
+            # Hidden layer 1
+            Dense(32),
+            BatchNormalization(),
+            tf.keras.layers.LeakyReLU(alpha=0.1),
+            Dropout(0.2),
+            
+            # Hidden layer 2
+            Dense(16),
+            BatchNormalization(),
+            tf.keras.layers.LeakyReLU(alpha=0.1),
+            Dropout(0.1),
+            
+            # Output layer
+            Dense(1, activation='sigmoid')
+        ])
+        
+        # Compile the model
+        meta_nn.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+            loss='binary_crossentropy',
+            metrics=[tf.keras.metrics.AUC(name='auc')]
+        )
+        
+        # Display model summary
+        meta_nn.summary()
+        
+        # Train the model
+        history = meta_nn.fit(
+            meta_features_train, y_train,
+            validation_data=(meta_features_val, y_val),
+            epochs=200,  # Maximum epochs (early stopping will prevent overfitting)
+            batch_size=64,
+            callbacks=callbacks,
+            verbose=2
+        )
+        
+        nn_time = time.time() - nn_start_time
+        print(f"\nNeural network meta-model training completed in {nn_time:.2f} seconds")
+        
+        # Calculate predictions and AUC for all models on validation set
+        trad_auc = roc_auc_score(y_val, trad_probs_val)
+        emb_auc = roc_auc_score(y_val, emb_probs_val)
+        meta_probs_val = meta_nn.predict(meta_features_val, verbose=0).flatten()
+        meta_auc = roc_auc_score(y_val, meta_probs_val)
+        
+        print("\n" + "="*50)
+        print("MODEL PERFORMANCE (AUC)")
+        print("="*50)
+        print(f"Traditional Feature Model AUC: {trad_auc:.4f}")
+        print(f"Embedding Feature Model AUC:  {emb_auc:.4f}")
+        print(f"Neural Network Meta-Model AUC: {meta_auc:.4f}")
+        print("="*50)
+        
+        # ========================================================
+        # 9) APPLY TO ALL DATA
+        # ========================================================
+        print("\nApplying models to all data...")
+        
+        # Get predictions from both base models for all data
+        trad_probs = trad_model.predict_proba(X_trad)[:, 1]
+        emb_probs = emb_model.predict_proba(X_emb)[:, 1]
+        
+        # Create meta-features for all data
+        meta_features_full = np.column_stack([
+            trad_probs, 
+            emb_probs,
+            trad_probs * emb_probs,
+            np.abs(trad_probs - emb_probs),
+            np.maximum(trad_probs, emb_probs),
+            np.minimum(trad_probs, emb_probs)
+        ])
+        
+        # Get final probabilities using neural network meta-model
+        final_probs = meta_nn.predict(meta_features_full, verbose=0).flatten()
+        
+        # Display feature importance for traditional model
+        print("\nTop traditional features by importance:")
+        importance = trad_model.feature_importances_
+        indices = np.argsort(importance)[::-1]
+        for i in range(min(10, len(traditional_features))):
+            print(f"  {i+1}. {traditional_features[indices[i]]}: {importance[indices[i]]:.4f}")
+        
+        # ========================================================
+        # 10) STORE MODELS AND PROBABILITIES
+        # ========================================================
+        # Store models for later use
+        self.model_trad = trad_model
+        self.model_emb = emb_model
+        self.model_meta = meta_nn
+        
+        # Add predictions to filtered_data
+        self.filtered_data['cv_prob_trad'] = trad_probs
+        self.filtered_data['cv_prob_emb'] = emb_probs
+        self.filtered_data['cv_prob'] = final_probs
+        
+        # Find the 100th best candidate
+        sorted_probs = np.sort(final_probs)[::-1]  # Sort in descending order
+        
+        print("\n" + "="*50)
+        print("CANDIDATE CONFIDENCE LEVELS")
+        print("="*50)
+        
+        if len(sorted_probs) >= 100:
+            print(f"Top candidate confidence:    {sorted_probs[0]:.4f}")
+            print(f"10th candidate confidence:   {sorted_probs[9]:.4f}")
+            print(f"50th candidate confidence:   {sorted_probs[49]:.4f}")
+            print(f"100th candidate confidence:  {sorted_probs[99]:.4f}")
+            if len(sorted_probs) >= 200:
+                print(f"200th candidate confidence:  {sorted_probs[199]:.4f}")
+        else:
+            print(f"Top candidate confidence:    {sorted_probs[0]:.4f}")
+            print(f"Last candidate confidence:   {sorted_probs[-1]:.4f}")
+            print(f"Note: Dataset contains fewer than 100 candidates.")
+        print("="*50)
+        
+        # Save models
+        os.makedirs(self.output_dir, exist_ok=True)
+        joblib.dump(trad_model, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
+        joblib.dump(emb_model, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
+        
+        # For TensorFlow model, save in its native format
+        meta_nn.save(os.path.join(self.output_dir, 'cv_classifier_meta_nn'))
+        
+        # Plot training history for neural network
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(history.history['loss'], label='Training Loss')
+        plt.plot(history.history['val_loss'], label='Validation Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Loss Curves')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(history.history['auc'], label='Training AUC')
+        plt.plot(history.history['val_auc'], label='Validation AUC')
+        plt.xlabel('Epoch')
+        plt.ylabel('AUC')
+        plt.title('AUC Curves')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, 'neural_network_training_history.png'), dpi=300)
+        plt.close()
+        
+        # Plot probability distribution
+        plt.figure(figsize=(10, 6))
+        plt.hist(self.filtered_data['cv_prob'], bins=50, alpha=0.7)
+        plt.axvline(0.5, color='r', linestyle='--', label='Default threshold (0.5)')
+        plt.axvline(0.8, color='g', linestyle='--', label='High confidence (0.8)')
+        plt.xlabel('CV Probability')
+        plt.ylabel('Number of Sources')
+        plt.title('Distribution of CV Probabilities from Advanced Two-Stage Classifier')
+        plt.yscale('log')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'cv_probability_distribution.png'), dpi=300)
+        plt.close()
+        
+        # Compare model predictions
+        plt.figure(figsize=(10, 8))
+        plt.scatter(trad_probs, emb_probs, c=final_probs, cmap='viridis', 
+                    alpha=0.6, s=5, edgecolors='none')
+        plt.colorbar(label='Meta-Model Probability')
+        plt.xlabel('Traditional Model Probability')
+        plt.ylabel('Embedding Model Probability')
+        plt.title('Comparison of Model Predictions')
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(self.output_dir, 'model_prediction_comparison.png'), dpi=300)
+        plt.close()
+        
+        total_time = time.time() - start_time
+        print(f"\nAdvanced two-stage classifier training completed in {total_time:.2f} seconds")
+        print(f"All results saved to: {self.output_dir}")
+        
+        return True        
 
 
     def run_pipeline(self):
