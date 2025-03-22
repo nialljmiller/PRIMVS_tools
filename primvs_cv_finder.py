@@ -1429,7 +1429,7 @@ class PrimvsCVFinder:
         pos_weight = (len(y_train) - sum(y_train)) / sum(y_train) if sum(y_train) > 0 else 1.0
 
         # NEW: Create a small tuning subset (5% of training data)
-        opt_frac = 0.05
+        opt_frac = 0.2
 
         opt_idx_trad = np.random.choice(len(X_trad_train), size=int(len(X_trad_train) * opt_frac), replace=False)
         X_trad_train_opt = X_trad_train[opt_idx_trad]
