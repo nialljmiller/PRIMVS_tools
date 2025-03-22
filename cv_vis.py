@@ -509,6 +509,133 @@ class PrimvsTessCrossMatch:
         print(f"Generated publication-quality summary plots in {plots_dir}")
         return True
 
+
+
+    def generate_summary_plots(self):
+        if self.cv_candidates is None:
+            print("No candidate data available. Run load_cv_candidates() first.")
+            return False
+        print("Generating summary plots...")
+        plots_dir = os.path.join(self.output_dir, 'summary_plots')
+        os.makedirs(plots_dir, exist_ok=True)
+        plt.style.use('seaborn-v0_8-whitegrid')
+        plt.rcParams['font.family'] = 'serif'
+        plt.rcParams['font.size'] = 12
+        plt.rcParams['axes.labelsize'] = 14
+        plt.rcParams['axes.titlesize'] = 16
+        plt.rcParams['xtick.labelsize'] = 12
+        plt.rcParams['ytick.labelsize'] = 12
+        plt.rcParams['legend.fontsize'] = 12
+
+        # Use crossmatch_results instead of cv_candidates to ensure 'tic_id' is present.
+        all_candidates = self.crossmatch_results.copy()
+        if 'is_known_cv' not in all_candidates.columns:
+            all_candidates['is_known_cv'] = False
+        known_candidates = all_candidates[all_candidates['is_known_cv'] == True]
+        if self.target_list is None:
+            print("Target list not generated; cannot plot target list group.")
+            targets = pd.DataFrame()
+        else:
+            targets = self.target_list.copy()
+
+        # Spatial Plot in Galactic Coordinates with TESS Overlay
+        plt.figure(figsize=(12,10))
+        hb = plt.hexbin(all_candidates['l'], all_candidates['b'], gridsize=75, cmap='Greys', bins='log')
+        plt.colorbar(hb, label='log10(count)')
+        plt.scatter(known_candidates['l'], known_candidates['b'], label='Known CVs', color='red', marker='*', s=80)
+        if not targets.empty:
+            plt.scatter(targets['l'], targets['b'], label='Target List', color='blue', s=30, alpha=0.8)
+        plt.xlabel('Galactic Longitude (l)')
+        plt.ylabel('Galactic Latitude (b)')
+        plt.title('Spatial Distribution (Galactic) - All, Known CVs, Target List')
+        ax_gal = plt.gca()
+        tess_overlay = TESSCycle8Overlay()
+        tess_overlay.add_to_plot(ax_gal, focus_region=None, alpha=0.2)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.pdf'), format='pdf', bbox_inches='tight')
+        plt.close()
+
+        # ROC Curve Plot using all candidates
+        print("Generating ROC curve plot...")
+        if 'true_label' not in all_candidates.columns:
+            all_candidates['true_label'] = all_candidates.get('is_known_cv', False).astype(int)
+        fpr, tpr, thresholds = roc_curve(all_candidates['true_label'], all_candidates['cv_prob'])
+        roc_auc = auc(fpr, tpr)
+        optimal_idx = np.argmax(tpr - fpr)
+        optimal_threshold = thresholds[optimal_idx]
+        plt.figure(figsize=(8,6))
+        plt.plot(fpr, tpr, label=f'ROC curve (AUC = {roc_auc:.2f})')
+        plt.plot([0,1], [0,1], linestyle='--', color='grey')
+        plt.scatter(fpr[optimal_idx], tpr[optimal_idx], color='red', label=f'Optimal threshold = {optimal_threshold:.2f}')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curve for CV Classifier')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(plots_dir, "roc_curve.png"), dpi=300)
+        plt.close()
+
+        # Bailey Diagram Plot: Period vs Amplitude
+        print("Generating Bailey diagram...")
+        plt.figure(figsize=(10,8))
+        hb = plt.hexbin(all_candidates['true_period'], all_candidates['true_amplitude'], 
+                        gridsize=50, cmap='Greys', bins='log')
+        plt.colorbar(hb, label='log10(count)')
+        plt.scatter(known_candidates['true_period'], known_candidates['true_amplitude'], 
+                    label='Known CVs', color='red', marker='*', s=80)
+        if not targets.empty:
+            plt.scatter(targets['true_period'], targets['true_amplitude'], 
+                        label='Target List', color='blue', s=30, alpha=0.8)
+        plt.xlabel('True Period (days)')
+        plt.ylabel('True Amplitude (mag)')
+        plt.title('Bailey Diagram: Period vs Amplitude')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(plots_dir, "bailey_diagram_groups.png"), dpi=300)
+        plt.close()
+
+        # 2D PCA of Embedding Space (if embedding features exist)
+        embedding_features = [str(i) for i in range(64)]
+        available_features = [col for col in embedding_features if col in all_candidates.columns]
+        if len(available_features) >= 3:
+            print("Computing PCA on embeddings...")
+            embeddings = all_candidates[available_features].values
+            pca = PCA(n_components=3)
+            pca_result = pca.fit_transform(embeddings)
+            all_candidates['pca_1'] = pca_result[:, 0]
+            all_candidates['pca_2'] = pca_result[:, 1]
+            if not targets.empty:
+                # Map PCA results for target list by matching TIC IDs.
+                target_pca = all_candidates[all_candidates['tic_id'].isin(targets['tic_id'])]
+            else:
+                target_pca = pd.DataFrame()
+            plt.figure(figsize=(10,8))
+            hb = plt.hexbin(all_candidates['pca_1'], all_candidates['pca_2'], 
+                            gridsize=100, cmap='Greys', bins='log')
+            plt.colorbar(hb, label='log10(count)')
+            if not target_pca.empty:
+                plt.scatter(target_pca['pca_1'], target_pca['pca_2'], label='Target List', alpha=0.7, color='blue', s=30)
+            if not known_candidates.empty:
+                known_pca = all_candidates[all_candidates['is_known_cv'] == True]
+                plt.scatter(known_pca['pca_1'], known_pca['pca_2'], label='Known CVs', color='red', marker='*', s=80)
+            plt.xlabel('PCA 1')
+            plt.ylabel('PCA 2')
+            plt.title('2D PCA of Embedding Space')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.savefig(os.path.join(plots_dir, "embedding_pca_2d_groups.png"), dpi=300)
+            plt.close()
+        else:
+            print("Insufficient embedding features for PCA.")
+        
+        print(f"Generated publication-quality summary plots in {plots_dir}")
+        return True
+
+
+        
+
     def report_tess_data_details(self):
         if self.crossmatch_results is None:
             print("No cross-match results available. Run perform_crossmatch() first.")
