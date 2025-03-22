@@ -1472,7 +1472,7 @@ class PrimvsCVFinder:
                 gamma=gamma,
                 subsample=subsample
             )
-            score = cross_val_score(model, X_trad_train, y_train, cv=3, scoring='roc_auc').mean()
+            score = cross_val_score(model, X_trad_train, y_train, cv=3, scoring='roc_auc', n_jobs=-1).mean()
             return -score  # minimize negative ROC-AUC
 
         # Bounds for: n_estimators, max_depth, learning_rate, min_child_weight, gamma, subsample
@@ -1486,7 +1486,7 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional feature model using differential evolution...")
-        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=10, polish=True, disp=True)
+        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=10, polish=True, disp=True, workers=-1)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
