@@ -2383,6 +2383,158 @@ class PrimvsCVFinder:
         return True        
 
 
+
+
+    def train_two_stage_classifier(self):
+        """
+        Streamlined two-stage classifier that combines traditional features and embeddings
+        using weighted averaging - simple, robust, and effective.
+        """
+        import numpy as np
+        import xgboost as xgb
+        import time
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import roc_auc_score
+        import joblib
+        import matplotlib.pyplot as plt
+        import os
+        
+        print("\nTRAINING CV CLASSIFIER")
+        start_time = time.time()
+        
+        # Setup data
+        known_ids = self.load_known_cvs()
+        candidate_ids = self.filtered_data['sourceid'].astype(str)
+        y = candidate_ids.isin(known_ids).astype(int)
+        print(f"Found {y.sum()} CVs in dataset of {len(y)} candidates")
+        
+        cc_embedding_cols = [str(i) for i in range(64)]
+        embedding_features = [col for col in self.scaled_features.columns if col in cc_embedding_cols]
+        traditional_features = [col for col in self.scaled_features.columns if col not in embedding_features]
+        
+        X_trad = self.scaled_features[traditional_features].values
+        X_emb = self.scaled_features[embedding_features].values
+        
+        # Train-test split
+        X_indices = np.arange(len(X_trad))
+        train_indices, val_indices = train_test_split(X_indices, test_size=0.25, random_state=42, stratify=y)
+        
+        X_trad_train, X_trad_val = X_trad[train_indices], X_trad[val_indices]
+        y_train, y_val = y.iloc[train_indices].values, y.iloc[val_indices].values
+        X_emb_train, X_emb_val = X_emb[train_indices], X_emb[val_indices]
+        
+        pos_weight = (len(y_train) - sum(y_train)) / sum(y_train)
+        
+        # Train traditional model with best hyperparameters
+        print("\nTraining traditional features model...")
+        trad_model = xgb.XGBClassifier(
+            n_estimators=1000, max_depth=3, learning_rate=0.01, min_child_weight=1,
+            subsample=0.7, colsample_bytree=0.7, gamma=0.1, objective='binary:logistic',
+            scale_pos_weight=pos_weight, n_jobs=-1, random_state=42
+        )
+        trad_model.fit(X_trad_train, y_train)
+        
+        # Train embedding model with best hyperparameters
+        print("\nTraining embedding features model...")
+        emb_model = xgb.XGBClassifier(
+            n_estimators=1000, max_depth=7, learning_rate=0.05, min_child_weight=5,
+            subsample=0.7, colsample_bytree=0.8, gamma=0.1, objective='binary:logistic',
+            scale_pos_weight=pos_weight, n_jobs=-1, random_state=42
+        )
+        emb_model.fit(X_emb_train, y_train)
+        
+        # Get predictions on validation set
+        trad_probs_val = trad_model.predict_proba(X_trad_val)[:, 1]
+        emb_probs_val = emb_model.predict_proba(X_emb_val)[:, 1]
+        
+        # Evaluate base models
+        trad_auc = roc_auc_score(y_val, trad_probs_val)
+        emb_auc = roc_auc_score(y_val, emb_probs_val)
+        print(f"\nTraditional model AUC: {trad_auc:.4f}")
+        print(f"Embedding model AUC: {emb_auc:.4f}")
+        
+        # Find optimal weight for the ensemble
+        best_weight = 0.5  # Default equal weighting
+        if trad_auc > 0.5 and emb_auc > 0.5:  # Both models better than random
+            # Try different weights to find the optimal blend
+            weight_range = np.linspace(0, 1, 11)  # 0.0, 0.1, 0.2, ..., 1.0
+            best_auc = 0
+            
+            for weight in weight_range:
+                ensemble_probs = weight * trad_probs_val + (1 - weight) * emb_probs_val
+                ensemble_auc = roc_auc_score(y_val, ensemble_probs)
+                
+                if ensemble_auc > best_auc:
+                    best_auc = ensemble_auc
+                    best_weight = weight
+            
+            print(f"Ensemble AUC: {best_auc:.4f} (trad_weight={best_weight:.2f})")
+        elif trad_auc > emb_auc:
+            best_weight = 1.0  # Use only traditional model
+            print(f"Using only traditional model (weight=1.0)")
+        else:
+            best_weight = 0.0  # Use only embedding model
+            print(f"Using only embedding model (weight=0.0)")
+        
+        # Apply models to all data
+        print("\nApplying models to all data...")
+        trad_probs = trad_model.predict_proba(X_trad)[:, 1]
+        emb_probs = emb_model.predict_proba(X_emb)[:, 1]
+        
+        # Calculate final probabilities with optimal weighting
+        final_probs = best_weight * trad_probs + (1 - best_weight) * emb_probs
+        
+        # Show feature importance
+        importance = trad_model.feature_importances_
+        indices = np.argsort(importance)[::-1]
+        print("\nTop traditional features:")
+        for i in range(min(10, len(traditional_features))):
+            print(f"  {i+1}. {traditional_features[indices[i]]}: {importance[indices[i]]:.4f}")
+        
+        # Store models and probabilities
+        self.model_trad = trad_model
+        self.model_emb = emb_model
+        self.model = trad_model  # For compatibility
+        
+        self.filtered_data['cv_prob_trad'] = trad_probs
+        self.filtered_data['cv_prob_emb'] = emb_probs
+        self.filtered_data['cv_prob'] = final_probs
+        
+        # Print confidence levels
+        sorted_probs = np.sort(final_probs)[::-1]
+        if len(sorted_probs) >= 100:
+            print(f"\nConfidence scores:")
+            print(f"  Top candidate:    {sorted_probs[0]:.4f}")
+            print(f"  10th candidate:   {sorted_probs[9]:.4f}")
+            print(f"  50th candidate:   {sorted_probs[49]:.4f}")
+            print(f"  100th candidate:  {sorted_probs[99]:.4f}")
+            if len(sorted_probs) >= 200:
+                print(f"  200th candidate:  {sorted_probs[199]:.4f}")
+        
+        # Save models
+        os.makedirs(self.output_dir, exist_ok=True)
+        joblib.dump(trad_model, os.path.join(self.output_dir, 'cv_classifier_traditional.joblib'))
+        joblib.dump(emb_model, os.path.join(self.output_dir, 'cv_classifier_embedding.joblib'))
+        
+        # Create visualization of model predictions
+        plt.figure(figsize=(10, 8))
+        plt.scatter(trad_probs, emb_probs, c=final_probs, cmap='viridis', alpha=0.6, s=5)
+        plt.colorbar(label='Final Probability')
+        plt.xlabel('Traditional Model Probability')
+        plt.ylabel('Embedding Model Probability')
+        plt.grid(True, alpha=0.3)
+        plt.title(f'Model Predictions (trad_weight={best_weight:.2f})')
+        plt.savefig(os.path.join(self.output_dir, 'model_prediction_comparison.png'), dpi=300)
+        plt.close()
+        
+        print(f"\nClassifier training completed in {time.time() - start_time:.2f} seconds")
+        
+        return True
+
+
+
+
+
     def run_pipeline(self):
         """Run the complete CV finder pipeline with two-stage classification."""
         start_time = time.time()
