@@ -1518,7 +1518,9 @@ class PrimvsCVFinder:
         ]
 
         print("Optimizing traditional feature model using differential evolution...")
-        result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
+        result_trad = spo.dual_annealing(objective_scipy_trad, bounds_trad, maxiter=10, disp=True)
+
+        #result_trad = spo.differential_evolution(objective_scipy_trad, bounds_trad, maxiter=5, polish=True, disp=True)
         print("Optimal traditional parameters:", result_trad.x)
         print("Best ROC-AUC (CV):", -result_trad.fun)
 
@@ -1567,52 +1569,47 @@ class PrimvsCVFinder:
         # --------------------------------------------------------------------------------
         # 7) Stage 2: Embedding Model Tuning (with PCA and Differential Evolution)
         # --------------------------------------------------------------------------------
-        if X_emb is not None and len(embedding_features) > 0:
-            print("Reducing embedding dimensionality via PCA to capture ~90% variance...")
-            pca_full = PCA().fit(X_emb_train)
-            explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
-            n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
-            print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
-            #pca = PCA(n_components=n_components)
-            X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
-            X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
+        print("Reducing embedding dimensionality via PCA to capture ~90% variance...")
+        pca_full = PCA().fit(X_emb_train)
+        explained_variance = np.cumsum(pca_full.explained_variance_ratio_)
+        n_components = min(np.argmax(explained_variance >= 0.9) + 1, len(explained_variance))
+        print(f"Using {n_components} PCA components (explaining {explained_variance[n_components-1]:.2%} variance)")
+        #pca = PCA(n_components=n_components)
+        X_emb_train_pca = X_emb_train#pca.fit_transform(X_emb_train)
+        X_emb_val_pca = X_emb_val#pca.transform(X_emb_val)
 
-            # Bounds for: n_estimators, max_depth, learning_rate for the embedding model
-            bounds_emb = [
-                (10, 500),    # n_estimators
-                (3, 200),     # max_depth (wider range to allow for more complexity)
-                (0.001, 0.1)  # learning_rate
-            ]
+        # Bounds for: n_estimators, max_depth, learning_rate for the embedding model
+        bounds_emb = [
+            (10, 500),    # n_estimators
+            (3, 200),     # max_depth (wider range to allow for more complexity)
+            (0.001, 0.1)  # learning_rate
+        ]
 
-            print("Optimizing embedding feature model using differential evolution...")
-            result_emb = spo.differential_evolution(objective_scipy_emb, bounds_emb, maxiter=5, polish=True, disp=True)
-            print("Optimal embedding parameters:", result_emb.x)
-            print("Best ROC-AUC (CV):", -result_emb.fun)
+        print("Optimizing embedding feature model using differential evolution...")
+        result_emb = spo.dual_annealing(objective_scipy_emb, bounds_emb, maxiter=10, disp=True)
+        print("Optimal embedding parameters:", result_emb.x)
+        print("Best ROC-AUC (CV):", -result_emb.fun)
 
-            opt_n_estimators_emb = int(np.round(result_emb.x[0]))
-            opt_max_depth_emb = int(np.round(result_emb.x[1]))
-            opt_learning_rate_emb = result_emb.x[2]
+        opt_n_estimators_emb = int(np.round(result_emb.x[0]))
+        opt_max_depth_emb = int(np.round(result_emb.x[1]))
+        opt_learning_rate_emb = result_emb.x[2]
 
-            best_emb = xgb.XGBClassifier(
-                objective='binary:logistic',
-                scale_pos_weight=pos_weight,
-                n_jobs=-1,
-                random_state=42,
-                use_label_encoder=False,
-                eval_metric='auc',
-                n_estimators=opt_n_estimators_emb,
-                max_depth=opt_max_depth_emb,
-                learning_rate=opt_learning_rate_emb
-            )
-            best_emb.fit(X_emb_train_pca, y_train)
-            y_pred_emb = best_emb.predict(X_emb_val_pca)
-            prob_emb = best_emb.predict_proba(X_emb_val_pca)[:, 1]
-            print("\nEmbedding Feature Model Performance:")
-            print(classification_report(y_val, y_pred_emb))
-        else:
-            pca = None
-            best_emb = None
-            prob_emb = np.zeros_like(prob_trad)
+        best_emb = xgb.XGBClassifier(
+            objective='binary:logistic',
+            scale_pos_weight=pos_weight,
+            n_jobs=-1,
+            random_state=42,
+            use_label_encoder=False,
+            eval_metric='auc',
+            n_estimators=opt_n_estimators_emb,
+            max_depth=opt_max_depth_emb,
+            learning_rate=opt_learning_rate_emb
+        )
+        best_emb.fit(X_emb_train_pca, y_train)
+        y_pred_emb = best_emb.predict(X_emb_val_pca)
+        prob_emb = best_emb.predict_proba(X_emb_val_pca)[:, 1]
+        print("\nEmbedding Feature Model Performance:")
+        print(classification_report(y_val, y_pred_emb))
 
         # --------------------------------------------------------------------------------
         # 8) Stage 3: Meta-Model (Stacking)
