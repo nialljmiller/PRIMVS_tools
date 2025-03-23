@@ -379,7 +379,7 @@ class PrimvsTessCrossMatch:
 
         # Convert negative galactic longitudes to the 0-360 range.
         l_vals = all_candidates['l'].values
-        l_vals[l_vals < 0] += 360
+        l_vals[l_vals < 0] -= 360
         all_candidates['l'] = l_vals
 
         if 'is_known_cv' not in all_candidates.columns:
@@ -391,7 +391,7 @@ class PrimvsTessCrossMatch:
         else:
             targets = self.target_list.copy()
             l_vals = targets['l'].values
-            l_vals[l_vals < 0] += 360
+            l_vals[l_vals < 0] -= 360
             targets['l'] = l_vals
 
         # ----- Galactic Coordinates Plot -----
@@ -400,7 +400,7 @@ class PrimvsTessCrossMatch:
         plt.colorbar(hb, label='log10(count)')
         plt.scatter(known_candidates['l'], known_candidates['b'], label='Known CVs', color='red', marker='*', s=80)
         if not targets.empty:
-            plt.scatter(targets['l'], targets['b'], label='Target List', color='blue', s=30, alpha=0.8)
+            plt.scatter(targets['l'], targets['b'], label='Target List', color='blue', marker='+',  s=30, alpha=0.8)
         plt.xlabel('Galactic Longitude (l)')
         plt.ylabel('Galactic Latitude (b)')
         plt.title('Spatial Distribution (Galactic) - All, Known CVs, Target List')
@@ -410,7 +410,6 @@ class PrimvsTessCrossMatch:
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.png'), dpi=300, bbox_inches='tight')
-        plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.pdf'), format='pdf', bbox_inches='tight')
         plt.close()
 
         # ----- Equatorial Coordinates Plot (RA/Dec) -----
@@ -419,7 +418,11 @@ class PrimvsTessCrossMatch:
         plt.colorbar(hb_eq, label='log10(count)')
         plt.scatter(known_candidates['ra'], known_candidates['dec'], label='Known CVs', color='red', marker='*', s=80)
         if not targets.empty:
-            plt.scatter(targets['ra'], targets['dec'], label='Target List', color='blue', s=30, alpha=0.8)
+            plt.scatter(targets['ra'], targets['dec'], label='Target List', color='blue', marker='+', s=30, alpha=0.8)
+
+        ax_eq = plt.gca()
+        add_tess_overlay_equatorial(ax_eq, alpha=0.2, size=12)
+
         plt.xlabel('Right Ascension (RA)')
         plt.ylabel('Declination (Dec)')
         plt.title('Spatial Distribution (Equatorial) - All, Known CVs, Target List')
@@ -428,7 +431,6 @@ class PrimvsTessCrossMatch:
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.savefig(os.path.join(plots_dir, 'spatial_equatorial_groups.png'), dpi=300, bbox_inches='tight')
-        plt.savefig(os.path.join(plots_dir, 'spatial_equatorial_groups.pdf'), format='pdf', bbox_inches='tight')
         plt.close()
 
         # ROC Curve Plot using all candidates
@@ -490,7 +492,7 @@ class PrimvsTessCrossMatch:
                             gridsize=100, cmap='Greys', bins='log')
             plt.colorbar(hb, label='log10(count)')
             if not target_pca.empty:
-                plt.scatter(target_pca['pca_1'], target_pca['pca_2'], label='Target List', alpha=0.7, color='blue', s=30)
+                plt.scatter(target_pca['pca_1'], target_pca['pca_2'], label='Target List', alpha=0.7, color='blue', marker='+',  s=30)
             if not known_candidates.empty:
                 known_pca = all_candidates[all_candidates['is_known_cv'] == True]
                 plt.scatter(known_pca['pca_1'], known_pca['pca_2'], label='Known CVs', color='red', marker='*', s=80)

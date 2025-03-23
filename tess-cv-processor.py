@@ -2,21 +2,17 @@
 """
 TESS CV Multi-Cycle Processor
 
-This script identifies and processes TESS light curves of cataclysmic variable (CV) stars 
-across multiple cycles to demonstrate the improvements gained from extended observations.
+This script processes TESS light curves for cataclysmic variable (CV) stars across multiple observation cycles.
+It demonstrates how additional cycles improve characterization of these complex variable systems.
 
-Key features:
-1. CV candidate selection from TESS data
-2. Download and processing of multi-cycle data
-3. Periodogram analysis with increasing number of cycles
-4. Visualization of period determination improvement
-5. Outburst detection and characterization
-6. Eclipse depth and profile analysis
+Features:
+- Downloads and processes light curves for specified CV stars
+- Analyzes period determination improvement with additional cycles
+- Characterizes flickering properties and how they vary by cycle
+- Generates visualization of light curves and period analysis
 
-Example usage:
-python tess_cv_processor.py --cycles 4 --output cv_results
-
-Author: Claude
+Usage:
+    python tess_cv_processor.py --output OUTPUT_DIR [--tics TIC_IDS [TIC_IDS ...]]
 """
 
 import os
@@ -24,1356 +20,731 @@ import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-from matplotlib.colors import LogNorm
-from astropy.io import fits
-from astropy.table import Table
+from matplotlib.gridspec import GridSpec
 from astropy.timeseries import LombScargle
 from astropy.stats import sigma_clip
-from scipy.signal import medfilt
-from scipy.ndimage import gaussian_filter1d
-import lightkurve as lk
+from astropy.modeling import models, fitting
 from tqdm import tqdm
-import warnings
-import seaborn as sns
-from astropy.visualization import time_support
-from astropy.time import Time
+import lightkurve as lk
+from scipy import stats
+from scipy.signal import savgol_filter
 
-# Initialize time plotting support
-time_support()
+# Well-known CVs with multiple TESS cycles
+DEFAULT_CV_TARGETS = {
+    # Target: (TIC ID, Common Name, CV Type)
+    "SS_Cyg": (149253887, "SS Cyg", "Dwarf Nova"),
+    "V2051_Oph": (309953133, "V2051 Oph", "Eclipsing Dwarf Nova"),
+    "AM_Her": (118327563, "AM Her", "Polar"),
+    "TX_Col": (233187779, "TX Col", "Intermediate Polar"),
+    "TW_Pic": (260130483, "TW Pic", "Intermediate Polar")
+}
 
-# Suppress warnings
-warnings.filterwarnings('ignore')
+def setup_args():
+    """Set up command line arguments."""
+    parser = argparse.ArgumentParser(description="Process TESS CV light curves across multiple cycles")
+    parser.add_argument("--output", type=str, default="./cv_results", 
+                        help="Output directory for results")
+    parser.add_argument("--tics", type=int, nargs="+", 
+                        help="Specific TIC IDs to process (default: preset CVs)")
+    parser.add_argument("--max-cycles", type=int, default=8,
+                        help="Maximum number of cycles to process (default: 8)")
+    parser.add_argument("--cadence", type=str, default="short", choices=["short", "long"],
+                        help="TESS cadence to download (default: short)")
+    parser.add_argument("--no-download", action="store_true",
+                        help="Skip downloading data (use existing files only)")
+    return parser.parse_args()
 
-class TESSCVProcessor:
-    """
-    A class to process TESS data for CV stars across multiple cycles.
-    """
-    
-    def __init__(self, output_dir='cv_results', max_cycles=4, cv_list=None):
-        """
-        Initialize the CV processor.
-        
-        Parameters:
-        -----------
-        output_dir : str
-            Directory to save outputs
-        max_cycles : int
-            Maximum number of TESS cycles to process
-        cv_list : list or None
-            Optional list of TIC IDs to process. If None, will use built-in list.
-        """
-        self.output_dir = output_dir
-        self.max_cycles = max_cycles
-        
-        # Create output directories
-        os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(os.path.join(output_dir, 'plots'), exist_ok=True)
-        os.makedirs(os.path.join(output_dir, 'data'), exist_ok=True)
-        
-        # Known CV candidates with good TESS coverage
-        # These TIC IDs were selected based on:
-        # - Multiple sectors of TESS coverage
-        # - Known CV classification or high probability CV candidates
-        # - Visible variability in TESS data
-        if cv_list is None:
-            self.cv_targets = [
-                # Estimate eclipse width by finding points half as deep as maximum
-            half_depth = eclipse_depth / 2
-            half_depth_threshold = baseline - half_depth
-            
-            # Find where flux crosses the half-depth threshold
-            below_threshold = binned_flux < half_depth_threshold
-            if np.sum(below_threshold) >= 3:  # Need at least 3 points for width estimate
-                # Find longest contiguous region below threshold
-                from scipy.ndimage import label
-                labeled_array, num_features = label(below_threshold)
-                
-                # Find largest region
-                sizes = np.bincount(labeled_array.ravel())[1:]  # Skip background
-                if len(sizes) > 0:
-                    largest_label = np.argmax(sizes) + 1  # +1 because background is 0
-                    
-                    # Get phases for this region
-                    region_indices = np.where(labeled_array == largest_label)[0]
-                    region_phases = bin_centers[region_indices]
-                    
-                    # Calculate width
-                    eclipse_width = (region_phases.max() - region_phases.min()) * orbital_period * 24  # in hours
-                else:
-                    eclipse_width = bin_width * 3 * orbital_period * 24  # Minimum detectable width
-            else:
-                eclipse_width = bin_width * 3 * orbital_period * 24  # Minimum detectable width
-            
-            # Calculate signal-to-noise ratio of eclipse
-            snr = eclipse_depth / eclipse_error
-            
-            # Store results
-            results['n_cycles'].append(n_cycles)
-            results['eclipse_depths'].append(eclipse_depth)
-            results['eclipse_errors'].append(eclipse_error)
-            results['eclipse_widths'].append(eclipse_width)
-            results['signal_to_noise'].append(snr)
-            
-            # For the final cycle, create eclipse visualization
-            if n_cycles == len(lcs):
-                self._plot_eclipse_analysis(tic_id, combined_lc, orbital_period, results)
-        
-        return results
-    
-    def _plot_eclipse_analysis(self, tic_id, light_curve, orbital_period, eclipse_results):
-        """
-        Create visualization of eclipse detection and characterization improvement.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV
-        light_curve : lightkurve.LightCurve
-            Combined light curve object
-        orbital_period : float
-            Orbital period in days
-        eclipse_results : dict
-            Dictionary with eclipse analysis results
-        """
-        # Fold light curve
-        folded_lc = light_curve.fold(period=orbital_period)
-        
-        # Create figure
-        fig = plt.figure(figsize=(12, 10))
-        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1.5])
-        
-        # 1. Plot SNR improvement with cycles
-        ax1 = fig.add_subplot(gs[0, 0])
-        ax1.plot(eclipse_results['n_cycles'], eclipse_results['signal_to_noise'], 'o-', 
-               markersize=8, color='blue')
-        ax1.set_xlabel('Number of Cycles')
-        ax1.set_ylabel('Eclipse SNR')
-        ax1.set_title('Eclipse SNR Improvement')
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. Plot eclipse depth error improvement
-        ax2 = fig.add_subplot(gs[0, 1])
-        ax2.plot(eclipse_results['n_cycles'], np.array(eclipse_results['eclipse_errors'])*1000, 'o-', 
-               markersize=8, color='red')  # Convert to millimag for better numbers
-        ax2.set_xlabel('Number of Cycles')
-        ax2.set_ylabel('Eclipse Depth Error (millimag)')
-        ax2.set_title('Eclipse Measurement Precision')
-        ax2.grid(True, alpha=0.3)
-        
-        # 3. Plot folded light curve with eclipse
-        ax3 = fig.add_subplot(gs[1, :])
-        
-        phase = folded_lc.phase
-        flux = folded_lc.flux
-        
-        # Create phase bins for cleaner visualization
-        bins = 100
-        bin_phase = np.linspace(0, 1, bins + 1)
-        bin_centers = 0.5 * (bin_phase[1:] + bin_phase[:-1])
-        binned_flux = np.zeros(bins)
-        binned_errors = np.zeros(bins)
-        
-        for i in range(bins):
-            mask = (phase.value >= bin_phase[i]) & (phase.value < bin_phase[i+1])
-            if np.sum(mask) > 0:
-                binned_flux[i] = np.median(flux.value[mask])
-                binned_errors[i] = np.std(flux.value[mask]) / np.sqrt(np.sum(mask))
-            else:
-                binned_flux[i] = np.nan
-                binned_errors[i] = np.nan
-        
-        # Plot density scatter of all points
-        try:
-            # Using gaussian KDE for density coloring
-            from scipy.stats import gaussian_kde
-            xy = np.vstack([phase.value, flux.value])
-            z = gaussian_kde(xy)(xy)
-            
-            # Sort points by density
-            idx = z.argsort()
-            x, y, z = phase.value[idx], flux.value[idx], z[idx]
-            
-            ax3.scatter(x, y, c=z, s=2, alpha=0.6, cmap='viridis')
-        except:
-            # Fall back to simple scatter
-            ax3.scatter(phase.value, flux.value, s=2, alpha=0.2, color='blue')
-        
-        # Plot binned light curve
-        valid_mask = ~np.isnan(binned_flux)
-        ax3.errorbar(bin_centers[valid_mask], binned_flux[valid_mask], 
-                   yerr=binned_errors[valid_mask], 
-                   fmt='o', color='red', markersize=4, capsize=0)
-        
-        # Add smooth curve through binned points
-        try:
-            # Fill gaps in binned flux if any
-            from scipy.interpolate import interp1d
-            
-            # Create a complete cycle by wrapping around
-            extended_phases = np.hstack([bin_centers[valid_mask], bin_centers[valid_mask] + 1])
-            extended_flux = np.hstack([binned_flux[valid_mask], binned_flux[valid_mask]])
-            
-            # Sort by phase
-            sort_idx = np.argsort(extended_phases)
-            extended_phases = extended_phases[sort_idx]
-            extended_flux = extended_flux[sort_idx]
-            
-            # Create interpolation function
-            f = interp1d(extended_phases, extended_flux, kind='cubic')
-            
-            # Generate smooth curve
-            smooth_phase = np.linspace(0, 1, 500)
-            smooth_flux = f(smooth_phase)
-            
-            ax3.plot(smooth_phase, smooth_flux, 'k-', linewidth=2, alpha=0.7)
-        except:
-            # If interpolation fails, connect the dots
-            ax3.plot(bin_centers[valid_mask], binned_flux[valid_mask], 'k-', linewidth=1, alpha=0.7)
-        
-        ax3.set_xlabel('Phase')
-        ax3.set_ylabel('Normalized Flux')
-        ax3.set_title(f'Folded Light Curve (P = {orbital_period*24:.4f} hours)')
-        ax3.grid(True, alpha=0.3)
-        
-        # Highlight eclipse region if detected
-        if eclipse_results['eclipse_depths']:
-            # Get the final eclipse depth and width
-            eclipse_depth = eclipse_results['eclipse_depths'][-1]
-            eclipse_width = eclipse_results['eclipse_widths'][-1]
-            
-            # Find the eclipse minimum in the binned curve
-            min_idx = np.argmin(binned_flux[valid_mask])
-            min_phase = bin_centers[valid_mask][min_idx]
-            
-            # Draw an annotation for the eclipse
-            min_flux = binned_flux[valid_mask][min_idx]
-            
-            # Highlight eclipse width
-            width_in_phase = eclipse_width / (orbital_period * 24)
-            eclipse_start = (min_phase - width_in_phase/2) % 1
-            eclipse_end = (min_phase + width_in_phase/2) % 1
-            
-            # Handle case where eclipse wraps around phase=0
-            if eclipse_start < eclipse_end:
-                ax3.axvspan(eclipse_start, eclipse_end, alpha=0.2, color='red', label='Eclipse')
-            else:
-                ax3.axvspan(0, eclipse_end, alpha=0.2, color='red', label='Eclipse')
-                ax3.axvspan(eclipse_start, 1, alpha=0.2, color='red')
-            
-            # Add annotation for eclipse
-            ax3.annotate(f"Depth: {eclipse_depth:.4f}\nWidth: {eclipse_width:.2f} hrs",
-                       xy=(min_phase, min_flux), xytext=(min_phase, min_flux - 0.2 * eclipse_depth),
-                       arrowprops=dict(arrowstyle="->", color="black"),
-                       bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8),
-                       ha='center')
-        
-        # Add info text
-        n_points = len(folded_lc.flux)
-        cycles = eclipse_results['n_cycles'][-1]
-        
-        info_text = f"Data points: {n_points}\n"
-        info_text += f"Cycles: {cycles}\n"
-        if eclipse_results['signal_to_noise']:
-            info_text += f"Final SNR: {eclipse_results['signal_to_noise'][-1]:.1f}\n"
-        
-        ax3.text(0.98, 0.05, info_text, transform=ax3.transAxes, fontsize=10,
-               verticalalignment='bottom', horizontalalignment='right',
-               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'plots', f'TIC{tic_id}_eclipse_analysis.png'), dpi=300)
-        plt.close()
-    
-    def analyze_flickering(self, tic_id):
-        """
-        Analyze how flickering characterization improves with additional cycles.
-        Flickering is rapid stochastic variability characteristic of CVs.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV to analyze
-            
-        Returns:
-        -----------
-        dict
-            Dictionary with flickering analysis results
-        """
-        if tic_id not in self.light_curves:
-            print(f"No data for TIC {tic_id}")
-            return None
-            
-        lcs = self.light_curves[tic_id]
-        if len(lcs) < 2:
-            print(f"Need at least 2 cycles for TIC {tic_id}")
-            return None
-        
-        # Results dictionary
-        results = {
-            'tic_id': tic_id,
-            'n_cycles': [],
-            'flickering_rms': [],
-            'power_spectrum': []
-        }
-        
-        # Analyze flickering for increasing number of cycles
-        for n_cycles in range(1, len(lcs) + 1):
-            # Combine first n_cycles
-            combined_lc = lcs[0]
-            for i in range(1, n_cycles):
-                combined_lc = combined_lc.append(lcs[i])
-            
-            # Extract time and flux
-            time = combined_lc.time.value
-            flux = combined_lc.flux.value
-            
-            # Detrend the light curve to remove slow variations
-            # For flickering, we want to analyze the high-frequency noise
-            
-            try:
-                # Try a Savitzky-Golay filter to remove trends
-                from scipy.signal import savgol_filter
-                
-                # Window size should be big enough to preserve flickering
-                window = min(101, len(flux) // 5 * 2 + 1)  # Ensure it's odd
-                if window < 11:
-                    window = 11
-                
-                # Polynomial order 3 works well for CV light curves
-                trend = savgol_filter(flux, window, 3)
-                
-                # Detrended flux
-                detrended = flux - trend
-                
-                # Calculate RMS of flickering (standard deviation of detrended flux)
-                flickering_rms = np.std(detrended)
-                
-                # Calculate power spectrum
-                try:
-                    from scipy import signal
-                    
-                    # Use Welch's method for power spectrum
-                    fs = 1.0 / np.median(np.diff(time))  # Approximate sampling frequency
-                    f, pxx = signal.welch(detrended, fs, nperseg=min(256, len(detrended)//10*2))
-                    
-                    # Store results
-                    results['n_cycles'].append(n_cycles)
-                    results['flickering_rms'].append(flickering_rms)
-                    results['power_spectrum'].append((f, pxx))
-                    
-                    # For the final cycle, create flickering visualization
-                    if n_cycles == len(lcs):
-                        self._plot_flickering_analysis(tic_id, combined_lc, detrended, flickering_rms, results)
-                except:
-                    print(f"Error calculating power spectrum for TIC {tic_id}")
-            except:
-                print(f"Error detrending light curve for TIC {tic_id}")
-        
-        return results
-    
-    def _plot_flickering_analysis(self, tic_id, light_curve, detrended, flickering_rms, results):
-        """
-        Create visualization of flickering analysis and improvement with cycles.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV
-        light_curve : lightkurve.LightCurve
-            Combined light curve object
-        detrended : array
-            Detrended flux
-        flickering_rms : float
-            RMS of flickering
-        results : dict
-            Dictionary with flickering analysis results
-        """
-        # Create figure
-        fig = plt.figure(figsize=(12, 10))
-        gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 2])
-        
-        # 1. Plot flickering RMS improvement with cycles
-        ax1 = fig.add_subplot(gs[0, 0])
-        ax1.plot(results['n_cycles'], np.array(results['flickering_rms'])*1000, 'o-', 
-               markersize=8, color='green')  # Convert to millimag
-        ax1.set_xlabel('Number of Cycles')
-        ax1.set_ylabel('Flickering RMS (millimag)')
-        ax1.set_title('Flickering Characterization')
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. Plot power spectrum comparison
-        ax2 = fig.add_subplot(gs[0, 1])
-        
-        for i, n_cycles in enumerate(results['n_cycles']):
-            f, pxx = results['power_spectrum'][i]
-            
-            # Convert to periods in minutes for more intuitive x-axis
-            # Use only relevant part of spectrum
-            mask = (f > 0) & (f < 0.1)  # Focus on 0-0.1 Hz
-            
-            if np.sum(mask) > 5:  # Need at least a few points
-                period_mins = (1.0 / f[mask]) / 60  # Convert Hz to minutes
-                pxx_norm = pxx[mask] / np.max(pxx[mask])  # Normalize
-                
-                ax2.plot(period_mins, pxx_norm, '-', 
-                       label=f"{n_cycles} cycle{'s' if n_cycles > 1 else ''}")
-        
-        ax2.set_xscale('log')
-        ax2.set_xlabel('Period (minutes)')
-        ax2.set_ylabel('Normalized Power')
-        ax2.set_title('Power Spectrum Evolution')
-        ax2.grid(True, alpha=0.3)
-        ax2.legend(loc='best')
-        
-        # 3. Plot time series section with flickering - original and detrended
-        ax3 = fig.add_subplot(gs[1, :])
-        
-        # Extract a representative section to show flickering
-        time = light_curve.time.value
-        flux = light_curve.flux.value
-        
-        # Try to find a section with good flickering
-        if len(time) > 200:
-            # Look for a section without large trends
-            window_size = 200
-            best_rms = 0
-            best_start = 0
-            
-            # Step through the light curve looking for highest short-term RMS
-            step = max(1, len(time) // 50)  # Examine ~50 windows
-            for i in range(0, len(time) - window_size, step):
-                section = flux[i:i+window_size]
-                section_rms = np.std(section - np.median(section))
-                
-                if section_rms > best_rms:
-                    best_rms = section_rms
-                    best_start = i
-            
-            # Extract the best section
-            section_slice = slice(best_start, best_start + window_size)
-            section_time = time[section_slice]
-            section_flux = flux[section_slice]
-            section_detrended = detrended[section_slice]
-            
-            # Normalize times to hours from start
-            section_time_hrs = (section_time - section_time[0]) * 24
-        else:
-            # Use the whole light curve if it's short
-            section_time = time
-            section_flux = flux
-            section_detrended = detrended
-            section_time_hrs = (section_time - section_time[0]) * 24
-        
-        # Plot original and detrended
-        ax3.plot(section_time_hrs, section_flux, 'b-', alpha=0.7, label='Original')
-        
-        # Offset detrended to avoid overlap
-        detrended_offset = np.mean(section_flux) - np.mean(section_detrended) - 2*np.std(section_flux)
-        ax3.plot(section_time_hrs, section_detrended + detrended_offset, 'r-', 
-               alpha=0.7, label='Detrended (offset)')
-        
-        ax3.set_xlabel('Time (hours)')
-        ax3.set_ylabel('Normalized Flux')
-        ax3.set_title('Flickering Time Series Detail')
-        ax3.legend(loc='best')
-        ax3.grid(True, alpha=0.3)
-        
-        # 4. Histogram of detrended flux showing flickering statistics
-        ax4 = fig.add_subplot(gs[2, :])
-        
-        # Histogram of detrended flux
-        n, bins, _ = ax4.hist(detrended, bins=50, alpha=0.7, density=True, color='purple')
-        
-        # Fit a Gaussian
-        from scipy.stats import norm
-        mu, sigma = norm.fit(detrended)
-        x = np.linspace(min(bins), max(bins), 100)
-        ax4.plot(x, norm.pdf(x, mu, sigma), 'r-', linewidth=2, 
-               label=f'Gaussian fit: σ={sigma*1000:.2f} millimag')
-        
-        ax4.set_xlabel('Detrended Flux')
-        ax4.set_ylabel('Density')
-        ax4.set_title('Flickering Amplitude Distribution')
-        ax4.legend(loc='best')
-        ax4.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'plots', f'TIC{tic_id}_flickering_analysis.png'), dpi=300)
-        plt.close()
-    
-    def generate_summary(self, tic_id):
-        """
-        Generate a summary showing all improvements with multiple cycles.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV to analyze
-        """
-        if tic_id not in self.light_curves:
-            print(f"No data for TIC {tic_id}")
-            return
-        
-        lcs = self.light_curves[tic_id]
-        n_cycles = len(lcs)
-        
-        # Create a summary figure
-        fig = plt.figure(figsize=(12, 10))
-        gs = gridspec.GridSpec(3, 1, height_ratios=[1, 2, 1])
-        
-        # 1. Plot the light curves for each cycle
-        ax1 = fig.add_subplot(gs[0])
-        
-        all_times = []
-        all_fluxes = []
-        time_offsets = []
-        
-        # Plot each cycle in a different color
-        colors = plt.cm.viridis(np.linspace(0, 1, n_cycles))
-        
-        for i, lc in enumerate(lcs):
-            time = lc.time.value
-            flux = lc.flux.value
-            
-            # Track all times for overall x-axis limits
-            all_times.extend(time)
-            all_fluxes.extend(flux)
-            
-            # Normalize times to BJD - 2457000 for cleaner numbers
-            plot_time = time - 2457000
-            time_offsets.append(np.min(plot_time))
-            
-            ax1.scatter(plot_time, flux, s=1, alpha=0.7, color=colors[i], 
-                      label=f'Cycle {i+1}')
-        
-        ax1.set_xlabel('Time (BJD - 2457000)')
-        ax1.set_ylabel('Normalized Flux')
-        ax1.set_title(f'TIC {tic_id}: Multi-cycle Analysis Summary')
-        ax1.legend(loc='upper right')
-        ax1.grid(True, alpha=0.3)
-        
-        # Add time span text
-        time_span = max(all_times) - min(all_times)
-        ax1.text(0.02, 0.95, f"Time span: {time_span:.1f} days", 
-               transform=ax1.transAxes, fontsize=10,
-               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        # 2. Folded light curve with best period
-        ax2 = fig.add_subplot(gs[1])
-        
-        # Combine all light curves
-        combined_lc = lcs[0]
-        for i in range(1, n_cycles):
-            combined_lc = combined_lc.append(lcs[i])
-        
-        # Try to get period from analysis or estimate from periodogram
-        try:
-            period_results = self.analyze_period_improvement(tic_id)
-            if period_results and period_results['best_period']:
-                orbital_period = period_results['best_period']
-            else:
-                # Estimate period from periodogram
-                ls = LombScargle(combined_lc.time.value, combined_lc.flux.value, combined_lc.flux_err.value)
-                freq, power = ls.autopower(minimum_frequency=1/10.0, maximum_frequency=1/0.05,
-                                          samples_per_peak=100)
-                peak_idx = np.argmax(power)
-                orbital_period = 1/freq[peak_idx]
-            
-            # Fold the light curve
-            folded_lc = combined_lc.fold(period=orbital_period)
-            
-            # Plot points colored by cycle
-            for i, lc in enumerate(lcs):
-                folded = lc.fold(period=orbital_period)
-                ax2.scatter(folded.phase, folded.flux, s=2, alpha=0.7, color=colors[i], 
-                         label=f'Cycle {i+1}')
-            
-            # Add binned curve
-            phase = folded_lc.phase.value
-            flux = folded_lc.flux.value
-            
-            phase_bins = np.linspace(0, 1, 75)
-            binned_flux = []
-            binned_err = []
-            
-            for i in range(len(phase_bins)-1):
-                mask = (phase >= phase_bins[i]) & (phase < phase_bins[i+1])
-                if np.sum(mask) > 0:
-                    binned_flux.append(np.median(flux[mask]))
-                    binned_err.append(np.std(flux[mask]) / np.sqrt(np.sum(mask)))
-                else:
-                    binned_flux.append(np.nan)
-                    binned_err.append(np.nan)
-            
-            bin_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
-            
-            # Plot with error bars
-            ax2.errorbar(bin_centers, binned_flux, yerr=binned_err, fmt='ko-', 
-                       markersize=4, capsize=0, label='Binned', zorder=10)
-            
-            ax2.set_xlabel('Phase')
-            ax2.set_ylabel('Normalized Flux')
-            ax2.set_title(f'Folded Light Curve (P = {orbital_period*24:.4f} hours)')
-            ax2.grid(True, alpha=0.3)
-            
-            # Add legend but exclude individual cycles to avoid clutter
-            handles, labels = ax2.get_legend_handles_labels()
-            ax2.legend([handles[-1]], [labels[-1]], loc='upper right')
-        except Exception as e:
-            ax2.text(0.5, 0.5, f"Could not create folded plot: {str(e)}", 
-                   ha='center', va='center', transform=ax2.transAxes)
-        
-        # 3. Plot improvement metrics
-        ax3 = fig.add_subplot(gs[2])
-        
-        # Get analysis results
-        try:
-            period_results = self.analyze_period_improvement(tic_id)
-            eclipse_results = self.analyze_eclipse_improvement(tic_id)
-            flickering_results = self.analyze_flickering(tic_id)
-            outburst_results = self.analyze_outbursts(tic_id)
-            
-            # Normalize each metric to 0-1 range for comparison
-            metrics = []
-            cycle_nums = list(range(1, n_cycles + 1))
-            
-            # Period error improvement
-            if period_results and 'period_errors' in period_results and period_results['period_errors']:
-                # Lower error is better, so invert
-                period_err = np.array(period_results['period_errors'])
-                if max(period_err) > min(period_err):
-                    norm_period_err = 1 - (period_err - min(period_err)) / (max(period_err) - min(period_err))
-                    metrics.append(('Period determination', norm_period_err))
-            
-            # Eclipse SNR improvement
-            if eclipse_results and 'signal_to_noise' in eclipse_results and eclipse_results['signal_to_noise']:
-                snr = np.array(eclipse_results['signal_to_noise'])
-                if max(snr) > min(snr):
-                    norm_snr = (snr - min(snr)) / (max(snr) - min(snr))
-                    metrics.append(('Eclipse SNR', norm_snr))
-            
-            # Flickering characterization
-            if flickering_results and 'flickering_rms' in flickering_results and flickering_results['flickering_rms']:
-                # More precise measurement (lower relative uncertainty) is better
-                flicker_rms = np.array(flickering_results['flickering_rms'])
-                # RMS precision improves with sqrt(N)
-                flicker_precision = np.sqrt(np.array(cycle_nums))
-                norm_flicker = (flicker_precision - min(flicker_precision)) / (max(flicker_precision) - min(flicker_precision))
-                metrics.append(('Flickering precision', norm_flicker))
-            
-            # Plot each metric
-            if metrics:
-                for name, values in metrics:
-                    ax3.plot(cycle_nums, values, 'o-', linewidth=2, markersize=8, label=name)
-                
-                ax3.set_xlim(0.9, n_cycles + 0.1)
-                ax3.set_ylim(-0.05, 1.05)
-                ax3.set_xlabel('Number of Cycles')
-                ax3.set_ylabel('Relative Improvement')
-                ax3.set_title('Multi-cycle Improvement Metrics')
-                ax3.grid(True, alpha=0.3)
-                ax3.legend(loc='best')
-            else:
-                ax3.text(0.5, 0.5, "No improvement metrics available", 
-                       ha='center', va='center', transform=ax3.transAxes)
-        except Exception as e:
-            ax3.text(0.5, 0.5, f"Error plotting metrics: {str(e)}", 
-                   ha='center', va='center', transform=ax3.transAxes)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'plots', f'TIC{tic_id}_summary.png'), dpi=300)
-        plt.close()
-    
-    def create_html_report(self, tic_ids=None):
-        """
-        Create an HTML report with all analysis results.
-        
-        Parameters:
-        -----------
-        tic_ids : list or None
-            List of TIC IDs to include in report. If None, include all processed CVs.
-        """
-        if not hasattr(self, 'light_curves') or not self.light_curves:
-            print("No light curves processed. Run search_and_download() first.")
-            return
-        
-        if tic_ids is None:
-            tic_ids = list(self.light_curves.keys())
-        
-        report_path = os.path.join(self.output_dir, 'cv_multi_cycle_report.html')
-        
-        with open(report_path, 'w') as f:
-            # Write HTML header
-            f.write('<!DOCTYPE html>\n')
-            f.write('<html>\n')
-            f.write('<head>\n')
-            f.write('<title>TESS CV Multi-Cycle Analysis Report</title>\n')
-            f.write('<style>\n')
-            f.write('body { font-family: Arial, sans-serif; margin: 20px; }\n')
-            f.write('h1 { color: #2c3e50; }\n')
-            f.write('h2 { color: #3498db; margin-top: 30px; }\n')
-            f.write('.cv-section { margin-bottom: 40px; border: 1px solid #ddd; padding: 20px; border-radius: 5px; }\n')
-            f.write('.plot-container { display: flex; flex-wrap: wrap; justify-content: center; }\n')
-            f.write('.plot { margin: 10px; max-width: 800px; }\n')
-            f.write('.plot img { max-width: 100%; border: 1px ASASSN-14mv - Dwarf nova with outbursts
-                219114871,
-                
-                # V2051 Oph - Eclipsing dwarf nova
-                309953133,
-                
-                # AM Her - Polar type CV
-                118327563,
-                
-                # SS Cyg - Prototype dwarf nova
-                149253887,
-                
-                # V1223 Sgr - Intermediate polar
-                372913684,
-                
-                # MV Lyr - VY Scl type CV
-                465272717, 
-                
-                # TW Vir - Dwarf nova
-                304042981,
-                
-                # RW Tri - Nova-like CV
-                69073959
-            ]
-        else:
-            self.cv_targets = cv_list
-            
-        # Dictionary to store light curves for each target
-        self.light_curves = {}
-        
-    def search_and_download(self):
-        """
-        Search for and download TESS data for the target CVs.
-        Prioritizes targets with data from multiple cycles.
-        """
-        print("Searching for TESS data on target CVs...")
-        
-        # Loop through each CV target
-        for tic_id in tqdm(self.cv_targets):
-            # Search for available data
-            search_result = lk.search_lightcurve(f'TIC {tic_id}', mission='TESS')
-            
-            if len(search_result) == 0:
-                print(f"No data found for TIC {tic_id}, skipping.")
-                continue
-                
-            # Group by sectors
-            sectors = np.unique([result.quarter for result in search_result])
-            
-            if len(sectors) < 2:
-                print(f"Only one sector available for TIC {tic_id}, but we need multiple for cycle analysis.")
-                continue
-                
-            print(f"Found {len(sectors)} sectors for TIC {tic_id}: {sectors}")
-            
-            # Download data for each sector
-            sector_lcs = []
-            for i, sector in enumerate(sectors):
-                if i >= self.max_cycles:
-                    print(f"Reached maximum {self.max_cycles} cycles for TIC {tic_id}")
+
+def get_cv_targets(args):
+    """Get list of CV targets to process, either from args or default list."""
+    if args.tics:
+        # Use specified TIC IDs
+        targets = []
+        for tic in args.tics:
+            # Try to match to known targets, otherwise use generic name
+            for name, (known_tic, common_name, cv_type) in DEFAULT_CV_TARGETS.items():
+                if tic == known_tic:
+                    targets.append((tic, common_name, cv_type))
                     break
-                    
-                sector_data = search_result[search_result.quarter == sector]
-                
-                try:
-                    # Try 2-minute cadence data first
-                    lc = sector_data[sector_data.exptime == 120].download()
-                except:
-                    try:
-                        # Fall back to other cadences
-                        lc = sector_data.download()
-                    except Exception as e:
-                        print(f"Error downloading data for TIC {tic_id}, sector {sector}: {e}")
-                        continue
-                
-                # Basic light curve cleaning
-                lc = lc.remove_outliers(sigma=5)
-                lc = lc.normalize()
-                sector_lcs.append(lc)
-            
-            if sector_lcs:
-                self.light_curves[tic_id] = sector_lcs
-                
-        print(f"Downloaded data for {len(self.light_curves)} CVs with multiple cycles")
-        
-    def find_best_cvs(self, min_cycles=2):
-        """
-        Find the best CV candidates with multiple cycles of data.
-        Returns a list of TIC IDs for CVs with good multi-cycle data.
-        
-        Parameters:
-        -----------
-        min_cycles : int
-            Minimum number of cycles required
-            
-        Returns:
-        -----------
-        list
-            List of TIC IDs for the best CV candidates
-        """
-        good_cvs = []
-        
-        for tic_id, lcs in self.light_curves.items():
-            if len(lcs) < min_cycles:
-                continue
-                
-            # Check if any light curve shows interesting variability
-            has_variability = False
-            for lc in lcs:
-                if lc.flux.std() > 0.005:  # Arbitrary threshold for variability
-                    has_variability = True
-                    break
-            
-            if has_variability:
-                good_cvs.append(tic_id)
-                
-        print(f"Found {len(good_cvs)} good CV candidates with {min_cycles}+ cycles of data")
-        return good_cvs
+            else:
+                targets.append((tic, f"TIC {tic}", "Unknown"))
+        return targets
+    else:
+        # Use default targets
+        return [(tic, common_name, cv_type) for _, (tic, common_name, cv_type) in DEFAULT_CV_TARGETS.items()]
+
+
+def download_lightcurves(tic_id, output_dir, cadence="short", max_cycles=8):
+    """
+    Download TESS light curves for a given TIC ID.
     
-    def analyze_period_improvement(self, tic_id):
-        """
-        Analyze how period determination improves with additional cycles for a given CV.
+    Parameters:
+    -----------
+    tic_id : int
+        TIC ID of the target
+    output_dir : str
+        Directory to save the results
+    cadence : str
+        Cadence type: "short" or "long"
+    max_cycles : int
+        Maximum number of cycles to download
         
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV to analyze
+    Returns:
+    --------
+    dict
+        Dictionary mapping cycle numbers to light curve file paths
+    """
+    # Create directory for this target
+    target_dir = os.path.join(output_dir, f"TIC_{tic_id}")
+    os.makedirs(target_dir, exist_ok=True)
+    
+    # Search for target
+    print(f"Searching for TESS data for TIC {tic_id}...")
+    search_result = lk.search_lightcurve(f"TIC {tic_id}", mission="TESS")
+    
+    if len(search_result) == 0:
+        print(f"No TESS data found for TIC {tic_id}")
+        return {}
+    
+    # Filter by cadence
+    if cadence == "short":
+        search_result = search_result[search_result.exptime.astype(int) < 600]
+    else:
+        search_result = search_result[search_result.exptime.astype(int) >= 600]
+    
+    if len(search_result) == 0:
+        print(f"No {cadence} cadence data found for TIC {tic_id}")
+        return {}
+    
+    print(f"Found {len(search_result)} {cadence} cadence observations")
+    
+    # Group by cycle/sector
+    cycles = {}
+    for idx, row in enumerate(search_result):
+        if idx >= max_cycles:
+            break
             
-        Returns:
-        -----------
-        dict
-            Dictionary with period analysis results
-        """
-        if tic_id not in self.light_curves:
-            print(f"No data for TIC {tic_id}")
-            return None
-            
-        lcs = self.light_curves[tic_id]
-        if len(lcs) < 2:
-            print(f"Need at least 2 cycles for TIC {tic_id}")
-            return None
-            
-        # Results dictionary
-        results = {
-            'tic_id': tic_id,
-            'n_cycles': [],
-            'periods': [],
-            'period_powers': [],
-            'period_errors': [],
-            'best_period': None,
-            'lc_stats': []
-        }
+        cycle_num = idx + 1
+        output_file = os.path.join(target_dir, f"cycle_{cycle_num}.fits")
         
-        # Calculate periodogram for increasing number of cycles
-        for n_cycles in range(1, len(lcs) + 1):
-            # Combine first n_cycles
-            combined_lc = lcs[0]
-            for i in range(1, n_cycles):
-                combined_lc = combined_lc.append(lcs[i])
-            
-            # Calculate statistics for this light curve
-            stats = {
-                'time_span': combined_lc.time.max().value - combined_lc.time.min().value,
-                'n_points': len(combined_lc.flux),
-                'std': combined_lc.flux.std(),
-                'median_err': np.median(combined_lc.flux_err)
-            }
-            results['lc_stats'].append(stats)
-            
-            # Calculate periodogram
+        # Download if file doesn't exist
+        if not os.path.exists(output_file):
+            print(f"Downloading cycle {cycle_num} data...")
             try:
-                # Use long minimum period for CVs since we expect orbital periods of hours
-                min_freq = 1/(10.0)  # 10 day max period
-                max_freq = 1/(0.05)  # 1.2 hour min period
-                
-                # Try a more sensitive periodogram for CV orbital periods
-                ls = LombScargle(combined_lc.time.value, combined_lc.flux.value, combined_lc.flux_err.value)
-                freq, power = ls.autopower(minimum_frequency=min_freq, maximum_frequency=max_freq,
-                                          samples_per_peak=100)
-                
-                # Convert to periods
-                periods = 1/freq
-                
-                # Find highest peak
-                peak_idx = np.argmax(power)
-                best_period = periods[peak_idx]
-                best_power = power[peak_idx]
-                
-                # Estimate error using FWHM of peak
-                # Find indices where power is at least half the peak power
-                half_max = best_power / 2
-                above_half_max = power >= half_max
-                
-                if np.sum(above_half_max) >= 3:  # Need at least 3 points for valid FWHM
-                    # Find contiguous regions above half max
-                    from scipy.ndimage import label
-                    labeled_array, num_features = label(above_half_max)
-                    
-                    # Find which label corresponds to the peak
-                    peak_label = labeled_array[peak_idx]
-                    
-                    # Get all frequencies in this peak
-                    peak_indices = np.where(labeled_array == peak_label)[0]
-                    peak_freqs = freq[peak_indices]
-                    
-                    # FWHM is the width of this region
-                    delta_freq = np.max(peak_freqs) - np.min(peak_freqs)
-                    period_error = best_period * delta_freq / (freq[peak_idx])
-                else:
-                    # Simple estimate if FWHM fails
-                    period_error = best_period / (stats['time_span'] / best_period)
-                
-                # Store results
-                results['n_cycles'].append(n_cycles)
-                results['periods'].append(best_period)
-                results['period_powers'].append(best_power)
-                results['period_errors'].append(period_error)
-                
+                lc = row.download()
+                lc.to_fits(output_file, overwrite=True)
+                print(f"Saved to {output_file}")
             except Exception as e:
-                print(f"Error calculating periodogram for TIC {tic_id} with {n_cycles} cycles: {e}")
-        
-        # Determine best overall period from all cycles
-        if results['periods']:
-            # Use period from max cycles as most accurate
-            results['best_period'] = results['periods'][-1]
-            
-            # Create figure to show period improvement
-            self._plot_period_improvement(tic_id, results)
-            
-        return results
-    
-    def _plot_period_improvement(self, tic_id, results):
-        """
-        Plot period determination improvement with increasing cycles.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV
-        results : dict
-            Dictionary with period analysis results
-        """
-        if not results['periods']:
-            return
-            
-        # Hours to display
-        periods_hrs = np.array(results['periods']) * 24
-        errors_hrs = np.array(results['period_errors']) * 24
-        
-        # Create figure
-        fig = plt.figure(figsize=(12, 10))
-        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1.5])
-        
-        # 1. Plot period vs number of cycles
-        ax1 = fig.add_subplot(gs[0, 0])
-        ax1.errorbar(results['n_cycles'], periods_hrs, yerr=errors_hrs, 
-                   fmt='o-', capsize=5, markersize=8)
-        ax1.set_xlabel('Number of Cycles')
-        ax1.set_ylabel('Period (hours)')
-        ax1.set_title(f'TIC {tic_id}: Period Determination Improvement')
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. Plot period error vs number of cycles
-        ax2 = fig.add_subplot(gs[0, 1])
-        ax2.plot(results['n_cycles'], errors_hrs, 'o-', markersize=8)
-        ax2.set_xlabel('Number of Cycles')
-        ax2.set_ylabel('Period Error (hours)')
-        ax2.set_title('Period Determination Uncertainty')
-        ax2.grid(True, alpha=0.3)
-        
-        # 3. Plot folded light curve with best period
-        ax3 = fig.add_subplot(gs[1, :])
-        
-        # Combine all available light curves
-        lcs = self.light_curves[tic_id]
-        combined_lc = lcs[0]
-        for i in range(1, len(lcs)):
-            combined_lc = combined_lc.append(lcs[i])
-        
-        # Fold with best period
-        folded_lc = combined_lc.fold(period=results['best_period'])
-        
-        # Plot with density coloring
-        x = folded_lc.phase.value
-        y = folded_lc.flux.value
-        
-        # Using a density-based scatter
-        xy = np.vstack([x, y])
-        
-        # Use kernel density estimate for coloring
-        try:
-            from scipy.stats import gaussian_kde
-            z = gaussian_kde(xy)(xy)
-            
-            # Sort points by density
-            idx = z.argsort()
-            x, y, z = x[idx], y[idx], z[idx]
-            
-            scatter = ax3.scatter(x, y, c=z, s=2, alpha=0.6, cmap='viridis')
-            plt.colorbar(scatter, ax=ax3, label='Density')
-        except:
-            # Fallback to simple plot if density estimation fails
-            ax3.scatter(x, y, s=2, alpha=0.2, color='blue')
-        
-        # Plot a binned average light curve
-        try:
-            phase_bins = np.linspace(0, 1, 75)
-            binned_flux = []
-            for i in range(len(phase_bins)-1):
-                mask = (x >= phase_bins[i]) & (x < phase_bins[i+1])
-                if np.sum(mask) > 0:
-                    binned_flux.append(np.mean(y[mask]))
-                else:
-                    binned_flux.append(np.nan)
-            
-            bin_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
-            ax3.plot(bin_centers, binned_flux, 'r-', linewidth=2)
-        except:
-            pass
-            
-        ax3.set_xlabel('Phase')
-        ax3.set_ylabel('Normalized Flux')
-        ax3.set_title(f'Folded Light Curve (P = {periods_hrs[-1]:.4f} hours)')
-        ax3.grid(True, alpha=0.3)
-        
-        # Add cycle info as text
-        info_text = f"Data span: {results['lc_stats'][-1]['time_span']:.1f} days\n"
-        info_text += f"Data points: {results['lc_stats'][-1]['n_points']}\n"
-        info_text += f"Period error: {errors_hrs[-1]:.6f} hours"
-        
-        # Place text in upper right corner with semi-transparent background
-        ax3.text(0.98, 0.95, info_text, transform=ax3.transAxes, fontsize=10,
-                verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'plots', f'TIC{tic_id}_period_improvement.png'), dpi=300)
-        plt.close()
-    
-    def analyze_outbursts(self, tic_id):
-        """
-        Analyze and characterize outbursts with improved detection in multiple cycles.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV to analyze
-            
-        Returns:
-        -----------
-        dict
-            Dictionary with outburst analysis results
-        """
-        if tic_id not in self.light_curves:
-            print(f"No data for TIC {tic_id}")
-            return None
-            
-        lcs = self.light_curves[tic_id]
-        if len(lcs) < 2:
-            print(f"Need at least 2 cycles for TIC {tic_id}")
-            return None
-            
-        # Results dictionary
-        results = {
-            'tic_id': tic_id,
-            'n_cycles': [],
-            'n_outbursts': [],
-            'outburst_details': []
-        }
-        
-        # Analyze outbursts for increasing number of cycles
-        for n_cycles in range(1, len(lcs) + 1):
-            # Combine first n_cycles
-            combined_lc = lcs[0]
-            for i in range(1, n_cycles):
-                combined_lc = combined_lc.append(lcs[i])
-            
-            # Standardize and normalize for outburst detection
-            time = combined_lc.time.value
-            flux = combined_lc.flux.value
-            
-            # Simple outburst detection algorithm
-            # For CV outbursts, we expect significant brightening
-            
-            # 1. Calculate baseline flux using a rolling median filter
-            window_size = min(101, len(flux) // 3 * 2 + 1)  # Ensure it's odd and covers max 1/3 of data
-            if window_size < 3:
-                window_size = 3
-                
-            baseline = medfilt(flux, window_size)
-            
-            # 2. Find points significantly above baseline
-            threshold = np.std(flux - baseline) * 3
-            outburst_candidate_mask = (flux - baseline) > threshold
-            
-            # 3. Group adjacent points into outburst events
-            from scipy.ndimage import label
-            outburst_regions, n_outbursts = label(outburst_candidate_mask)
-            
-            # 4. Process each outburst
-            outburst_list = []
-            for i in range(1, n_outbursts + 1):
-                # Get indices for this outburst
-                outburst_indices = np.where(outburst_regions == i)[0]
-                
-                # Only consider outbursts with multiple points
-                if len(outburst_indices) < 3:
-                    continue
-                    
-                # Get time and flux for this outburst
-                outburst_time = time[outburst_indices]
-                outburst_flux = flux[outburst_indices]
-                
-                # Calculate basic outburst parameters
-                start_time = outburst_time.min()
-                end_time = outburst_time.max()
-                duration = end_time - start_time
-                amplitude = outburst_flux.max() - baseline[outburst_indices[np.argmax(outburst_flux)]]
-                
-                # Only consider significant outbursts
-                if duration < 0.5 or amplitude < 0.05:  # At least 12 hours and 5% amplitude
-                    continue
-                    
-                outburst_list.append({
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    'duration': duration,
-                    'amplitude': amplitude,
-                    'peak_time': outburst_time[np.argmax(outburst_flux)],
-                    'n_points': len(outburst_indices)
-                })
-            
-            # Store results
-            results['n_cycles'].append(n_cycles)
-            results['n_outbursts'].append(len(outburst_list))
-            
-            # For the final cycle analysis, store detailed outburst info
-            if n_cycles == len(lcs):
-                results['outburst_details'] = outburst_list
-                
-                # Create outburst visualization
-                self._plot_outburst_analysis(tic_id, combined_lc, outburst_list, baseline)
-        
-        return results
-    
-    def _plot_outburst_analysis(self, tic_id, light_curve, outbursts, baseline=None):
-        """
-        Create visualization of outburst detection and characterization.
-        
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV
-        light_curve : lightkurve.LightCurve
-            Combined light curve object
-        outbursts : list
-            List of detected outbursts
-        baseline : array or None
-            Baseline flux level if available
-        """
-        # Extract data
-        time = light_curve.time.value
-        flux = light_curve.flux.value
-        
-        # For time axis, use BJD - 2457000 for cleaner numbers
-        plot_time = time - 2457000
-        
-        # Create figure
-        fig = plt.figure(figsize=(12, 8))
-        gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
-        
-        # Main light curve with outbursts
-        ax1 = fig.add_subplot(gs[0])
-        ax1.scatter(plot_time, flux, s=2, alpha=0.5, color='black', label='TESS data')
-        
-        # Add baseline if provided
-        if baseline is not None:
-            ax1.plot(plot_time, baseline, 'r-', alpha=0.7, label='Baseline')
-            
-        # Highlight outbursts
-        colors = plt.cm.tab10(np.linspace(0, 1, min(10, len(outbursts))))
-        
-        for i, outburst in enumerate(outbursts):
-            color = colors[i % len(colors)]
-            
-            # Find indices for this outburst
-            mask = (time >= outburst['start_time']) & (time <= outburst['end_time'])
-            
-            # Plot outburst
-            ax1.scatter(plot_time[mask], flux[mask], s=15, alpha=0.7, color=color, 
-                      label=f'Outburst {i+1}' if i < 5 else "")
-            
-            # Add annotation
-            peak_idx = np.argmax(flux[mask])
-            peak_time = plot_time[mask][peak_idx]
-            peak_flux = flux[mask][peak_idx]
-            
-            # Only annotate first 5 outbursts to avoid crowding
-            if i < 5:
-                ax1.annotate(f"{i+1}", (peak_time, peak_flux),
-                           xytext=(0, 10), textcoords='offset points',
-                           ha='center', va='bottom', fontsize=12, fontweight='bold')
-        
-        ax1.set_xlabel('Time (BJD - 2457000)')
-        ax1.set_ylabel('Normalized Flux')
-        ax1.set_title(f'TIC {tic_id}: Detected Outbursts')
-        ax1.legend(loc='upper right')
-        ax1.grid(True, alpha=0.3)
-        
-        # Lower panel: Cumulative outburst count
-        ax2 = fig.add_subplot(gs[1], sharex=ax1)
-        
-        if outbursts:
-            # Sort outbursts by time
-            sorted_outbursts = sorted(outbursts, key=lambda x: x['peak_time'])
-            
-            # Create cumulative count
-            cum_times = [ob['peak_time'] - 2457000 for ob in sorted_outbursts]
-            cum_counts = np.arange(1, len(sorted_outbursts) + 1)
-            
-            # Plot cumulative function
-            ax2.step(cum_times, cum_counts, where='post', linewidth=2)
-            ax2.set_ylabel('Cumulative Count')
-            
-            # Try to fit a linear function to estimate recurrence time
-            if len(cum_times) >= 3:
-                try:
-                    from scipy.stats import linregress
-                    slope, intercept, r_value, p_value, std_err = linregress(cum_times, cum_counts)
-                    
-                    # Plot fitted line
-                    xfit = np.array([cum_times[0], cum_times[-1]])
-                    yfit = intercept + slope * xfit
-                    ax2.plot(xfit, yfit, 'r--', alpha=0.7)
-                    
-                    # Calculate and display recurrence time
-                    if slope > 0:
-                        recurrence = 1.0 / slope
-                        ax2.text(0.02, 0.85, f"Est. recurrence: {recurrence:.1f} days", 
-                               transform=ax2.transAxes, fontsize=10,
-                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-                except:
-                    pass
+                print(f"Error downloading data: {e}")
+                continue
         else:
-            ax2.text(0.5, 0.5, "No outbursts detected", ha='center', va='center', 
-                   transform=ax2.transAxes)
-        
-        ax2.set_xlabel('Time (BJD - 2457000)')
-        ax2.grid(True, alpha=0.3)
-        
-        # Add outburst statistics as text
-        if outbursts:
-            durations = [ob['duration'] for ob in outbursts]
-            amplitudes = [ob['amplitude'] for ob in outbursts]
+            print(f"Using existing file: {output_file}")
             
-            stats_text = f"Outbursts: {len(outbursts)}\n"
-            stats_text += f"Median duration: {np.median(durations):.2f} days\n"
-            stats_text += f"Median amplitude: {np.median(amplitudes):.2f}"
-            
-            ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes, fontsize=10,
-                   verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.output_dir, 'plots', f'TIC{tic_id}_outburst_analysis.png'), dpi=300)
-        plt.close()
+        cycles[cycle_num] = output_file
     
-    def analyze_eclipse_improvement(self, tic_id):
-        """
-        Analyze how eclipse characterization improves with additional cycles.
+    return cycles
+
+
+def process_lightcurve(lc_file):
+    """
+    Process a TESS light curve file.
+    
+    Parameters:
+    -----------
+    lc_file : str
+        Path to the light curve FITS file
         
-        Parameters:
-        -----------
-        tic_id : int
-            TIC ID of the CV to analyze
-            
-        Returns:
-        -----------
-        dict
-            Dictionary with eclipse analysis results
-        """
-        if tic_id not in self.light_curves:
-            print(f"No data for TIC {tic_id}")
-            return None
-            
-        lcs = self.light_curves[tic_id]
-        if len(lcs) < 2:
-            print(f"Need at least 2 cycles for TIC {tic_id}")
-            return None
+    Returns:
+    --------
+    tuple
+        - Processed light curve object
+        - Time array (days)
+        - Flux array (normalized)
+        - Error array (normalized)
+    """
+    try:
+        # Load light curve
+        lc = lk.read(lc_file)
         
-        # First, determine if this is an eclipsing system
-        # We need a good orbital period
-        period_results = self.analyze_period_improvement(tic_id)
+        # Basic cleaning
+        clean_lc = lc.remove_outliers(sigma=5)
         
-        if period_results is None or not period_results['periods']:
-            print(f"Could not determine period for TIC {tic_id}")
-            return None
+        # Normalize flux
+        median_flux = np.median(clean_lc.flux.value)
+        time = clean_lc.time.value
+        flux = clean_lc.flux.value / median_flux
+        error = clean_lc.flux_err.value / median_flux if hasattr(clean_lc, 'flux_err') else np.ones_like(flux) * 0.001
+        
+        return clean_lc, time, flux, error
+    
+    except Exception as e:
+        print(f"Error processing {lc_file}: {e}")
+        return None, None, None, None
+
+
+def find_orbital_period(time, flux, error, min_period=0.01, max_period=1.0, n_periods=10000):
+    """
+    Find orbital period using Lomb-Scargle periodogram.
+    
+    Parameters:
+    -----------
+    time : array
+        Time array (days)
+    flux : array
+        Flux array (normalized)
+    error : array
+        Error array
+    min_period : float
+        Minimum period to search (days)
+    max_period : float
+        Maximum period to search (days)
+    n_periods : int
+        Number of periods to test
+        
+    Returns:
+    --------
+    tuple
+        - Best period (days)
+        - Period uncertainty (days)
+        - Periodogram object
+        - Frequency array
+        - Power array
+    """
+    # Prepare frequency grid
+    frequency = np.linspace(1/max_period, 1/min_period, n_periods)
+    
+    # Compute periodogram
+    ls = LombScargle(time, flux, error)
+    power = ls.power(frequency)
+    
+    # Find the best period
+    best_idx = np.argmax(power)
+    best_frequency = frequency[best_idx]
+    best_period = 1.0 / best_frequency
+    
+    # Estimate uncertainty
+    # This is a simple estimate based on the FWHM of the periodogram peak
+    # For a proper uncertainty, a bootstrap method would be better
+    try:
+        fwhm_idx = np.where(power > 0.5 * power[best_idx])[0]
+        if len(fwhm_idx) > 1:
+            period_uncertainty = 0.5 * (1.0 / frequency[fwhm_idx[0]] - 1.0 / frequency[fwhm_idx[-1]])
+        else:
+            # Default to 1% uncertainty if FWHM method fails
+            period_uncertainty = 0.01 * best_period
+    except:
+        period_uncertainty = 0.01 * best_period
+    
+    return best_period, period_uncertainty, ls, frequency, power
+
+
+def phase_fold_lightcurve(time, flux, error, period):
+    """
+    Phase fold a light curve.
+    
+    Parameters:
+    -----------
+    time : array
+        Time array (days)
+    flux : array
+        Flux array (normalized)
+    error : array
+        Error array
+    period : float
+        Period to fold at (days)
+        
+    Returns:
+    --------
+    tuple
+        - Phase array (0-1)
+        - Flux array
+        - Error array
+    """
+    phase = (time / period) % 1.0
+    
+    # Sort by phase
+    sort_idx = np.argsort(phase)
+    phase = phase[sort_idx]
+    flux = flux[sort_idx]
+    error = error[sort_idx]
+    
+    return phase, flux, error
+
+
+def bin_phased_lightcurve(phase, flux, error, bins=100):
+    """
+    Bin a phase-folded light curve.
+    
+    Parameters:
+    -----------
+    phase : array
+        Phase array (0-1)
+    flux : array
+        Flux array
+    error : array
+        Error array
+    bins : int
+        Number of bins
+        
+    Returns:
+    --------
+    tuple
+        - Binned phase array
+        - Binned flux array
+        - Binned error array
+    """
+    bin_edges = np.linspace(0, 1, bins + 1)
+    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+    
+    binned_flux = np.zeros(bins)
+    binned_error = np.zeros(bins)
+    
+    for i in range(bins):
+        mask = (phase >= bin_edges[i]) & (phase < bin_edges[i+1])
+        if np.sum(mask) > 0:
+            binned_flux[i] = np.mean(flux[mask])
+            # Error propagation
+            binned_error[i] = np.sqrt(np.sum(error[mask]**2)) / np.sum(mask)
+        else:
+            binned_flux[i] = np.nan
+            binned_error[i] = np.nan
+    
+    return bin_centers, binned_flux, binned_error
+
+
+def combine_cycles(cycle_data, max_cycles=None):
+    """
+    Combine data from multiple cycles.
+    
+    Parameters:
+    -----------
+    cycle_data : dict
+        Dictionary mapping cycle numbers to tuples of (time, flux, error)
+    max_cycles : int, optional
+        Maximum number of cycles to combine
+        
+    Returns:
+    --------
+    list
+        List of tuples (cycle_count, combined_time, combined_flux, combined_error)
+    """
+    if max_cycles is None:
+        max_cycles = len(cycle_data)
+    
+    combined_data = []
+    
+    for n_cycles in range(1, min(max_cycles+1, len(cycle_data)+1)):
+        all_time = np.concatenate([cycle_data[i+1][0] for i in range(n_cycles)])
+        all_flux = np.concatenate([cycle_data[i+1][1] for i in range(n_cycles)])
+        all_error = np.concatenate([cycle_data[i+1][2] for i in range(n_cycles)])
+        
+        combined_data.append((n_cycles, all_time, all_flux, all_error))
+    
+    return combined_data
+
+
+def analyze_cv_target(tic_id, common_name, cv_type, output_dir, cycles, args):
+    """
+    Analyze a CV target across multiple cycles.
+    
+    Parameters:
+    -----------
+    tic_id : int
+        TIC ID of the target
+    common_name : str
+        Common name of the target
+    cv_type : str
+        CV type
+    output_dir : str
+        Output directory
+    cycles : dict
+        Dictionary mapping cycle numbers to light curve file paths
+    args : argparse.Namespace
+        Command line arguments
+        
+    Returns:
+    --------
+    dict
+        Results dictionary
+    """
+    # Create results directory for this target
+    target_dir = os.path.join(output_dir, f"{common_name.replace(' ', '_')}")
+    os.makedirs(target_dir, exist_ok=True)
+    
+    print(f"\nAnalyzing {common_name} (TIC {tic_id}, {cv_type})")
+    print("-" * 50)
+    
+    # Process individual cycles
+    cycle_data = {}
+    cycle_results = {}
+    
+    for cycle_num, lc_file in cycles.items():
+        print(f"Processing cycle {cycle_num}...")
+        
+        # Process light curve
+        lc, time, flux, error = process_lightcurve(lc_file)
+        if time is None:
+            print(f"Skipping cycle {cycle_num} due to processing error")
+            continue
             
-        # Results dictionary
-        results = {
-            'tic_id': tic_id,
-            'n_cycles': [],
-            'eclipse_depths': [],
-            'eclipse_errors': [],
-            'eclipse_widths': [],
-            'signal_to_noise': []
+        cycle_data[cycle_num] = (time, flux, error)
+        
+        # Find orbital period
+        result = find_orbital_period(time, flux, error)
+        period, period_err, ls, frequency, power = result
+        
+        cycle_results[cycle_num] = {
+            "period": period,
+            "period_err": period_err,
+            "time_span": time.max() - time.min(),
+            "n_points": len(time),
+            "phase_coverage": None,  # Will compute later
+            "snr": None,  # Will compute later
         }
         
-        # Use period from full dataset
-        orbital_period = period_results['best_period']
+        print(f"  Period: {period*24:.6f} ± {period_err*24:.6f} hours")
+    
+    if not cycle_data:
+        print(f"No valid cycles for {common_name}")
+        return None
         
-        # Analyze eclipses for increasing number of cycles
-        for n_cycles in range(1, len(lcs) + 1):
-            # Combine first n_cycles
-            combined_lc = lcs[0]
-            for i in range(1, n_cycles):
-                combined_lc = combined_lc.append(lcs[i])
+    # Now do the combined analysis
+    combined_results = []
+    combined_data = combine_cycles(cycle_data)
+    
+    for idx, (n_cycles, all_time, all_flux, all_error) in enumerate(combined_data):
+        print(f"Analyzing combined data: cycles 1-{n_cycles}...")
+        
+        # Find orbital period
+        result = find_orbital_period(all_time, all_flux, all_error)
+        period, period_err, ls, frequency, power = result
+        
+        # Phase fold and bin
+        phase, folded_flux, folded_error = phase_fold_lightcurve(all_time, all_flux, all_error, period)
+        bin_phase, bin_flux, bin_error = bin_phased_lightcurve(phase, folded_flux, folded_error)
+        
+        # Calculate phase coverage
+        phase_bins = np.linspace(0, 1, 20)
+        phase_hist, _ = np.histogram(phase, bins=phase_bins)
+        phase_coverage = np.sum(phase_hist > 0) / len(phase_bins)
+        
+        # Calculate SNR of the folded curve
+        # For eclipse-like signals, use the ratio of depth to noise
+        mean_flux = np.median(bin_flux)
+        depth = mean_flux - np.min(bin_flux)
+        noise = np.median(bin_error)
+        snr = depth / noise if noise > 0 else 0
+        
+        result = {
+            "n_cycles": n_cycles,
+            "period": period,
+            "period_err": period_err,
+            "time_span": all_time.max() - all_time.min(),
+            "n_points": len(all_time),
+            "phase_coverage": phase_coverage,
+            "snr": snr,
+            "folded_data": (bin_phase, bin_flux, bin_error),
+            "frequency": frequency,
+            "power": power,
+        }
+        
+        combined_results.append(result)
+        
+        print(f"  Period: {period*24:.6f} ± {period_err*24:.6f} hours")
+        print(f"  SNR: {snr:.2f}, Phase coverage: {phase_coverage:.2f}")
+    
+    # Create summary plots
+    create_summary_plots(common_name, cv_type, combined_results, target_dir)
+    
+    return {
+        "tic_id": tic_id,
+        "common_name": common_name,
+        "cv_type": cv_type,
+        "cycle_results": cycle_results,
+        "combined_results": combined_results,
+    }
+
+
+def create_summary_plots(star_name, cv_type, results, output_dir):
+    """
+    Create summary plots for a CV target.
+    
+    Parameters:
+    -----------
+    star_name : str
+        Name of the star
+    cv_type : str
+        CV type
+    results : list
+        List of combined results dictionaries
+    output_dir : str
+        Output directory
+    """
+    # Plot 1: Period error vs. number of cycles
+    plt.figure(figsize=(12, 9))
+    
+    # Create a 2x2 grid
+    gs = GridSpec(2, 2, figure=plt.gcf())
+    
+    # Plot 1: Period precision improvement
+    ax1 = plt.subplot(gs[0, 0])
+    
+    n_cycles = [r["n_cycles"] for r in results]
+    period_err = [r["period_err"] * 24 * 3600 for r in results]  # Convert to seconds
+    
+    ax1.plot(n_cycles, period_err, 'o-', color='blue', linewidth=2, markersize=8)
+    
+    # Add the theoretical 1/sqrt(N) improvement
+    if len(n_cycles) > 1:
+        initial_err = period_err[0]
+        theoretical = [initial_err / np.sqrt(n) for n in n_cycles]
+        ax1.plot(n_cycles, theoretical, 'k--', label='Theoretical: 1/√N', linewidth=2, alpha=0.7)
+    
+    ax1.set_xlabel('Number of Cycles')
+    ax1.set_ylabel('Period Uncertainty (seconds)')
+    ax1.set_title('Period Precision Improvement')
+    ax1.grid(True, alpha=0.3)
+    if len(n_cycles) > 1:
+        ax1.legend()
+    
+    # Plot 2: SNR vs. number of cycles
+    ax2 = plt.subplot(gs[0, 1])
+    
+    snr = [r["snr"] for r in results]
+    
+    ax2.plot(n_cycles, snr, 'o-', color='green', linewidth=2, markersize=8)
+    
+    # Add the theoretical sqrt(N) improvement
+    if len(n_cycles) > 1 and snr[0] > 0:
+        initial_snr = snr[0]
+        theoretical = [initial_snr * np.sqrt(n) for n in n_cycles]
+        ax2.plot(n_cycles, theoretical, 'k--', label='Theoretical: √N', linewidth=2, alpha=0.7)
+    
+    ax2.set_xlabel('Number of Cycles')
+    ax2.set_ylabel('Signal-to-Noise Ratio')
+    ax2.set_title('SNR Improvement')
+    ax2.grid(True, alpha=0.3)
+    if len(n_cycles) > 1 and snr[0] > 0:
+        ax2.legend()
+    
+    # Plot 3: Phase-folded light curve for best period (using all cycles)
+    ax3 = plt.subplot(gs[1, :])
+    
+    # Get the folded data from the last result (all cycles)
+    bin_phase, bin_flux, bin_error = results[-1]["folded_data"]
+    
+    # Plot the binned data
+    ax3.errorbar(bin_phase, bin_flux, yerr=bin_error, fmt='o', color='blue', 
+                 alpha=0.7, ecolor='lightblue', markersize=4)
+    
+    # Add a second cycle
+    ax3.errorbar(bin_phase + 1, bin_flux, yerr=bin_error, fmt='o', color='blue', 
+                 alpha=0.7, ecolor='lightblue', markersize=4)
+    
+    # Try to fit a smoothing spline or savgol filter
+    try:
+        # Fill in any gaps first
+        nan_mask = np.isnan(bin_flux)
+        if not all(nan_mask):
+            x_valid = bin_phase[~nan_mask]
+            y_valid = bin_flux[~nan_mask]
             
-            # Fold light curve at orbital period
-            folded_lc = combined_lc.fold(period=orbital_period)
+            # Smooth with Savitzky-Golay filter
+            if len(y_valid) > 10:
+                window_length = min(15, len(y_valid) // 4 * 2 + 1)  # Odd number
+                if window_length > 3:
+                    y_smooth = savgol_filter(y_valid, window_length, 3)
+                    ax3.plot(x_valid, y_smooth, 'r-', linewidth=2)
+                    ax3.plot(x_valid + 1, y_smooth, 'r-', linewidth=2)
+    except Exception as e:
+        print(f"Error in smoothing: {e}")
+    
+    period = results[-1]["period"]
+    period_err = results[-1]["period_err"]
+    
+    ax3.set_xlabel('Phase')
+    ax3.set_ylabel('Relative Flux')
+    ax3.set_title(f'Phase-folded Light Curve: P = {period*24:.6f} ± {period_err*24:.6f} hours')
+    ax3.set_xlim(0, 2)
+    ax3.grid(True, alpha=0.3)
+    
+    # Add a note with the best orbital period
+    hours_per_day = 24
+    period_hours = period * hours_per_day
+    period_err_hours = period_err * hours_per_day
+    ax3.annotate(f'Orbital Period: {period_hours:.6f} ± {period_err_hours:.6f} hours', 
+                xy=(0.02, 0.02), xycoords='axes fraction',
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="grey", alpha=0.8))
+    
+    # Add overall title
+    plt.suptitle(f'{star_name} ({cv_type}) - Multi-cycle Analysis', fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    
+    # Save the plot
+    plt.savefig(os.path.join(output_dir, f"{star_name.replace(' ', '_')}_summary.png"), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Save the periodogram
+    plt.figure(figsize=(10, 6))
+    frequency = results[-1]["frequency"]
+    power = results[-1]["power"]
+    
+    periods = 1/frequency
+    in_range = (periods > 0.01) & (periods < 2.0)  # Limit range for clarity
+    
+    plt.plot(periods[in_range] * 24, power[in_range])  # Convert to hours
+    
+    # Mark the detected period
+    best_period = results[-1]["period"] * 24  # Hours
+    best_idx = np.argmin(np.abs(periods * 24 - best_period))
+    plt.axvline(best_period, color='r', linestyle='--', alpha=0.7)
+    plt.scatter([best_period], [power[best_idx]], color='red', s=100, marker='o', zorder=5)
+    
+    plt.xlabel('Period (hours)')
+    plt.ylabel('Power')
+    plt.title(f'{star_name} - Lomb-Scargle Periodogram (All Cycles)')
+    plt.xscale('log')
+    plt.grid(True, alpha=0.3)
+    
+    plt.savefig(os.path.join(output_dir, f"{star_name.replace(' ', '_')}_periodogram.png"), dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def create_comparative_plot(all_results, output_dir):
+    """
+    Create a comparative plot showing period precision improvement vs. number of cycles.
+    
+    Parameters:
+    -----------
+    all_results : list
+        List of results dictionaries
+    output_dir : str
+        Output directory
+    """
+    # Filter out None results
+    all_results = [r for r in all_results if r is not None]
+    
+    if len(all_results) == 0:
+        print("No valid results for comparative plot")
+        return
+    
+    # Extract data for plotting
+    cv_names = [r["common_name"] for r in all_results]
+    cv_types = [r["cv_type"] for r in all_results]
+    
+    plt.figure(figsize=(12, 8))
+    
+    type_colors = {
+        "Dwarf Nova": "blue",
+        "Eclipsing Dwarf Nova": "green",
+        "Polar": "red",
+        "Intermediate Polar": "purple",
+        "Unknown": "gray"
+    }
+    
+    # Create legend entries to avoid duplicates
+    legend_entries = {}
+    
+    # Plot relative period precision improvement for each CV
+    for result in all_results:
+        if not result["combined_results"]:
+            continue
             
-            phase = folded_lc.phase.value
-            flux = folded_lc.flux.value
+        name = result["common_name"]
+        cv_type = result["cv_type"]
+        
+        n_cycles = [r["n_cycles"] for r in result["combined_results"]]
+        if len(n_cycles) <= 1:
+            continue
             
-            # Create phase bins
-            bins = 50
-            phase_bins = np.linspace(0, 1, bins + 1)
-            bin_width = phase_bins[1] - phase_bins[0]
-            bin_centers = 0.5 * (phase_bins[1:] + phase_bins[:-1])
-            
-            # Compute binned flux and errors
-            binned_flux = np.zeros(bins)
-            binned_errors = np.zeros(bins)
-            
-            for i in range(bins):
-                mask = (phase >= phase_bins[i]) & (phase < phase_bins[i+1])
-                if np.sum(mask) > 0:
-                    binned_flux[i] = np.median(flux[mask])
-                    # Use standard error of the mean for error estimate
-                    binned_errors[i] = np.std(flux[mask]) / np.sqrt(np.sum(mask))
-                else:
-                    binned_flux[i] = np.nan
-                    binned_errors[i] = np.nan
-            
-            # Look for eclipse - find the deepest point
-            valid_mask = ~np.isnan(binned_flux)
-            if np.sum(valid_mask) < bins * 0.5:
-                # Too many missing bins
-                print(f"Too many missing bins for TIC {tic_id} with {n_cycles} cycles")
+        # Convert period errors to relative improvement
+        period_err = [r["period_err"] for r in result["combined_results"]]
+        relative_err = [err / period_err[0] for err in period_err]
+        
+        # Plot with color based on CV type
+        color = type_colors.get(cv_type, "gray")
+        
+        # Only add to legend if type not already there
+        if cv_type not in legend_entries:
+            plt.plot(n_cycles, relative_err, 'o-', color=color, linewidth=2, markersize=8, 
+                     label=cv_type, alpha=0.8)
+            legend_entries[cv_type] = True
+        else:
+            plt.plot(n_cycles, relative_err, 'o-', color=color, linewidth=2, markersize=8, 
+                     alpha=0.8)
+        
+        # Add star name as annotation
+        plt.annotate(name, (n_cycles[-1], relative_err[-1]), 
+                     xytext=(5, 0), textcoords='offset points', 
+                     fontsize=9, alpha=0.8)
+    
+    # Add the theoretical 1/sqrt(N) improvement
+    max_cycles = max([max([r["n_cycles"] for r in result["combined_results"]]) 
+                     for result in all_results if result["combined_results"]])
+    
+    n_values = np.arange(1, max_cycles+1)
+    theoretical = [1 / np.sqrt(n) for n in n_values]
+    
+    plt.plot(n_values, theoretical, 'k--', linewidth=2, label='Theoretical: 1/√N', alpha=0.7)
+    
+    plt.xlabel('Number of Cycles')
+    plt.ylabel('Relative Period Uncertainty')
+    plt.title('Period Precision Improvement with Multiple TESS Cycles')
+    plt.yscale('log')
+    plt.grid(True, which='both', alpha=0.3)
+    plt.legend(title="CV Type")
+    
+    plt.savefig(os.path.join(output_dir, "period_precision_comparison.png"), dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def main():
+    # Parse arguments
+    args = setup_args()
+    
+    # Create output directory
+    os.makedirs(args.output, exist_ok=True)
+    
+    # Get CV targets
+    targets = get_cv_targets(args)
+    
+    print(f"Will process {len(targets)} CV targets")
+    
+    # Process each target
+    all_results = []
+    
+    for tic_id, common_name, cv_type in targets:
+        # Download light curves
+        if not args.no_download:
+            cycles = download_lightcurves(tic_id, args.output, args.cadence, args.max_cycles)
+        else:
+            # Look for existing files
+            target_dir = os.path.join(args.output, f"TIC_{tic_id}")
+            if not os.path.exists(target_dir):
+                print(f"No data directory found for TIC {tic_id}")
                 continue
                 
-            baseline = np.median(binned_flux[valid_mask])
-            min_idx = np.argmin(binned_flux[valid_mask])
-            min_flux = binned_flux[valid_mask][min_idx]
-            min_phase = bin_centers[valid_mask][min_idx]
+            cycles = {}
+            for cycle_num in range(1, args.max_cycles + 1):
+                cycle_file = os.path.join(target_dir, f"cycle_{cycle_num}.fits")
+                if os.path.exists(cycle_file):
+                    cycles[cycle_num] = cycle_file
+        
+        if not cycles:
+            print(f"No cycles found for {common_name} (TIC {tic_id})")
+            continue
             
-            # Calculate eclipse depth
-            eclipse_depth = baseline - min_flux
-            eclipse_error = binned_errors[valid_mask][min_idx]
-            
-            #
+        print(f"Found {len(cycles)} cycles for {common_name} (TIC {tic_id})")
+        
+        # Analyze
+        result = analyze_cv_target(tic_id, common_name, cv_type, args.output, cycles, args)
+        all_results.append(result)
+    
+    # Create comparative plot
+    create_comparative_plot(all_results, args.output)
+    
+    print(f"\nAnalysis complete. Results saved to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
