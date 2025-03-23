@@ -182,6 +182,34 @@ def process_lightcurve(lc_file):
         return None, None, None, None
 
 
+
+def process_lightcurve(lc_file):
+    try:
+        # Load the light curve and remove outliers
+        lc = lk.read(lc_file)
+        clean_lc = lc.remove_outliers(sigma=5)
+        
+        # Get the raw time and flux values
+        time = clean_lc.time.value
+        flux = clean_lc.flux.value
+        # Get flux_err if it exists, otherwise assign a default
+        if hasattr(clean_lc, 'flux_err') and clean_lc.flux_err is not None:
+            error = clean_lc.flux_err.value
+        else:
+            error = np.ones_like(flux) * 0.001
+        
+        # Normalize flux by its median
+        median_flux = np.median(flux)
+        flux = flux / median_flux
+        error = error / median_flux
+        
+        return clean_lc, time, flux, error
+    
+    except Exception as e:
+        print(f"Error processing {lc_file}: {e}")
+        return None, None, None, None
+
+
 def find_orbital_period(time, flux, error, min_period=0.01, max_period=1.0, n_periods=10000):
     """
     Find orbital period using Lomb-Scargle periodogram.
