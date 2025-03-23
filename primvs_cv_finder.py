@@ -897,13 +897,6 @@ class PrimvsCVFinder:
         
         # Return statistics for potential further analysis
         return region_stats
-        
-        print(f"Galactic region analysis complete. Results saved to {self.output_dir}.")
-        
-        # Return statistics for potential further analysis
-        return region_stats
-
-
 
 
     def load_primvs_data(self):
@@ -1086,7 +1079,7 @@ class PrimvsCVFinder:
         # Save the classifier probability directly
 
         # Only select candidates with probability >= 0.5
-        prob_threshold = 0.0
+        prob_threshold = 0.9
         high_prob_mask = self.filtered_data['cv_prob'] >= prob_threshold
         high_prob_count = high_prob_mask.sum()
         
@@ -1411,6 +1404,17 @@ class PrimvsCVFinder:
             subsample=0.7, colsample_bytree=0.8, gamma=0.1, objective='binary:logistic',
             scale_pos_weight=pos_weight, n_jobs=-1, random_state=42
         )
+
+
+        from sklearn.decomposition import PCA
+
+        # Assuming X_emb is your original 64-dimensional embedding matrix:
+        #pca = PCA(n_components=20)  # Adjust n_components based on variance explained
+        #X_emb = pca.fit_transform(X_emb)
+
+        # Now use X_emb_reduced for your classifier training instead of X_emb.
+        #print("Explained variance ratio:", pca.explained_variance_ratio_.sum())
+
         emb_model.fit(X_emb_train, y_train)
         
         # Get predictions on validation set
@@ -1449,16 +1453,20 @@ class PrimvsCVFinder:
         # Apply models to all data
         print("\nApplying models to all data...")
         trad_probs = trad_model.predict_proba(X_trad)[:, 1]
+
+        # When applying models to all data for final predictions:
+        trad_probs = trad_model.predict_proba(X_trad)[:, 1]
+        # Use the same PCA model to transform the entire embedding dataset      
         emb_probs = emb_model.predict_proba(X_emb)[:, 1]
-        
-        # Calculate final probabilities with optimal weighting
+
+        # Now combine the probabilities as before:
         final_probs = best_weight * trad_probs + (1 - best_weight) * emb_probs
         
         # Show feature importance
         importance = trad_model.feature_importances_
         indices = np.argsort(importance)[::-1]
         print("\nTop traditional features:")
-        for i in range(min(10, len(traditional_features))):
+        for i in range(min(100, len(traditional_features))):
             print(f"  {i+1}. {traditional_features[indices[i]]}: {importance[indices[i]]:.4f}")
         
         # Store models and probabilities
