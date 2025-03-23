@@ -166,6 +166,13 @@ def process_lightcurve(lc_file):
         # Load light curve
         lc = lk.read(lc_file)
         
+        lc = lk.read(lc_file)
+        # Convert all relevant quantities to unitless numpy arrays
+        lc.time = lc.time.value
+        lc.flux = lc.flux.value
+        if hasattr(lc, 'flux_err') and lc.flux_err is not None:
+            lc.flux_err = lc.flux_err.value
+
         # Basic cleaning
         clean_lc = lc.remove_outliers(sigma=5)
         
