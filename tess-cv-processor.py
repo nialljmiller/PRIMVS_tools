@@ -31,62 +31,71 @@ from scipy.signal import savgol_filter
 
 def build_default_cv_targets():
     """
-    Build DEFAULT_CV_TARGETS dictionary using the SIMBAD catalog.
+    Build a DEFAULT_CV_TARGETS dictionary by querying SIMBAD for objects with type 'CV*'
+    and extracting their TIC IDs. This returns a dictionary mapping a target key (the main ID with underscores)
+    to a tuple: (TIC ID, main ID, "Cataclysmic Variable").
 
-    This function queries SIMBAD for objects classified as Cataclysmic Variables (otype 'CV*'),
-    then scans the returned identifier list to extract a TIC ID if available.
-    
     Returns:
-        dict: A dictionary mapping a target key (common name with spaces replaced by underscores)
-              to a tuple (TIC ID, common name, CV type).
+        dict: A dictionary of CV targets in TESS with TIC IDs.
     """
     from astroquery.simbad import Simbad
+    import re
 
-    # Include additional fields: ids and object type
+    # Increase the timeout to give SIMBAD more time to respond.
+    Simbad.TIMEOUT = 120
+    # Request additional fields: ids and object type.
     Simbad.add_votable_fields("ids", "otype")
     
-    # Query SIMBAD for cataclysmic variables.
-    # Note: 'otype' might need refinement depending on how SIMBAD classifies these objects.
-    result = Simbad.query_criteria("otype='CV*'")
-    cv_targets = {}
-    
+    print("Querying SIMBAD for cataclysmic variables (CV*)...")
+    try:
+        result = Simbad.query_criteria("otype='CV*'")
+    except Exception as e:
+        print(f"Error querying SIMBAD: {e}")
+        return {}
+
     if result is None:
         print("No cataclysmic variables found in SIMBAD.")
-        return cv_targets
+        return {}
 
+    cv_targets = {}
     for row in result:
         main_id = row['MAIN_ID']
-        # Ensure main_id is a string
+        # Ensure main_id is a proper string
         if isinstance(main_id, bytes):
             main_id = main_id.decode()
         
-        # Get the list of identifiers and split them by '|'
+        # Get the identifiers field and split them
         ids_field = row['IDS']
         if isinstance(ids_field, bytes):
             ids_field = ids_field.decode()
-        identifiers = [id_.strip() for id_ in ids_field.split('|')]
+        identifiers = [identifier.strip() for identifier in ids_field.split('|')]
         
-        # Look for an identifier that starts with "TIC"
+        # Look for a TIC ID in the identifiers using a regex.
         tic_id = None
         for identifier in identifiers:
-            if identifier.startswith("TIC"):
-                parts = identifier.split()
-                if len(parts) >= 2:
-                    try:
-                        tic_id = int(parts[1])
-                        break
-                    except ValueError:
-                        continue
-        # Only add targets that have a valid TIC ID.
+            # This regex looks for "TIC" optionally followed by a space then numbers.
+            match = re.search(r'TIC\s*([\d]+)', identifier)
+            if match:
+                try:
+                    tic_id = int(match.group(1))
+                    break
+                except ValueError:
+                    continue
+        
         if tic_id is not None:
             target_key = main_id.replace(" ", "_")
             cv_targets[target_key] = (tic_id, main_id, "Cataclysmic Variable")
     
+    print(f"Found {len(cv_targets)} confirmed CV targets with TIC IDs.")
     return cv_targets
 
 # Example usage:
 DEFAULT_CV_TARGETS = build_default_cv_targets()
-print("Found CV targets:", DEFAULT_CV_TARGETS)
+print("Default CV targets:", DEFAULT_CV_TARGETS)
+
+
+
+
 
 def setup_args():
     """Set up command line arguments."""
