@@ -931,18 +931,20 @@ class PrimvsTessCrossMatch:
 
 
 
+import os
+import shutil
+import pandas as pd
 
-
-def copy_target_npy_files(target_list_csv, token_dir="/beegfs/car/njm/LC/vars/", dest_folder_name="target_npy"):
+def copy_target_npy_files(target_list_csv, token_base_dir="/beegfs/car/njm/LC/", dest_folder_name="target_npy"):
     """
     This function reloads the target list from a CSV file and uses the 'sourceid' column to identify
-    the corresponding .npy files in the LC_TOKEN directory (which is in the same directory as this script)
-    and then copies them to a new folder in the same directory as the target list CSV.
+    the corresponding .FITS files anywhere within the token_base_dir directory tree and then copies
+    them to a new folder in the same directory as the target list CSV.
     
     Parameters:
       target_list_csv (str): Path to the target list CSV file.
-      token_dir (str): Directory where the LC_TOKEN npy files reside (relative to current working directory).
-      dest_folder_name (str): Name of the new folder where the npy files will be copied.
+      token_base_dir (str): Base directory where the LC_TOKEN .FITS files reside.
+      dest_folder_name (str): Name of the new folder where the .FITS files will be copied.
     """
     # Load the target list CSV
     target_list = pd.read_csv(target_list_csv)
@@ -956,7 +958,7 @@ def copy_target_npy_files(target_list_csv, token_dir="/beegfs/car/njm/LC/vars/",
     os.makedirs(dest_folder, exist_ok=True)
     print(f"Destination folder created: {dest_folder}")
     
-    # Loop over each target and copy its corresponding npy file
+    # Loop over each target and search for its corresponding .FITS file in token_base_dir
     copied_count = 0
     missing_files = []
     for idx, row in target_list.iterrows():
@@ -966,22 +968,30 @@ def copy_target_npy_files(target_list_csv, token_dir="/beegfs/car/njm/LC/vars/",
             continue
 
         npy_filename = f"{source_id}.FITS"
-        src_file = os.path.join(token_dir, npy_filename)
+        src_file = None
         
-        if os.path.exists(src_file):
+        # Walk through every directory under token_base_dir looking for the file
+        for root, dirs, files in os.walk(token_base_dir):
+            if npy_filename in files:
+                src_file = os.path.join(root, npy_filename)
+                break
+        
+        if src_file and os.path.exists(src_file):
             try:
                 shutil.copy2(src_file, dest_folder)
                 copied_count += 1
             except Exception as e:
                 print(f"Error copying {src_file}: {e}")
         else:
-            print(f"Warning: {src_file} does not exist.")
+            print(f"Warning: {npy_filename} not found in {token_base_dir}.")
             missing_files.append(npy_filename)
     
-    print(f"Copied {copied_count} npy files to {dest_folder}")
+    print(f"Copied {copied_count} .FITS files to {dest_folder}")
     if missing_files:
-        print(f"{len(missing_files)} npy files were missing: {missing_files}")
+        print(f"{len(missing_files)} .FITS files were missing: {missing_files}")
 
+# Example usage:
+# copy_target_npy_files("path/to/target_list.csv")
 
 # -------------------------
 # Main Execution
