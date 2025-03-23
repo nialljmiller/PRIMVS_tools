@@ -912,7 +912,7 @@ class PrimvsTessCrossMatch:
         self.load_cv_candidates()
         self.perform_crossmatch()
         # Populate tess_sectors using the TESSCycle8Overlay geometry
-        self.populate_tess_sectors()
+        #self.populate_tess_sectors()
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
