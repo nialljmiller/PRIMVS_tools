@@ -931,67 +931,58 @@ class PrimvsTessCrossMatch:
 
 
 
-import os
-import shutil
-import pandas as pd
 
-def copy_target_npy_files(target_list_csv, token_base_dir="/beegfs/car/njm/LC/", dest_folder_name="target_npy"):
+import Virac as virac
+import numpy as np
+from tqdm import tqdm
+
+def get_lightcurves(star_names):
     """
-    This function reloads the target list from a CSV file and uses the 'sourceid' column to identify
-    the corresponding .FITS files anywhere within the token_base_dir directory tree and then copies
-    them to a new folder in the same directory as the target list CSV.
-    
-    Parameters:
-      target_list_csv (str): Path to the target list CSV file.
-      token_base_dir (str): Base directory where the LC_TOKEN .FITS files reside.
-      dest_folder_name (str): Name of the new folder where the .FITS files will be copied.
+    Retrieves and filters light curves using virac for each star in star_names.
+    Returns a dictionary keyed by star name with the light curve details.
     """
-    # Load the target list CSV
-    target_list = pd.read_csv(target_list_csv)
-    print(f"Loaded {len(target_list)} targets from {target_list_csv}")
+    lightcurves = {}
+    for star_name in tqdm(star_names):
+        try:
+            # Fetch the light curve using virac
+            lc = virac.run_sourceid(int(star_name))
+            
+            # Filter by Ks filter and ensure positive magnitudes and errors
+            lc = lc[lc['filter'].astype(str) == 'Ks']
+            lc = lc[lc['hfad_mag'].astype(float) > 0]
+            lc = lc[lc['hfad_emag'].astype(float) > 0]
+            
+            if len(lc) == 0:
+                print(f"Warning: No valid data for star {star_name}")
+                continue
 
-    # Determine the directory of the target list CSV
-    target_dir = os.path.dirname(os.path.abspath(target_list_csv))
-    
-    # Create the destination folder inside the target list directory
-    dest_folder = os.path.join(target_dir, dest_folder_name)
-    os.makedirs(dest_folder, exist_ok=True)
-    print(f"Destination folder created: {dest_folder}")
-    
-    # Loop over each target and search for its corresponding .FITS file in token_base_dir
-    copied_count = 0
-    missing_files = []
-    for idx, row in target_list.iterrows():
-        source_id = str(row.get("sourceid", "")).strip()
-        if not source_id:
-            print(f"Warning: sourceid missing for row {idx}, skipping...")
-            continue
+            # Calculate the time range of observations
+            time_range = np.max(lc["mjdobs"]) - np.min(lc["mjdobs"])
 
-        npy_filename = f"{source_id}.FITS"
-        src_file = None
-        
-        # Walk through every directory under token_base_dir looking for the file
-        for root, dirs, files in os.walk(token_base_dir):
-            if npy_filename in files:
-                src_file = os.path.join(root, npy_filename)
-                break
-        
-        if src_file and os.path.exists(src_file):
-            try:
-                shutil.copy2(src_file, dest_folder)
-                copied_count += 1
-            except Exception as e:
-                print(f"Error copying {src_file}: {e}")
-        else:
-            print(f"Warning: {npy_filename} not found in {token_base_dir}.")
-            missing_files.append(npy_filename)
-    
-    print(f"Copied {copied_count} .FITS files to {dest_folder}")
-    if missing_files:
-        print(f"{len(missing_files)} .FITS files were missing: {missing_files}")
+            # Store relevant info in the dictionary
+            lightcurves[star_name] = {
+                "name": lc["sourceid"].iloc[0],
+                "mag": lc["hfad_mag"],
+                "magerr": lc["hfad_emag"],
+                "time": lc["mjdobs"],
+                "ast_res_chi": lc["ast_res_chisq"],
+                "chi": lc["chi"],
+                "ambi_match": lc["ambiguous_match"],
+                "time_range": time_range
+            }
+        except Exception as e:
+            print(f"Error processing star {star_name}: {e}")
+    return lightcurves
 
 # Example usage:
-# copy_target_npy_files("path/to/target_list.csv")
+if __name__ == "__main__":
+    # Replace with your actual list of star names/IDs
+    star_names = ["123456", "234567", "345678"]
+    lcs = get_lightcurves(star_names)
+    print(lcs)
+
+
+
 
 # -------------------------
 # Main Execution
