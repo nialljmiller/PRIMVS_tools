@@ -28,6 +28,21 @@ from tqdm import tqdm
 import lightkurve as lk
 from scipy import stats
 from scipy.signal import savgol_filter
+from astropy.io import fits
+
+def remove_units_from_fits(fits_file):
+    """
+    Remove all unit keywords (TUNIT*) from the FITS file header to avoid unit errors on reload.
+    """
+    with fits.open(fits_file, mode='update') as hdul:
+        for hdu in hdul:
+            if isinstance(hdu, fits.BinTableHDU):
+                keys_to_remove = [key for key in hdu.header if key.startswith("TUNIT")]
+                for key in keys_to_remove:
+                    del hdu.header[key]
+        hdul.flush()
+
+
 
 def build_default_cv_targets():
     """
@@ -100,7 +115,7 @@ print("Default CV targets:", DEFAULT_CV_TARGETS)
 def setup_args():
     """Set up command line arguments."""
     parser = argparse.ArgumentParser(description="Process TESS CV light curves across multiple cycles")
-    parser.add_argument("--output", type=str, default="../PRIMVS/cv_results", 
+    parser.add_argument("--output", type=str, default="../PRIMVS/cv_results/TESS/", 
                         help="Output directory for results")
     parser.add_argument("--tics", type=int, nargs="+", 
                         help="Specific TIC IDs to process (default: preset CVs)")
@@ -185,97 +200,26 @@ def download_lightcurves(tic_id, output_dir, cadence="short", max_cycles=8):
         cycle_num = idx + 1
         output_file = os.path.join(target_dir, f"cycle_{cycle_num}.fits")
         
+
+
         # Download if file doesn't exist
         if not os.path.exists(output_file):
             print(f"Downloading cycle {cycle_num} data...")
             try:
                 lc = row.download()
                 lc.to_fits(output_file, overwrite=True)
+                # Strip the astropy unit keywords
+                remove_units_from_fits(output_file)
                 print(f"Saved to {output_file}")
             except Exception as e:
                 print(f"Error downloading data: {e}")
                 continue
         else:
             print(f"Using existing file: {output_file}")
-            
+
         cycles[cycle_num] = output_file
     
     return cycles
-
-def process_lightcurve(lc_file):
-    try:
-        # Load light curve
-        lc = lk.read(lc_file)
-        # Immediately convert to unitless numpy arrays
-        time = np.asarray(lc.time)
-        flux = np.asarray(lc.flux)
-        if hasattr(lc, 'flux_err') and lc.flux_err is not None:
-            error = np.asarray(lc.flux_err)
-        else:
-            error = np.ones_like(flux) * 0.001
-        
-        # If you still want to clean the data using remove_outliers,
-        # you might want to apply it to your numpy arrays manually.
-        # Alternatively, if remove_outliers is giving you trouble,
-        # you can skip it and use sigma_clip or your own outlier removal.
-        # For example:
-        # flux = sigma_clip(flux, sigma=5).data
-        
-        # Normalize flux by its median
-        median_flux = np.median(flux)
-        flux = flux / median_flux
-        error = error / median_flux
-        
-        return None, time, flux, error  # We don't need the original lightcurve anymore
-    except Exception as e:
-        print(f"Error processing {lc_file}: {e}")
-        return None, None, None, None
-
-
-
-def process_lightcurve(lc_file):
-    """
-    Process a TESS light curve file.
-    
-    Parameters:
-    -----------
-    lc_file : str
-        Path to the light curve FITS file
-        
-    Returns:
-    --------
-    tuple
-        - Processed light curve object
-        - Time array (days)
-        - Flux array (normalized)
-        - Error array (normalized)
-    """
-    try:
-        # Load light curve
-        lc = lk.read(lc_file)
-        
-        lc = lk.read(lc_file)
-        # Convert all relevant quantities to unitless numpy arrays
-        lc.time = lc.time.value
-        lc.flux = lc.flux.value
-        if hasattr(lc, 'flux_err') and lc.flux_err is not None:
-            lc.flux_err = lc.flux_err.value
-
-        # Basic cleaning
-        clean_lc = lc.remove_outliers(sigma=5)
-        
-        # Normalize flux
-        median_flux = np.median(clean_lc.flux.value)
-        time = clean_lc.time.value
-        flux = clean_lc.flux.value / median_flux
-        error = clean_lc.flux_err.value / median_flux if hasattr(clean_lc, 'flux_err') else np.ones_like(flux) * 0.001
-        
-        return clean_lc, time, flux, error
-    
-    except Exception as e:
-        print(f"Error processing {lc_file}: {e}")
-        return None, None, None, None
-
 
 
 def process_lightcurve(lc_file):

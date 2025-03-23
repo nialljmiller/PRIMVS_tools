@@ -909,15 +909,15 @@ class PrimvsTessCrossMatch:
         print("\n" + "="*80)
         print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
         print("="*80 + "\n")
-        #self.load_cv_candidates()
-        #self.perform_crossmatch()
+        self.load_cv_candidates()
+        self.perform_crossmatch()
         #self.crossmatch_results = pd.read_csv(crossmatch_path)
         print(f"Reloaded crossmatch results from: {crossmatch_path}")        
         # Populate tess_sectors using the TESSCycle8Overlay geometry
-        #self.populate_tess_sectors()
+        self.populate_tess_sectors()
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
-        #self.generate_target_list()
-        #self.generate_summary_plots()
+        self.generate_target_list()
+        self.generate_summary_plots()
 
         save_lightcurves_to_csv(target_path)
 
@@ -997,7 +997,7 @@ def save_lightcurves_to_csv(target_list_csv, dest_folder_name="target_csv"):
 def main():
     cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"  # or CSV
     output_dir = "../PRIMVS/cv_results/tess_crossmatch_results"
-    cv_prob_threshold = 0.15
+    cv_prob_threshold = 0.1
     search_radius = 5.0  # arcseconds
     tess_mag_limit = 16.0
     print(f"Initializing PRIMVS-TESS cross-matching pipeline with parameters:")
