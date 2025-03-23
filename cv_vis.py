@@ -903,6 +903,7 @@ class PrimvsTessCrossMatch:
 
     # Modify run_pipeline to call populate_tess_sectors() after crossmatch:
     def run_pipeline(self):
+        crossmatch_path = self.output_dir + '/tess_proposal_targets.csv'
         start_time = time.time()
         print("\n" + "="*80)
         print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
@@ -916,7 +917,7 @@ class PrimvsTessCrossMatch:
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
-        copy_target_npy_files(self.output_dir + '/tess_proposal_targets.csv')
+        copy_target_npy_files(crossmatch_path)
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
