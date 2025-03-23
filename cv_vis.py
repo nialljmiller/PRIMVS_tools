@@ -981,7 +981,8 @@ def save_lightcurves_to_csv(target_list_csv, dest_folder_name="target_csv"):
             
             # Save the filtered lightcurve to CSV
             csv_filename = os.path.join(dest_folder, f"{source_id}.csv")
-            np.savetxt(csv_filename, lc, delimiter=",")
+            df = pd.DataFrame(lc)
+            df.to_csv(csv_filename, index = False)
             print(f"Saved lightcurve CSV for source {source_id} to {csv_filename}")
             
         except Exception as e:
