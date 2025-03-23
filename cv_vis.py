@@ -918,7 +918,12 @@ class PrimvsTessCrossMatch:
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         #self.generate_target_list()
         #self.generate_summary_plots()
-        copy_target_npy_files(target_path)
+
+        target_list = pd.read_csv(target_path)
+        print(f"Loaded {len(target_list)} targets from {target_list_csv}")
+        star_names = target_list['sourceid'].values
+
+        get_lightcurves(star_names)
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
@@ -973,14 +978,6 @@ def get_lightcurves(star_names):
         except Exception as e:
             print(f"Error processing star {star_name}: {e}")
     return lightcurves
-
-# Example usage:
-if __name__ == "__main__":
-    # Replace with your actual list of star names/IDs
-    star_names = ["123456", "234567", "345678"]
-    lcs = get_lightcurves(star_names)
-    print(lcs)
-
 
 
 
