@@ -526,52 +526,6 @@ class PrimvsTessCrossMatch:
 
 
 
-
-
-        plt.figure(figsize=(12, 8))
-        ax_ecl = plt.gca()
-
-        # Convert your data to ecliptic coords in degrees
-        lon_deg_all, lat_deg_all = ra_dec_to_ecliptic_plate_carree(
-            all_candidates['ra'].values, all_candidates['dec'].values
-        )
-
-        # Basic 2D hexbin
-        hb_ecl = ax_ecl.hexbin(lon_deg_all, lat_deg_all, gridsize=75, cmap='Greys', bins='log')
-        plt.colorbar(hb_ecl, label='log10(count)')
-
-        # Known CVs
-        lon_deg_cv, lat_deg_cv = ra_dec_to_ecliptic_plate_carree(
-            known_candidates['ra'].values, known_candidates['dec'].values
-        )
-        plt.scatter(lon_deg_cv, lat_deg_cv, label='Known CVs', color='red', marker='*', s=80)
-
-        # Targets
-        if not targets.empty:
-            lon_deg_tg, lat_deg_tg = ra_dec_to_ecliptic_plate_carree(
-                targets['ra'].values, targets['dec'].values
-            )
-            plt.scatter(lon_deg_tg, lat_deg_tg, label='Target List', color='blue', marker='+', s=30, alpha=0.8)
-
-        # Overlay TESS footprints
-        tess = TESSCycle8Overlay()
-        add_tess_overlay_ecliptic_plate_carree(ax_ecl, tess, alpha=0.2, size=12)
-
-        # Axes, labels
-        plt.xlabel("Ecliptic Longitude (degrees)")
-        plt.ylabel("Ecliptic Latitude (degrees)")
-        plt.title("Spatial Distribution (Ecliptic) - All, Known CVs, Target List")
-
-        # x in [0..360], y in [-90..90]
-        plt.xlim(0, 360)
-        plt.ylim(-90, 90)
-
-        plt.legend(loc='upper left')
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(plots_dir, "spatial_ecliptic_platecarree_groups.png"), dpi=300, bbox_inches='tight')
-        plt.close()
-
-
         # -----------------------------------------------------------------------
         # ROC Curve Plot using all candidates
         # -----------------------------------------------------------------------
