@@ -1764,7 +1764,8 @@ class PrimvsCVFinder:
 def main():
     """Main function to run the CV finder."""
     # Fixed paths to match your description
-    primvs_file = '../PRIMVS/PRIMVS_CC_CV_cand.fits'
+    #primvs_file = '../PRIMVS/PRIMVS_CC_CV_cand.fits'
+    primvs_file = '../PRIMVS/PRIMVS_CC.fits'    
     output_dir = "../PRIMVS/cv_results"
     known_cvs = "../PRIMVS/PRIMVS_CC_CV.fits"
     period_limit = 10.0  # Very generous upper limit (days)
