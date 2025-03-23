@@ -1079,7 +1079,7 @@ class PrimvsCVFinder:
         # Save the classifier probability directly
 
         # Only select candidates with probability >= 0.5
-        prob_threshold = 0.9
+        prob_threshold = 0.5
         high_prob_mask = self.filtered_data['cv_prob'] >= prob_threshold
         high_prob_count = high_prob_mask.sum()
         
