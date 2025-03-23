@@ -684,7 +684,7 @@ class PrimvsTessCrossMatch:
         if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
             pool['composite_score'] = pool['cv_prob'] / pool['tic_tmag']
         else:
-            pool['composite_score'] = 0.167
+            pool['composite_score'] = 0.0
             print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
         
         # Make sure we have a flag for known CVs
@@ -1036,7 +1036,7 @@ class PrimvsTessCrossMatch:
 def main():
     cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"  # or CSV
     output_dir = "../PRIMVS/cv_results/tess_crossmatch_results"
-    cv_prob_threshold = 0.5
+    cv_prob_threshold = 0.167
     search_radius = 5.0  # arcseconds
     tess_mag_limit = 16.0
     print(f"Initializing PRIMVS-TESS cross-matching pipeline with parameters:")
