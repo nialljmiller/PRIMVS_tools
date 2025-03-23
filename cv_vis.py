@@ -909,15 +909,15 @@ class PrimvsTessCrossMatch:
         print("\n" + "="*80)
         print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
         print("="*80 + "\n")
-        self.load_cv_candidates()
+        #self.load_cv_candidates()
         #self.perform_crossmatch()
-        self.crossmatch_results = pd.read_csv(crossmatch_path)
+        #self.crossmatch_results = pd.read_csv(crossmatch_path)
         print(f"Reloaded crossmatch results from: {crossmatch_path}")        
         # Populate tess_sectors using the TESSCycle8Overlay geometry
-        self.populate_tess_sectors()
+        #self.populate_tess_sectors()
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
-        self.generate_target_list()
-        self.generate_summary_plots()
+        #self.generate_target_list()
+        #self.generate_summary_plots()
         copy_target_npy_files(target_path)
 
         #self.populate_tess_sectors_equatorial()
@@ -933,7 +933,7 @@ class PrimvsTessCrossMatch:
 
 
 
-def copy_target_npy_files(target_list_csv, token_dir="../LC_TOKEN", dest_folder_name="target_npy"):
+def copy_target_npy_files(target_list_csv, token_dir="../LC/vars/", dest_folder_name="target_npy"):
     """
     This function reloads the target list from a CSV file and uses the 'sourceid' column to identify
     the corresponding .npy files in the LC_TOKEN directory (which is in the same directory as this script)
@@ -960,12 +960,12 @@ def copy_target_npy_files(target_list_csv, token_dir="../LC_TOKEN", dest_folder_
     copied_count = 0
     missing_files = []
     for idx, row in target_list.iterrows():
-        source_id = str(row.get("uniqueid", "")).strip()
+        source_id = str(row.get("sourceid", "")).strip()
         if not source_id:
             print(f"Warning: sourceid missing for row {idx}, skipping...")
             continue
 
-        npy_filename = f"{source_id}.npy"
+        npy_filename = f"{source_id}.FITS"
         src_file = os.path.join(token_dir, npy_filename)
         
         if os.path.exists(src_file):
