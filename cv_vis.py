@@ -478,6 +478,64 @@ class PrimvsTessCrossMatch:
         return True
 
 
+    def generate_target_list(self):
+        """
+        Generate the final target list for the TESS GI proposal.
+        The final list will be exactly 100 targets and must include all known CVs.
+        For remaining slots, best candidates are selected based on a composite score:
+            composite_score = cv_prob / tic_tmag
+        """
+        if self.crossmatch_results is None:
+            print("No cross-match results available. Call perform_crossmatch() first.")
+            return False
+        print("Generating target list for TESS proposal...")
+        # Select only objects with a TIC match.
+        pool = self.crossmatch_results[self.crossmatch_results['in_tic'] == True].copy()
+        if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
+            pool['composite_score'] = pool['cv_prob'] / pool['tic_tmag']
+        else:
+            pool['composite_score'] = 0.0
+            print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
+        # Ensure known CVs are flagged
+        if 'is_known_cv' not in pool.columns:
+            pool['is_known_cv'] = False
+            print("Warning: is_known_cv column not found; assuming all are unknown.")
+        known = pool[pool['is_known_cv'] == True].copy()
+        others = pool[pool['is_known_cv'] == False].copy()
+        others = others.sort_values('composite_score', ascending=False)
+        num_needed = 100 - len(known)
+        if num_needed < 0:
+            # In the unlikely event that known CVs exceed 100, select top 100 known by composite score.
+            final_targets = known.sort_values('composite_score', ascending=False).head(100)
+        else:
+            final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
+        # If final list is less than 100, warn the user.
+        if len(final_targets) < 100:
+            print(f"Warning: Final target list has only {len(final_targets)} targets.")
+        else:
+            final_targets = final_targets.head(100)
+        self.target_list = final_targets.copy()
+        target_list_path = os.path.join(self.output_dir, 'tess_targets.csv')
+        self.target_list.to_csv(target_list_path, index=False)
+        print(f"Generated target list with {len(self.target_list)} sources (100 targets expected).")
+        print(f"Full target list saved to: {target_list_path}")
+        # Create a simplified version for proposal submission.
+        proposal_columns = ['priority', 'sourceid', 'tic_id', 'ra', 'dec', 'tic_tmag', 'cv_prob', 'composite_score']
+        proposal_columns = [col for col in proposal_columns if col in self.target_list.columns]
+        proposal_targets = self.target_list[proposal_columns].copy()
+        proposal_targets['target'] = proposal_targets['tic_id'].apply(lambda x: f"TIC {x}")
+        proposal_targets_path = os.path.join(self.output_dir, 'tess_proposal_targets.csv')
+        proposal_targets.to_csv(proposal_targets_path, index=False)
+        print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
+        return self.target_list
+
+
+
+
+
+
+
+
 
 
     def report_tess_data_details(self):
