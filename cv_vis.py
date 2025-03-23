@@ -379,7 +379,7 @@ class PrimvsTessCrossMatch:
 
         # Convert negative galactic longitudes to the 0-360 range.
         l_vals = all_candidates['l'].values
-        l_vals[l_vals < 0] -= 360
+        l_vals[l_vals > 180] -= 360
         all_candidates['l'] = l_vals
 
         if 'is_known_cv' not in all_candidates.columns:
@@ -391,7 +391,7 @@ class PrimvsTessCrossMatch:
         else:
             targets = self.target_list.copy()
             l_vals = targets['l'].values
-            l_vals[l_vals < 0] -= 360
+            l_vals[l_vals > 180] -= 360
             targets['l'] = l_vals
 
         # ----- Galactic Coordinates Plot -----
@@ -563,83 +563,6 @@ class PrimvsTessCrossMatch:
 
 
 
-    def generate_target_list(self):
-        """
-        Generate the final target list for the TESS GI proposal.
-        The final list will be exactly 100 targets and must include all known CVs.
-        For remaining slots, best candidates are selected based on a composite score:
-            composite_score = (cv_prob / tic_tmag) * n_cycle8
-        where n_cycle8 is the number of TESS Cycle 8 sectors (97-107) in which the target is observed.
-        """
-        if self.crossmatch_results is None:
-            print("No cross-match results available. Call perform_crossmatch() first.")
-            return False
-        print("Generating target list for TESS proposal...")
-
-        # Select only objects with a TIC match.
-        pool = self.crossmatch_results[self.crossmatch_results['in_tic'] == True].copy()
-
-        # Helper function to parse tess_sectors string into a list of ints.
-        def parse_tess_sectors(sectors):
-            if pd.isna(sectors):
-                return []
-            return [int(s.strip()) for s in str(sectors).split(',') if s.strip().isdigit()]
-        
-        # Only consider candidates with TESS data in Cycle 8 (sectors 97-107)
-        cycle8_range = set(range(97, 108))
-        pool = pool[pool['tess_sectors'].notna()]
-        pool['n_cycle8'] = pool['tess_sectors'].apply(lambda x: sum(1 for s in parse_tess_sectors(x) if s in cycle8_range))
-        pool = pool[pool['n_cycle8'] > 0]
-        
-        # Compute composite score incorporating cycle 8 observability.
-        if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
-            pool['composite_score'] = (pool['cv_prob'] / pool['tic_tmag']) * pool['n_cycle8']
-        else:
-            pool['composite_score'] = 0.0
-            print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
-        
-        # Ensure known CVs are flagged
-        if 'is_known_cv' not in pool.columns:
-            pool['is_known_cv'] = False
-            print("Warning: is_known_cv column not found; assuming all are unknown.")
-        
-        known = pool[pool['is_known_cv'] == True].copy()
-        others = pool[pool['is_known_cv'] == False].copy()
-        others = others.sort_values('composite_score', ascending=False)
-        num_needed = 100 - len(known)
-        if num_needed < 0:
-            # In the unlikely event that known CVs exceed 100, select top 100 known by composite score.
-            final_targets = known.sort_values('composite_score', ascending=False).head(100)
-        else:
-            final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
-        
-        # If final list is less than 100, warn the user.
-        if len(final_targets) < 100:
-            print(f"Warning: Final target list has only {len(final_targets)} targets.")
-        else:
-            final_targets = final_targets.head(100)
-        
-        self.target_list = final_targets.copy()
-        target_list_path = os.path.join(self.output_dir, 'tess_targets.csv')
-        self.target_list.to_csv(target_list_path, index=False)
-        print(f"Generated target list with {len(self.target_list)} sources (100 targets expected).")
-        print(f"Full target list saved to: {target_list_path}")
-        
-        # Create a simplified version for proposal submission (including n_cycle8 for scrutiny).
-        proposal_columns = ['priority', 'sourceid', 'tic_id', 'ra', 'dec', 'tic_tmag', 'cv_prob', 'composite_score', 'n_cycle8']
-        proposal_columns = [col for col in proposal_columns if col in self.target_list.columns]
-        proposal_targets = self.target_list[proposal_columns].copy()
-        proposal_targets['target'] = proposal_targets['tic_id'].apply(lambda x: f"TIC {x}")
-        proposal_targets_path = os.path.join(self.output_dir, 'tess_proposal_targets.csv')
-        proposal_targets.to_csv(proposal_targets_path, index=False)
-        print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
-        return self.target_list
-
-
-
-
-
-
 
 
 
@@ -750,6 +673,87 @@ class PrimvsTessCrossMatch:
         plt.close()
         print(f"Saved tess_sectors spatial plot to: {plot_path}")
 
+
+
+
+
+
+    def populate_tess_sectors_equatorial(self, size=12):
+        """
+        Determines which TESS Cycle 8 sectors each candidate falls in using RA/Dec coordinates.
+        Uses the TESSCycle8Overlay camera_positions (which are in RA, Dec, roll) to compute
+        camera footprints, then checks each candidate's RA/Dec against these polygons.
+        The matching sectors are stored in the 'tess_sectors' column.
+        """
+        print("Populating tess_sectors using RA/Dec and TESS Cycle 8 equatorial footprint geometry...")
+        
+        # Initialize TESSCycle8Overlay to get equatorial camera positions.
+        tess = TESSCycle8Overlay()
+        
+        # Pre-compute the polygon for each camera footprint for every sector using RA/Dec.
+        from matplotlib.path import Path  # Make sure this is imported at the top of your file.
+        sector_polygons = {}
+        for sector, cam_list in tess.camera_positions.items():
+            polygons = []
+            for (ra_center, dec_center, roll) in cam_list:
+                # Define square vertices centered at (0,0)
+                vertices_ra = np.array([-size, size, size, -size, -size])
+                vertices_dec = np.array([-size, -size, size, size, -size])
+                roll_rad = np.radians(roll - 90)
+                rotated_ra = vertices_ra * np.cos(roll_rad) - vertices_dec * np.sin(roll_rad)
+                rotated_dec = vertices_ra * np.sin(roll_rad) + vertices_dec * np.cos(roll_rad)
+                poly_ra = ra_center + rotated_ra
+                poly_dec = dec_center + rotated_dec
+                vertices = np.column_stack([poly_ra, poly_dec])
+                polygons.append(Path(vertices))
+            sector_polygons[sector] = polygons
+
+        # Ensure candidates have RA and Dec columns.
+        if 'ra' not in self.crossmatch_results.columns or 'dec' not in self.crossmatch_results.columns:
+            print("Error: RA and Dec columns not found in candidate data.")
+            return
+
+        # Loop over candidates and determine which sectors they're in.
+        tess_sector_list = []
+        for idx, row in self.crossmatch_results.iterrows():
+            candidate_ra = row['ra']
+            candidate_dec = row['dec']
+            visible_sectors = []
+            for sector, poly_list in sector_polygons.items():
+                for poly in poly_list:
+                    if poly.contains_point((candidate_ra, candidate_dec)):
+                        visible_sectors.append(sector)
+                        break  # No need to check other cameras in the same sector.
+            if visible_sectors:
+                visible_sectors_str = ','.join(map(str, sorted(visible_sectors)))
+            else:
+                visible_sectors_str = ''
+            tess_sector_list.append(visible_sectors_str)
+
+        self.crossmatch_results['tess_sectors'] = tess_sector_list
+        print("Finished populating tess_sectors column using RA/Dec.")
+
+        # Create a spatial plot for visual inspection.
+        fig, ax = plt.subplots(figsize=(12, 10))
+        ax.scatter(self.crossmatch_results['ra'], self.crossmatch_results['dec'], 
+                   c='blue', s=20, label='Candidates', alpha=0.6)
+        # Use your equatorial overlay function to add the TESS footprints.
+        add_tess_overlay_equatorial(ax, alpha=0.2, size=size)
+        ax.set_xlabel("Right Ascension (RA)")
+        ax.set_ylabel("Declination (Dec)")
+        ax.set_title("Candidate Positions with TESS Cycle 8 Equatorial Footprints")
+        ax.legend()
+        plot_path = os.path.join(self.output_dir, 'tess_sectors_equatorial_visualization.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Saved tess_sectors equatorial spatial plot to: {plot_path}")
+
+
+
+
+
+
+
     # Modify run_pipeline to call populate_tess_sectors() after crossmatch:
     def run_pipeline(self):
         start_time = time.time()
@@ -763,6 +767,7 @@ class PrimvsTessCrossMatch:
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
+        self.populate_tess_sectors_equatorial()
         end_time = time.time()
         runtime = end_time - start_time
         print("\n" + "="*80)
