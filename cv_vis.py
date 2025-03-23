@@ -528,176 +528,6 @@ class PrimvsTessCrossMatch:
 
 
 
-
-
-
-
-        # 1) Replace your existing ra_dec_to_ecliptic() with this:
-        def _ra_dec_to_ecliptic_180_center(ra_array, dec_array):
-            """
-            Convert RA/Dec (ICRS, in degrees) to ecliptic lon/lat (in radians),
-            shifting so 180° ecliptic longitude is at the center of the Mollweide plot.
-            """
-            coords = SkyCoord(ra=ra_array*u.deg, dec=dec_array*u.deg, frame='icrs')
-            ecl = coords.barycentrictrueecliptic  # or 'geocentrictrueecliptic'
-            lon = ecl.lon.value  # in [0..360)
-            lat = ecl.lat.value  # in [-90..+90]
-
-            # SHIFT so ecliptic longitude = 180° is the center
-            lon = (lon + 180) % 360
-            lon[lon > 180] -= 360  # => [-180..180]
-
-            lon_rad = np.radians(lon)
-            lat_rad = np.radians(lat)
-            return lon_rad, lat_rad
-
-
-        # 2) In your ECLIPTIC MOLLWEIDE plotting code, just call this function:
-        #    e.g. inside generate_summary_plots(), for your "Spatial Distribution (Ecliptic)" figure:
-        print("Generating Ecliptic Mollweide plot (180° in center)...")
-        plt.figure(figsize=(12,10))
-        ax_ecl = plt.subplot(111, projection='mollweide')
-
-        # Convert all_candidates
-        lon_rad, lat_rad = _ra_dec_to_ecliptic_180_center(all_candidates['ra'].values, 
-                                                         all_candidates['dec'].values)
-        hb_ecl = ax_ecl.hexbin(lon_rad, lat_rad, gridsize=75, cmap='Greys', bins='log')
-        plt.colorbar(hb_ecl, label='log10(count)')
-
-        # Overplot known CVs
-        cv_lon, cv_lat = _ra_dec_to_ecliptic_180_center(known_candidates['ra'].values,
-                                                       known_candidates['dec'].values)
-        plt.scatter(cv_lon, cv_lat, label='Known CVs', color='red', marker='*', s=80)
-
-        # Overplot targets
-        if not targets.empty:
-            tg_lon, tg_lat = _ra_dec_to_ecliptic_180_center(targets['ra'].values, 
-                                                           targets['dec'].values)
-            plt.scatter(tg_lon, tg_lat, label='Target List', color='blue', marker='+', s=30, alpha=0.8)
-
-        # Add TESS footprints in ecliptic coords, also using the new transform:
-        def _add_tess_overlay_ecliptic_mollweide(ax, tess_overlay, alpha=0.2, size=12):
-            camera_colors = ['red', 'purple', 'blue', 'green']
-            for sector, cameras in tess_overlay.camera_positions.items():
-                for i, (ra, dec, roll) in enumerate(cameras):
-                    # same local footprint approach
-                    vertices_ra = np.array([-size, size, size, -size, -size])
-                    vertices_dec = np.array([-size, -size, size, size, -size])
-                    roll_rad = np.radians(roll - 90)
-                    rotated_ra = (vertices_ra * np.cos(roll_rad) - 
-                                  vertices_dec * np.sin(roll_rad))
-                    rotated_dec = (vertices_ra * np.sin(roll_rad) + 
-                                   vertices_dec * np.cos(roll_rad))
-                    corners_ra = ra + rotated_ra
-                    corners_dec = dec + rotated_dec
-
-                    # ***Call your 180-center transform***
-                    lon_rad, lat_rad = _ra_dec_to_ecliptic_180_center(corners_ra, corners_dec)
-
-                    polygon = Polygon(
-                        np.column_stack([lon_rad, lat_rad]),
-                        alpha=alpha,
-                        color=camera_colors[i % len(camera_colors)],
-                        closed=True
-                    )
-                    ax.add_patch(polygon)
-
-                    # Label
-                    c_lon, c_lat = _ra_dec_to_ecliptic_180_center(np.array([ra]), np.array([dec]))
-                    ax.text(c_lon, c_lat, str(sector),
-                            fontsize=8, ha='center', va='center',
-                            color='white', fontweight='bold',
-                            path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
-                                          patheffects.Normal()])
-
-            handles = [
-                plt.Line2D([], [], color=c, marker='s', linestyle='None', markersize=10, alpha=0.6)
-                for c in camera_colors
-            ]
-            labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
-            ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
-
-        # Instantiate your TESSCycle8Overlay
-        tess = TESSCycle8Overlay()
-        _add_tess_overlay_ecliptic_mollweide(ax_ecl, tess, alpha=0.2, size=12)
-
-        ax_ecl.set_xlabel("Ecliptic Longitude (180° in center)")
-        ax_ecl.set_ylabel("Ecliptic Latitude")
-        plt.title("Spatial Distribution (Ecliptic) - All, Known CVs, Target List")
-        plt.legend(loc='lower left')
-        ax_ecl.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(plots_dir, "spatial_ecliptic_mollweide_groups.png"), dpi=300, bbox_inches='tight')
-        plt.close()
-
-
-        print("Generating TESS-style ecliptic coverage (Plate Carrée) ...")
-
-
-        def add_tess_overlay_ecliptic_plate_carree(ax, tess_overlay, alpha=0.2, size=12):
-            """
-            Overlay TESS footprints in a simple ecliptic-lon/lat rectangular plot.
-            """
-            camera_colors = ['red', 'purple', 'blue', 'green']
-            for sector, cameras in tess_overlay.camera_positions.items():
-                for i, (ra, dec, roll) in enumerate(cameras):
-                    # Create local corners
-                    vertices_ra = np.array([-size, size, size, -size, -size])
-                    vertices_dec = np.array([-size, -size, size, size, -size])
-                    roll_rad = np.radians(roll - 90)
-                    rotated_ra = (vertices_ra * np.cos(roll_rad)
-                                  - vertices_dec * np.sin(roll_rad))
-                    rotated_dec = (vertices_ra * np.sin(roll_rad)
-                                   + vertices_dec * np.cos(roll_rad))
-                    corners_ra = ra + rotated_ra
-                    corners_dec = dec + rotated_dec
-
-                    # Convert corners to ecliptic (in degrees)
-                    lon_deg, lat_deg = ra_dec_to_ecliptic_plate_carree(corners_ra, corners_dec)
-
-                    # Some corners may wrap beyond [0..360]. Let's mod them back:
-                    lon_deg = lon_deg % 360
-
-                    # Build polygon
-                    polygon = Polygon(
-                        np.column_stack([lon_deg, lat_deg]),
-                        alpha=alpha,
-                        color=camera_colors[i % len(camera_colors)],
-                        closed=True
-                    )
-                    ax.add_patch(polygon)
-
-                    # Label near center
-                    c_lon, c_lat = ra_dec_to_ecliptic_plate_carree(np.array([ra]), np.array([dec]))
-                    c_lon = c_lon % 360
-                    ax.text(c_lon, c_lat, str(sector),
-                            fontsize=8, ha='center', va='center',
-                            color='white', fontweight='bold',
-                            path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
-                                          patheffects.Normal()])
-
-            # Camera legend
-            handles = [
-                plt.Line2D([], [], color=c, marker='s', linestyle='None', markersize=10, alpha=0.6)
-                for c in camera_colors
-            ]
-            labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
-            ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
-
-        def ra_dec_to_ecliptic_plate_carree(ra_array, dec_array):
-            """
-            Convert RA/Dec (ICRS, in degrees) to ecliptic longitude & latitude (in degrees)
-            for a simple rectangular (Plate Carree) ecliptic plot.
-            We keep ecl.lon in [0..360) and ecl.lat in [-90..+90].
-            """
-            coords = SkyCoord(ra=ra_array*u.deg, dec=dec_array*u.deg, frame='icrs')
-            ecl = coords.barycentrictrueecliptic
-            lon = ecl.lon.value  # [0..360)
-            lat = ecl.lat.value  # [-90..+90]
-            return lon, lat
-
-
-
-
         plt.figure(figsize=(12, 8))
         ax_ecl = plt.gca()
 
@@ -1014,6 +844,102 @@ class PrimvsTessCrossMatch:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Saved tess_sectors spatial plot to: {plot_path}")
+
+
+
+
+
+
+
+    def populate_tess_sectors_equatorial(self, size=12):
+        """
+        For each candidate in crossmatch_results, determine which TESS Cycle 8 sectors
+        (97-107) the candidate falls in using the TESSCycle8Overlay geometry in Equatorial coords.
+        The resulting sectors (if any) are stored in 'tess_sectors' as a comma-separated string.
+        A spatial plot is also generated for visual inspection in RA/Dec.
+        
+        size=12 means we approximate each camera as a 24 x 24 deg square.
+        """
+        print("Populating tess_sectors for each candidate using TESSCycle8Overlay geometry (Equatorial)...")
+        tess_overlay = TESSCycle8Overlay()
+        
+        # Precompute polygons in Equatorial for each camera
+        # (sector -> list of Path polygons in RA/Dec)
+        sector_polygons = {}
+        for sector, cameras in tess_overlay.camera_positions.items():
+            poly_list = []
+            for (ra_cen, dec_cen, roll) in cameras:
+                # define a square with corners [-size,size], rotated
+                vertices_x = np.array([-size, size, size, -size, -size])  # "RA offsets"
+                vertices_y = np.array([-size, -size, size, size, -size])  # "Dec offsets"
+                
+                # rotate by (roll - 90)
+                roll_rad = np.radians(roll - 90)
+                rotated_x = vertices_x * np.cos(roll_rad) - vertices_y * np.sin(roll_rad)
+                rotated_y = vertices_x * np.sin(roll_rad) + vertices_y * np.cos(roll_rad)
+                
+                # shift to the camera center
+                poly_ra = ra_cen + rotated_x
+                poly_dec = dec_cen + rotated_y
+                
+                # build a Path polygon
+                coords = np.column_stack([poly_ra, poly_dec])
+                poly_list.append(Path(coords))
+            sector_polygons[sector] = poly_list
+
+        # Make sure we have RA/Dec columns for each candidate
+        if 'ra' in self.crossmatch_results.columns and 'dec' in self.crossmatch_results.columns:
+            ra_col, dec_col = 'ra', 'dec'
+        elif 'RAJ2000' in self.crossmatch_results.columns and 'DEJ2000' in self.crossmatch_results.columns:
+            ra_col, dec_col = 'RAJ2000', 'DEJ2000'
+        else:
+            print("Error: No valid RA/Dec columns found in crossmatch_results.")
+            return
+        
+        # Now loop over your crossmatch_results and see which polygons each source falls into
+        tess_sector_list = []
+        for idx, row in self.crossmatch_results.iterrows():
+            source_ra = row[ra_col]
+            source_dec = row[dec_col]
+            # Because RA can wrap around, watch out if your footprints cross RA=0.
+            # If you have a sector near RA ~ 359 and a star near RA ~ 1 deg,
+            # you might need a special fix for wrap-around. For now we ignore that.
+            
+            in_sectors = []
+            for sector, poly_list in sector_polygons.items():
+                # if the source is inside ANY of that sector's 4 camera polygons, we consider it in that sector
+                for poly in poly_list:
+                    if poly.contains_point((source_ra, source_dec)):
+                        in_sectors.append(sector)
+                        break
+            
+            if in_sectors:
+                in_sectors_str = ','.join(map(str, sorted(in_sectors)))
+            else:
+                in_sectors_str = "0"  # or empty string, whichever you prefer
+            tess_sector_list.append(in_sectors_str)
+        
+        self.crossmatch_results['tess_sectors'] = tess_sector_list
+        print("Finished populating tess_sectors column in Equatorial coordinates.")
+
+        # Optionally, produce a quick RA/Dec plot to visualize coverage
+        fig, ax = plt.subplots(figsize=(12, 10))
+        ax.scatter(self.crossmatch_results[ra_col], self.crossmatch_results[dec_col],
+                   c='blue', s=20, label='Candidates', alpha=0.6)
+        add_tess_overlay_equatorial(ax, alpha=0.2, size=size)
+        ax.set_xlabel("Right Ascension (deg)")
+        ax.set_ylabel("Declination (deg)")
+        ax.set_title("Candidate Positions with TESS Cycle 8 Footprints (Equatorial)")
+        ax.legend()
+        plot_path = os.path.join(self.output_dir, 'tess_sectors_visualization_equatorial.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Saved tess_sectors spatial plot to: {plot_path}")
+
+
+
+
+
 
 
 
