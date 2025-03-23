@@ -215,6 +215,11 @@ class PrimvsTessCrossMatch:
             print(f"Error loading CV candidates: {e}")
             return False
     
+
+
+
+
+
     def perform_crossmatch(self):
         if self.filtered_candidates is None:
             print("No filtered candidates available. Call load_cv_candidates() first.")
@@ -297,6 +302,92 @@ class PrimvsTessCrossMatch:
         print(f"Saved crossmatch results to: {crossmatch_path}")
         return True
     
+
+
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+    def process_candidate(idx, coord):
+        candidate_result = {}
+        try:
+            tic_result = Catalogs.query_region(coord, radius=self.search_radius * u.arcsec, catalog="TIC")
+            if len(tic_result) > 0:
+                tic_result.sort('dstArcSec')
+                best_match = tic_result[0]
+                candidate_result['in_tic'] = True
+                candidate_result['tic_id'] = int(best_match['ID'])
+                candidate_result['tic_tmag'] = best_match['Tmag']
+                candidate_result['separation_arcsec'] = best_match['dstArcSec']
+                candidate_result['has_tess_data'] = False
+                candidate_result['tess_sectors'] = None
+                try:
+                    tic_id = str(int(best_match['ID']))
+                    obs = Observations.query_criteria(target_name=f"TIC {tic_id}", obs_collection='TESS')
+                    if len(obs) > 0:
+                        candidate_result['has_tess_data'] = True
+                        sectors = set()
+                        for o in obs:
+                            if 's' in o['sequence_number']:
+                                sectors.add(int(o['sequence_number'].split('s')[1][:2]))
+                        candidate_result['tess_sectors'] = ','.join(map(str, sorted(sectors)))
+                except Exception as obs_err:
+                    print(f"  Warning: Error querying observations for TIC {best_match['ID']}: {obs_err}")
+            else:
+                # Handle the "not found" case as per your logic
+                candidate_result['in_tic'] = False
+                candidate_result['tic_id'] = np.nan
+                candidate_result['tic_tmag'] = np.nan
+                candidate_result['separation_arcsec'] = np.nan
+                if 'mag_avg' in self.filtered_candidates.columns:
+                    ks_mag = self.filtered_candidates.loc[idx, 'mag_avg']
+                    est_tmag = ks_mag + 0.5
+                    if est_tmag > self.tess_mag_limit:
+                        candidate_result['not_in_tic_reason'] = 'below_limit'
+                    else:
+                        bright_sources = Catalogs.query_region(coord, radius=30 * u.arcsec, catalog="TIC")
+                        bright_sources = bright_sources[bright_sources['Tmag'] < est_tmag - 1]
+                        candidate_result['not_in_tic_reason'] = 'confused_with_brighter' if len(bright_sources) > 0 else 'unknown'
+                else:
+                    candidate_result['not_in_tic_reason'] = 'unknown'
+        except Exception as e:
+            print(f"Error processing candidate {idx}: {e}")
+        return idx, candidate_result
+
+        # Copy your original results DataFrame
+        results = self.filtered_candidates.copy()
+
+        # Parallelize using threads
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(process_candidate, idx, coord): idx for idx, coord in zip(results.index, coords)}
+            for future in tqdm(as_completed(futures), total=len(futures)):
+                idx, candidate_result = future.result()
+                for key, value in candidate_result.items():
+                    results.loc[idx, key] = value
+
+
+        self.crossmatch_results = results
+        crossmatch_path = os.path.join(self.output_dir, 'tess_crossmatch_results.csv')
+        results.to_csv(crossmatch_path, index=False)
+        in_tic_count = results['in_tic'].sum()
+        has_data_count = results['has_tess_data'].sum()
+        below_limit_count = (results['not_in_tic_reason'] == 'below_limit').sum()
+        confused_count = (results['not_in_tic_reason'] == 'confused_with_brighter').sum()
+        print(f"Cross-match summary:")
+        print(f"  - In TIC: {in_tic_count} ({in_tic_count/len(results)*100:.1f}%)")
+        print(f"  - Has TESS data: {has_data_count} ({has_data_count/len(results)*100:.1f}%)")
+        print(f"  - Not in TIC (below limit): {below_limit_count} ({below_limit_count/len(results)*100:.1f}%)")
+        print(f"  - Not in TIC (confused): {confused_count} ({confused_count/len(results)*100:.1f}%)")
+        print(f"Saved crossmatch results to: {crossmatch_path}")
+        return True
+
+
+
+
+
+
+
+
     def download_tess_lightcurves(self):
         if self.crossmatch_results is None:
             print("No cross-match results available. Call perform_crossmatch() first.")
