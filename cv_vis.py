@@ -630,6 +630,116 @@ class PrimvsTessCrossMatch:
         plt.close()
 
 
+        print("Generating TESS-style ecliptic coverage (Plate Carrée) ...")
+
+
+        def add_tess_overlay_ecliptic_plate_carree(ax, tess_overlay, alpha=0.2, size=12):
+            """
+            Overlay TESS footprints in a simple ecliptic-lon/lat rectangular plot.
+            """
+            camera_colors = ['red', 'purple', 'blue', 'green']
+            for sector, cameras in tess_overlay.camera_positions.items():
+                for i, (ra, dec, roll) in enumerate(cameras):
+                    # Create local corners
+                    vertices_ra = np.array([-size, size, size, -size, -size])
+                    vertices_dec = np.array([-size, -size, size, size, -size])
+                    roll_rad = np.radians(roll - 90)
+                    rotated_ra = (vertices_ra * np.cos(roll_rad)
+                                  - vertices_dec * np.sin(roll_rad))
+                    rotated_dec = (vertices_ra * np.sin(roll_rad)
+                                   + vertices_dec * np.cos(roll_rad))
+                    corners_ra = ra + rotated_ra
+                    corners_dec = dec + rotated_dec
+
+                    # Convert corners to ecliptic (in degrees)
+                    lon_deg, lat_deg = ra_dec_to_ecliptic_plate_carree(corners_ra, corners_dec)
+
+                    # Some corners may wrap beyond [0..360]. Let's mod them back:
+                    lon_deg = lon_deg % 360
+
+                    # Build polygon
+                    polygon = Polygon(
+                        np.column_stack([lon_deg, lat_deg]),
+                        alpha=alpha,
+                        color=camera_colors[i % len(camera_colors)],
+                        closed=True
+                    )
+                    ax.add_patch(polygon)
+
+                    # Label near center
+                    c_lon, c_lat = ra_dec_to_ecliptic_plate_carree(np.array([ra]), np.array([dec]))
+                    c_lon = c_lon % 360
+                    ax.text(c_lon, c_lat, str(sector),
+                            fontsize=8, ha='center', va='center',
+                            color='white', fontweight='bold',
+                            path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
+                                          patheffects.Normal()])
+
+            # Camera legend
+            handles = [
+                plt.Line2D([], [], color=c, marker='s', linestyle='None', markersize=10, alpha=0.6)
+                for c in camera_colors
+            ]
+            labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
+            ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
+
+        def ra_dec_to_ecliptic_plate_carree(ra_array, dec_array):
+            """
+            Convert RA/Dec (ICRS, in degrees) to ecliptic longitude & latitude (in degrees)
+            for a simple rectangular (Plate Carree) ecliptic plot.
+            We keep ecl.lon in [0..360) and ecl.lat in [-90..+90].
+            """
+            coords = SkyCoord(ra=ra_array*u.deg, dec=dec_array*u.deg, frame='icrs')
+            ecl = coords.barycentrictrueecliptic
+            lon = ecl.lon.value  # [0..360)
+            lat = ecl.lat.value  # [-90..+90]
+            return lon, lat
+
+
+
+
+        plt.figure(figsize=(12, 8))
+        ax_ecl = plt.gca()
+
+        # Convert your data to ecliptic coords in degrees
+        lon_deg_all, lat_deg_all = ra_dec_to_ecliptic_plate_carree(
+            all_candidates['ra'].values, all_candidates['dec'].values
+        )
+
+        # Basic 2D hexbin
+        hb_ecl = ax_ecl.hexbin(lon_deg_all, lat_deg_all, gridsize=75, cmap='Greys', bins='log')
+        plt.colorbar(hb_ecl, label='log10(count)')
+
+        # Known CVs
+        lon_deg_cv, lat_deg_cv = ra_dec_to_ecliptic_plate_carree(
+            known_candidates['ra'].values, known_candidates['dec'].values
+        )
+        plt.scatter(lon_deg_cv, lat_deg_cv, label='Known CVs', color='red', marker='*', s=80)
+
+        # Targets
+        if not targets.empty:
+            lon_deg_tg, lat_deg_tg = ra_dec_to_ecliptic_plate_carree(
+                targets['ra'].values, targets['dec'].values
+            )
+            plt.scatter(lon_deg_tg, lat_deg_tg, label='Target List', color='blue', marker='+', s=30, alpha=0.8)
+
+        # Overlay TESS footprints
+        tess = TESSCycle8Overlay()
+        add_tess_overlay_ecliptic_plate_carree(ax_ecl, tess, alpha=0.2, size=12)
+
+        # Axes, labels
+        plt.xlabel("Ecliptic Longitude (degrees)")
+        plt.ylabel("Ecliptic Latitude (degrees)")
+        plt.title("Spatial Distribution (Ecliptic) - All, Known CVs, Target List")
+
+        # x in [0..360], y in [-90..90]
+        plt.xlim(0, 360)
+        plt.ylim(-90, 90)
+
+        plt.legend(loc='upper left')
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(plots_dir, "spatial_ecliptic_platecarree_groups.png"), dpi=300, bbox_inches='tight')
+        plt.close()
 
 
         # -----------------------------------------------------------------------
