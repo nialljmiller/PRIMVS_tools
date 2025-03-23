@@ -636,6 +636,81 @@ class PrimvsTessCrossMatch:
 
 
 
+    def generate_target_list(self):
+        """
+        Generate the final target list for the TESS proposal.
+        Only consider sources that are in Cycle 8 sectors.
+        The final list will be exactly 100 targets and must include all known CVs.
+        For remaining slots, best candidates are selected based on a composite score:
+             composite_score = cv_prob / tic_tmag
+
+        This function produces a proposal formatted target list CSV that includes:
+           - All input data columns (as available) for TIC-matched targets,
+           - Populated "tess_sectors" column,
+           - Simplified columns for proposal submission.
+           
+        Output file: tess_proposal_targets.csv
+        """
+        if self.crossmatch_results is None:
+            print("No cross-match results available. Call perform_crossmatch() first.")
+            return False
+        print("Generating target list for TESS proposal, filtering for Cycle 8 sectors first...")
+        
+        # Filter to objects with a TIC match and that are in a Cycle 8 sector (tess_sectors != "0")
+        pool = self.crossmatch_results[
+            (self.crossmatch_results['in_tic'] == True) &
+            (self.crossmatch_results['tess_sectors'] != "0")
+        ].copy()
+        
+        if pool.empty:
+            print("Fuck! No candidates found in Cycle 8 sectors.")
+            return False
+        
+        if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
+            pool['composite_score'] = pool['cv_prob'] / pool['tic_tmag']
+        else:
+            pool['composite_score'] = 0.0
+            print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
+        
+        # Ensure we have a flag for known CVs
+        if 'is_known_cv' not in pool.columns:
+            pool['is_known_cv'] = False
+            print("Warning: is_known_cv column not found; assuming all are unknown.")
+        
+        # Separate known CVs from the rest
+        known = pool[pool['is_known_cv'] == True].copy()
+        others = pool[pool['is_known_cv'] == False].copy()
+        others = others.sort_values('composite_score', ascending=False)
+        
+        num_needed = 100 - len(known)
+        if num_needed < 0:
+            final_targets = known.sort_values('composite_score', ascending=False).head(100)
+        else:
+            final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
+        
+        if len(final_targets) < 100:
+            print(f"Warning: Final target list has only {len(final_targets)} targets.")
+        else:
+            final_targets = final_targets.head(100)
+        
+        self.target_list = final_targets.copy()
+        
+        # Create a proposal-formatted target list with simplified columns, ensuring tess_sectors is included.
+        proposal_columns = ['priority', 'sourceid', 'tic_id', 'ra', 'dec', 
+                            'tic_tmag', 'cv_prob', 'composite_score', 'tess_sectors']
+        # Only keep the columns that actually exist in the target list
+        proposal_columns = [col for col in proposal_columns if col in self.target_list.columns]
+        proposal_targets = self.target_list[proposal_columns].copy()
+        
+        # Optionally, add a "target" column if desired (e.g., "TIC 123456")
+        if 'tic_id' in proposal_targets.columns:
+            proposal_targets['target'] = proposal_targets['tic_id'].apply(lambda x: f"TIC {x}")
+        
+        proposal_targets_path = os.path.join(self.output_dir, 'tess_proposal_targets.csv')
+        proposal_targets.to_csv(proposal_targets_path, index=False)
+        print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
+        
+        return self.target_list
 
 
 
