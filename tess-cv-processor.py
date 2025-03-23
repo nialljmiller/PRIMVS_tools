@@ -313,34 +313,22 @@ def bin_phased_lightcurve(phase, flux, error, bins=100):
 
 
 def combine_cycles(cycle_data, max_cycles=None):
-    """
-    Combine data from multiple cycles.
-    
-    Parameters:
-    -----------
-    cycle_data : dict
-        Dictionary mapping cycle numbers to tuples of (time, flux, error)
-    max_cycles : int, optional
-        Maximum number of cycles to combine
-        
-    Returns:
-    --------
-    list
-        List of tuples (cycle_count, combined_time, combined_flux, combined_error)
-    """
+    sorted_keys = sorted(cycle_data.keys())
     if max_cycles is None:
-        max_cycles = len(cycle_data)
+        max_cycles = len(sorted_keys)
     
     combined_data = []
     
-    for n_cycles in range(1, min(max_cycles+1, len(cycle_data)+1)):
-        all_time = np.concatenate([cycle_data[i+1][0] for i in range(n_cycles)])
-        all_flux = np.concatenate([cycle_data[i+1][1] for i in range(n_cycles)])
-        all_error = np.concatenate([cycle_data[i+1][2] for i in range(n_cycles)])
+    for n in range(1, min(max_cycles+1, len(sorted_keys)+1)):
+        keys_to_combine = sorted_keys[:n]
+        all_time = np.concatenate([cycle_data[k][0] for k in keys_to_combine])
+        all_flux = np.concatenate([cycle_data[k][1] for k in keys_to_combine])
+        all_error = np.concatenate([cycle_data[k][2] for k in keys_to_combine])
         
-        combined_data.append((n_cycles, all_time, all_flux, all_error))
+        combined_data.append((n, all_time, all_flux, all_error))
     
     return combined_data
+
 
 
 def analyze_cv_target(tic_id, common_name, cv_type, output_dir, cycles, args):
