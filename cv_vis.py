@@ -933,7 +933,7 @@ class PrimvsTessCrossMatch:
 
 
 
-def copy_target_npy_files(target_list_csv, token_dir="../LC/vars/", dest_folder_name="target_npy"):
+def copy_target_npy_files(target_list_csv, token_dir="/beegfs/car/njm/LC/vars/", dest_folder_name="target_npy"):
     """
     This function reloads the target list from a CSV file and uses the 'sourceid' column to identify
     the corresponding .npy files in the LC_TOKEN directory (which is in the same directory as this script)
