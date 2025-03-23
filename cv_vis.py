@@ -673,17 +673,6 @@ class PrimvsTessCrossMatch:
                 polygons.append(Path(vertices))
             sector_polygons[sector] = polygons
 
-        # Ensure candidates have galactic coordinates; compute if necessary.
-        if 'l' not in self.crossmatch_results.columns or 'b' not in self.crossmatch_results.columns:
-            print("Computing galactic coordinates for candidates...")
-            ra_col = 'ra' if 'ra' in self.crossmatch_results.columns else 'RAJ2000'
-            dec_col = 'dec' if 'dec' in self.crossmatch_results.columns else 'DEJ2000'
-            coords = SkyCoord(ra=self.crossmatch_results[ra_col].values * u.degree,
-                               dec=self.crossmatch_results[dec_col].values * u.degree)
-            gal_coords = coords.galactic
-            self.crossmatch_results['l'] = gal_coords.l.degree
-            self.crossmatch_results['b'] = gal_coords.b.degree
-
         # Check each candidate's (l, b) against each sector's polygons
         tess_sector_list = []
         # Inside the loop in populate_tess_sectors (and similarly in populate_tess_sectors_equatorial)
