@@ -899,12 +899,12 @@ class PrimvsTessCrossMatch:
         print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
         print("="*80 + "\n")
         self.load_cv_candidates()
-        self.perform_crossmatch()
-        #self.crossmatch_results = pd.read_csv(crossmatch_path)
+        #self.perform_crossmatch()
+        self.crossmatch_results = pd.read_csv(crossmatch_path)
         print(f"Reloaded crossmatch results from: {crossmatch_path}")        
         # Populate tess_sectors using the TESSCycle8Overlay geometry
         self.populate_tess_sectors()
-        #self.download_tess_lightcurves()  # Optional: uncomment if needed
+        self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
 
