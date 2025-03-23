@@ -1406,15 +1406,6 @@ class PrimvsCVFinder:
         )
 
 
-        from sklearn.decomposition import PCA
-
-        # Assuming X_emb is your original 64-dimensional embedding matrix:
-        #pca = PCA(n_components=20)  # Adjust n_components based on variance explained
-        #X_emb = pca.fit_transform(X_emb)
-
-        # Now use X_emb_reduced for your classifier training instead of X_emb.
-        #print("Explained variance ratio:", pca.explained_variance_ratio_.sum())
-
         emb_model.fit(X_emb_train, y_train)
         
         # Get predictions on validation set

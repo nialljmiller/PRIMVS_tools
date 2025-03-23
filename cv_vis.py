@@ -336,178 +336,6 @@ class PrimvsTessCrossMatch:
         print(f"Download complete. Data saved to: {data_dir}")
         return True
     
-    def generate_target_list(self):
-        """
-        Generate the final target list for the TESS GI proposal.
-        The final list will be exactly 100 targets and must include all known CVs.
-        For remaining slots, best candidates are selected based on a composite score:
-            composite_score = cv_prob / tic_tmag
-        """
-        if self.crossmatch_results is None:
-            print("No cross-match results available. Call perform_crossmatch() first.")
-            return False
-        print("Generating target list for TESS proposal...")
-        # Select only objects with a TIC match.
-        pool = self.crossmatch_results[self.crossmatch_results['in_tic'] == True].copy()
-        if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
-            pool['composite_score'] = pool['cv_prob'] / pool['tic_tmag']
-        else:
-            pool['composite_score'] = 0.0
-            print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
-        # Ensure known CVs are flagged
-        if 'is_known_cv' not in pool.columns:
-            pool['is_known_cv'] = False
-            print("Warning: is_known_cv column not found; assuming all are unknown.")
-        known = pool[pool['is_known_cv'] == True].copy()
-        others = pool[pool['is_known_cv'] == False].copy()
-        others = others.sort_values('composite_score', ascending=False)
-        num_needed = 100 - len(known)
-        if num_needed < 0:
-            # In the unlikely event that known CVs exceed 100, select top 100 known by composite score.
-            final_targets = known.sort_values('composite_score', ascending=False).head(100)
-        else:
-            final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
-        # If final list is less than 100, warn the user.
-        if len(final_targets) < 100:
-            print(f"Warning: Final target list has only {len(final_targets)} targets.")
-        else:
-            final_targets = final_targets.head(100)
-        self.target_list = final_targets.copy()
-        target_list_path = os.path.join(self.output_dir, 'tess_targets.csv')
-        self.target_list.to_csv(target_list_path, index=False)
-        print(f"Generated target list with {len(self.target_list)} sources (100 targets expected).")
-        print(f"Full target list saved to: {target_list_path}")
-        # Create a simplified version for proposal submission.
-        proposal_columns = ['priority', 'sourceid', 'tic_id', 'ra', 'dec', 'tic_tmag', 'cv_prob', 'composite_score']
-        proposal_columns = [col for col in proposal_columns if col in self.target_list.columns]
-        proposal_targets = self.target_list[proposal_columns].copy()
-        proposal_targets['target'] = proposal_targets['tic_id'].apply(lambda x: f"TIC {x}")
-        proposal_targets_path = os.path.join(self.output_dir, 'tess_proposal_targets.csv')
-        proposal_targets.to_csv(proposal_targets_path, index=False)
-        print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
-        return self.target_list
-    
-    def generate_summary_plots(self):
-        if self.cv_candidates is None:
-            print("No candidate data available. Run load_cv_candidates() first.")
-            return False
-        print("Generating summary plots...")
-        plots_dir = os.path.join(self.output_dir, 'summary_plots')
-        os.makedirs(plots_dir, exist_ok=True)
-        plt.style.use('seaborn-v0_8-whitegrid')
-        plt.rcParams['font.family'] = 'serif'
-        plt.rcParams['font.size'] = 12
-        plt.rcParams['axes.labelsize'] = 14
-        plt.rcParams['axes.titlesize'] = 16
-        plt.rcParams['xtick.labelsize'] = 12
-        plt.rcParams['ytick.labelsize'] = 12
-        plt.rcParams['legend.fontsize'] = 12
-
-        # Define three groups: All candidates, Known CVs, and Target List
-        all_candidates = self.cv_candidates.copy()
-        if 'is_known_cv' not in all_candidates.columns:
-            all_candidates['is_known_cv'] = False
-        known_candidates = all_candidates[all_candidates['is_known_cv'] == True]
-        if self.target_list is None:
-            print("Target list not generated; cannot plot target list group.")
-            targets = pd.DataFrame()
-        else:
-            targets = self.target_list.copy()
-
-        # Spatial Plot in Galactic Coordinates with TESS Overlay
-        plt.figure(figsize=(12,10))
-        hb = plt.hexbin(all_candidates['l'], all_candidates['b'], gridsize=75, cmap='Greys', bins='log')
-        plt.colorbar(hb, label='log10(count)')
-        plt.scatter(known_candidates['l'], known_candidates['b'], label='Known CVs', color='red', marker='*', s=80)
-        if not targets.empty:
-            plt.scatter(targets['l'], targets['b'], label='Target List', color='blue', s=30, alpha=0.8)
-        plt.xlabel('Galactic Longitude (l)')
-        plt.ylabel('Galactic Latitude (b)')
-        plt.title('Spatial Distribution (Galactic) - All, Known CVs, Target List')
-        ax_gal = plt.gca()
-        tess_overlay = TESSCycle8Overlay()
-        tess_overlay.add_to_plot(ax_gal, focus_region=None, alpha=0.2)
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.png'), dpi=300, bbox_inches='tight')
-        plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.pdf'), format='pdf', bbox_inches='tight')
-        plt.close()
-
-        # ROC Curve Plot using all candidates
-        print("Generating ROC curve plot...")
-        if 'true_label' not in all_candidates.columns:
-            all_candidates['true_label'] = all_candidates.get('is_known_cv', False).astype(int)
-        fpr, tpr, thresholds = roc_curve(all_candidates['true_label'], all_candidates['cv_prob'])
-        roc_auc = auc(fpr, tpr)
-        optimal_idx = np.argmax(tpr - fpr)
-        optimal_threshold = thresholds[optimal_idx]
-        plt.figure(figsize=(8,6))
-        plt.plot(fpr, tpr, label=f'ROC curve (AUC = {roc_auc:.2f})')
-        plt.plot([0,1], [0,1], linestyle='--', color='grey')
-        plt.scatter(fpr[optimal_idx], tpr[optimal_idx], color='red', label=f'Optimal threshold = {optimal_threshold:.2f}')
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('ROC Curve for CV Classifier')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(plots_dir, "roc_curve.png"), dpi=300)
-        plt.close()
-
-        # Bailey Diagram Plot: Period vs Amplitude
-        print("Generating Bailey diagram...")
-        plt.figure(figsize=(10,8))
-        hb = plt.hexbin(all_candidates['true_period'], all_candidates['true_amplitude'], 
-                        gridsize=50, cmap='Greys', bins='log')
-        plt.colorbar(hb, label='log10(count)')
-        plt.scatter(known_candidates['true_period'], known_candidates['true_amplitude'], 
-                    label='Known CVs', color='red', marker='*', s=80)
-        if not targets.empty:
-            plt.scatter(targets['true_period'], targets['true_amplitude'], 
-                        label='Target List', color='blue', s=30, alpha=0.8)
-        plt.xlabel('True Period (days)')
-        plt.ylabel('True Amplitude (mag)')
-        plt.title('Bailey Diagram: Period vs Amplitude')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(os.path.join(plots_dir, "bailey_diagram_groups.png"), dpi=300)
-        plt.close()
-
-        # 2D PCA of Embedding Space (if embedding features exist)
-        embedding_features = [str(i) for i in range(64)]
-        available_features = [col for col in embedding_features if col in all_candidates.columns]
-        if len(available_features) >= 3:
-            print("Computing PCA on embeddings...")
-            embeddings = all_candidates[available_features].values
-            pca = PCA(n_components=3)
-            pca_result = pca.fit_transform(embeddings)
-            all_candidates['pca_1'] = pca_result[:, 0]
-            all_candidates['pca_2'] = pca_result[:, 1]
-            if not targets.empty:
-                # Map PCA results for target list by matching TIC IDs
-                target_pca = all_candidates[all_candidates['tic_id'].isin(targets['tic_id'])]
-            else:
-                target_pca = pd.DataFrame()
-            plt.figure(figsize=(10,8))
-            hb = plt.hexbin(all_candidates['pca_1'], all_candidates['pca_2'], 
-                            gridsize=100, cmap='Greys', bins='log')
-            plt.colorbar(hb, label='log10(count)')
-            if not target_pca.empty:
-                plt.scatter(target_pca['pca_1'], target_pca['pca_2'], label='Target List', alpha=0.7, color='blue', s=30)
-            if not known_candidates.empty:
-                known_pca = all_candidates[all_candidates['is_known_cv'] == True]
-                plt.scatter(known_pca['pca_1'], known_pca['pca_2'], label='Known CVs', color='red', marker='*', s=80)
-            plt.xlabel('PCA 1')
-            plt.ylabel('PCA 2')
-            plt.title('2D PCA of Embedding Space')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.savefig(os.path.join(plots_dir, "embedding_pca_2d_groups.png"), dpi=300)
-            plt.close()
-        else:
-            print("Insufficient embedding features for PCA.")
-        
-        print(f"Generated publication-quality summary plots in {plots_dir}")
-        return True
 
 
 
@@ -529,6 +357,14 @@ class PrimvsTessCrossMatch:
 
         # Use crossmatch_results instead of cv_candidates to ensure 'tic_id' is present.
         all_candidates = self.crossmatch_results.copy()
+
+
+        l_vals = all_candidates['l'].values
+        l_vals[l_vals < 0] += 360
+        all_candidates['l'] = l_vals
+
+
+
         if 'is_known_cv' not in all_candidates.columns:
             all_candidates['is_known_cv'] = False
         known_candidates = all_candidates[all_candidates['is_known_cv'] == True]
@@ -536,7 +372,15 @@ class PrimvsTessCrossMatch:
             print("Target list not generated; cannot plot target list group.")
             targets = pd.DataFrame()
         else:
-            targets = self.target_list.copy()
+            targets = self.targets.copy()
+            l_vals = targets['l'].values
+            l_vals[l_vals < 0] += 360
+            targets['l'] = l_vals
+
+
+
+
+
 
         # Spatial Plot in Galactic Coordinates with TESS Overlay
         plt.figure(figsize=(12,10))
