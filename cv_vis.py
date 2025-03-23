@@ -155,84 +155,6 @@ def add_tess_overlay_equatorial(ax, alpha=0.2, size=12):
 
 
 
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
-from matplotlib.patches import Polygon
-import matplotlib.patheffects as patheffects
-from astropy.coordinates import SkyCoord
-import astropy.units as u
-
-# 1) REUSE your existing TESSCycle8Overlay class
-#    (same as in your snippet above; not repeated here for brevity)
-#    or import it if it's in a separate file.
-
-# 2) Helper to convert RA, Dec to the range expected by a Mollweide projection
-def to_mollweide(ra_deg, dec_deg):
-    """
-    Convert RA,Dec in degrees to the radian coordinates expected
-    by a Mollweide (or Aitoff) projection. By convention, we flip RA
-    so that 0h is at the center, and RA increases to the left.
-    """
-    # Convert to [0..360)
-    ra = np.mod(ra_deg, 360.0)
-    # Shift so that RA=0 is in the middle, going from +180 to -180
-    ra[ra > 180] -= 360
-    # Flip sign so that it increases to the left
-    ra = -ra
-    # Convert degrees to radians
-    ra_rad = np.radians(ra)
-    dec_rad = np.radians(dec_deg)
-    return ra_rad, dec_rad
-
-# 3) We need a version of the overlay function that draws the TESS footprints in Mollweide coords
-def add_tess_overlay_mollweide(ax, tess, alpha=0.2, size=12):
-    """
-    Similar to add_tess_overlay_equatorial, but transform each camera footprint
-    from RA/Dec to Mollweide rad coords, then draw polygons on 'ax'.
-    """
-    camera_colors = ['red', 'purple', 'blue', 'green']
-    for sector, cameras in tess.camera_positions.items():
-        for i, (ra, dec, roll) in enumerate(cameras):
-            # Build the corners
-            vertices_ra = np.array([-size, size, size, -size, -size])
-            vertices_dec = np.array([-size, -size, size, size, -size])
-
-            roll_rad = np.radians(roll-90)
-            rotated_ra = vertices_ra * np.cos(roll_rad) - vertices_dec * np.sin(roll_rad)
-            rotated_dec = vertices_ra * np.sin(roll_rad) + vertices_dec * np.cos(roll_rad)
-
-            # Shift corners by (ra, dec)
-            corners_ra = ra + rotated_ra
-            corners_dec = dec + rotated_dec
-
-            # Convert each corner to Mollweide coords
-            moll_ra, moll_dec = to_mollweide(corners_ra, corners_dec)
-            polygon = Polygon(
-                np.column_stack([moll_ra, moll_dec]),
-                alpha=alpha,
-                color=camera_colors[i % len(camera_colors)],
-                closed=True
-            )
-            ax.add_patch(polygon)
-
-            # Plot sector label at the camera center in Mollweide coords
-            label_ra, label_dec = to_mollweide(np.array([ra]), np.array([dec]))
-            ax.text(label_ra, label_dec, str(sector),
-                    fontsize=8, ha='center', va='center',
-                    color='white', fontweight='bold',
-                    path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
-                                  patheffects.Normal()])
-
-    # Make a custom legend
-    handles = [
-        plt.Line2D([], [], color=c, marker='s', linestyle='None', markersize=10, alpha=0.6)
-        for c in camera_colors
-    ]
-    labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
-    ax.legend(handles, labels, loc='lower left', title="TESS Cycle 8")
-
 
 
 
@@ -525,7 +447,6 @@ class PrimvsTessCrossMatch:
         return True
 
 
-        
     def generate_summary_plots(self):
         if self.cv_candidates is None:
             print("No candidate data available. Run load_cv_candidates() first.")
@@ -542,23 +463,28 @@ class PrimvsTessCrossMatch:
         plt.rcParams['ytick.labelsize'] = 12
         plt.rcParams['legend.fontsize'] = 12
 
-        # Use crossmatch_results instead of cv_candidates to ensure 'tic_id' is present.
+        # Use crossmatch_results to ensure 'tic_id' is present.
         all_candidates = self.crossmatch_results.copy()
 
-
+        # Mark known CVs
         if 'is_known_cv' not in all_candidates.columns:
             all_candidates['is_known_cv'] = False
         known_candidates = all_candidates[all_candidates['is_known_cv'] == True]
+
+        # Load targets
         if self.target_list is None:
             print("Target list not generated; cannot plot target list group.")
             targets = pd.DataFrame()
         else:
             targets = self.target_list.copy()
+            # For galactic plots, shift l>180
             l_vals = targets['l'].values
             l_vals[l_vals > 180] -= 360
             targets['l'] = l_vals
 
-        # ----- Galactic Coordinates Plot -----
+        # -----------------------------------------------------------------------
+        # GALACTIC COORDINATES PLOT
+        # -----------------------------------------------------------------------
         plt.figure(figsize=(12,10))
         hb = plt.hexbin(all_candidates['l'], all_candidates['b'], gridsize=75, cmap='Greys', bins='log')
         plt.colorbar(hb, label='log10(count)')
@@ -569,6 +495,7 @@ class PrimvsTessCrossMatch:
         plt.ylabel('Galactic Latitude (b)')
         plt.title('Spatial Distribution (Galactic) - All, Known CVs, Target List')
         ax_gal = plt.gca()
+
         tess_overlay = TESSCycle8Overlay()
         tess_overlay.add_to_plot(ax_gal, focus_region=None, alpha=0.2)
         plt.legend()
@@ -576,7 +503,9 @@ class PrimvsTessCrossMatch:
         plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
-        # ----- Equatorial Coordinates Plot (RA/Dec) -----
+        # -----------------------------------------------------------------------
+        # EQUATORIAL COORDINATES PLOT (RA/Dec)
+        # -----------------------------------------------------------------------
         plt.figure(figsize=(12,10))
         hb_eq = plt.hexbin(all_candidates['ra'], all_candidates['dec'], gridsize=75, cmap='Greys', bins='log')
         plt.colorbar(hb_eq, label='log10(count)')
@@ -590,57 +519,101 @@ class PrimvsTessCrossMatch:
         plt.xlabel('Right Ascension (RA)')
         plt.ylabel('Declination (Dec)')
         plt.title('Spatial Distribution (Equatorial) - All, Known CVs, Target List')
-        ax_eq = plt.gca()
-        # If you have an overlay for RA/Dec, add it here. Otherwise, this plot will be as is.
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.savefig(os.path.join(plots_dir, 'spatial_equatorial_groups.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
+        # -----------------------------------------------------------------------
+        # ECLIPTIC COORDINATES PLOT (MOLLWEIDE)
+        # -----------------------------------------------------------------------
+        def _ra_dec_to_ecliptic(ra_array, dec_array):
+            """
+            Convert arrays of RA/Dec in degrees (ICRS) to ecliptic lon/lat in radians,
+            shifted so 0° ecliptic longitude is in the center of the Mollweide.
+            """
+            coords = SkyCoord(ra=ra_array*u.deg, dec=dec_array*u.deg, frame='icrs')
+            ecl = coords.barycentrictrueecliptic
+            lon = ecl.lon.value  # [0..360)
+            lat = ecl.lat.value  # [-90..+90]
+            # Shift so 0 is in the center
+            lon[lon > 180] -= 360
+            return np.radians(lon), np.radians(lat)
 
+        def _add_tess_overlay_ecliptic_mollweide(ax, tess_overlay, alpha=0.2, size=12):
+            """
+            Similar to add_tess_overlay_equatorial, but we convert footprints from RA/Dec
+            into ecliptic coords and plot them in Mollweide projection.
+            """
+            camera_colors = ['red', 'purple', 'blue', 'green']
+            for sector, cameras in tess_overlay.camera_positions.items():
+                for i, (ra, dec, roll) in enumerate(cameras):
+                    vertices_ra = np.array([-size, size, size, -size, -size])
+                    vertices_dec = np.array([-size, -size, size, size, -size])
+                    roll_rad = np.radians(roll - 90)
+                    rotated_ra = vertices_ra * np.cos(roll_rad) - vertices_dec * np.sin(roll_rad)
+                    rotated_dec = vertices_ra * np.sin(roll_rad) + vertices_dec * np.cos(roll_rad)
+                    corners_ra = ra + rotated_ra
+                    corners_dec = dec + rotated_dec
 
-        # (B) Now the "TESS website style" Mollweide figure
+                    lon_rad, lat_rad = _ra_dec_to_ecliptic(corners_ra, corners_dec)
+                    polygon = Polygon(
+                        np.column_stack([lon_rad, lat_rad]),
+                        alpha=alpha,
+                        color=camera_colors[i % len(camera_colors)],
+                        closed=True
+                    )
+                    ax.add_patch(polygon)
+
+                    # Sector label
+                    cen_lon, cen_lat = _ra_dec_to_ecliptic(np.array([ra]), np.array([dec]))
+                    ax.text(cen_lon, cen_lat, str(sector),
+                            fontsize=8, ha='center', va='center',
+                            color='white', fontweight='bold',
+                            path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
+                                          patheffects.Normal()])
+
+            # Legend
+            handles = [
+                plt.Line2D([], [], color=c, marker='s', linestyle='None', markersize=10, alpha=0.6)
+                for c in camera_colors
+            ]
+            labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
+            ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
+
+        print("Generating Ecliptic Mollweide plot (TESS-style)...")
         plt.figure(figsize=(12,10))
-        ax_moll = plt.subplot(111, projection="mollweide")
+        ax_ecl = plt.subplot(111, projection='mollweide')
 
-        # Convert RA/Dec of your data to Mollweide coords
-        ra_rad, dec_rad = to_mollweide(all_candidates['ra'].values, all_candidates['dec'].values)
-        hb_moll = ax_moll.hexbin(ra_rad, dec_rad, gridsize=75, cmap='Greys', bins='log')
-        cb = plt.colorbar(hb_moll, label='log10(count)')
+        # Convert all candidates
+        lon_rad, lat_rad = _ra_dec_to_ecliptic(all_candidates['ra'].values, all_candidates['dec'].values)
+        hb_ecl = ax_ecl.hexbin(lon_rad, lat_rad, gridsize=75, cmap='Greys', bins='log')
+        plt.colorbar(hb_ecl, label='log10(count)')
 
         # Overplot known CVs
-        ra_cv, dec_cv = to_mollweide(known_candidates['ra'].values, known_candidates['dec'].values)
-        plt.scatter(ra_cv, dec_cv, label='Known CVs', color='red', marker='*', s=80)
+        cv_lon, cv_lat = _ra_dec_to_ecliptic(known_candidates['ra'].values, known_candidates['dec'].values)
+        plt.scatter(cv_lon, cv_lat, label='Known CVs', color='red', marker='*', s=80)
 
-        # Overplot targets
+        # Overplot target list
         if not targets.empty:
-            ra_tg, dec_tg = to_mollweide(targets['ra'].values, targets['dec'].values)
-            plt.scatter(ra_tg, dec_tg, label='Target List', color='blue', marker='+', s=30, alpha=0.8)
+            tg_lon, tg_lat = _ra_dec_to_ecliptic(targets['ra'].values, targets['dec'].values)
+            plt.scatter(tg_lon, tg_lat, label='Target List', color='blue', marker='+', s=30, alpha=0.8)
 
-        # Add TESS overlay in Mollweide coords
-        tess = TESSCycle8Overlay()  # or however you're instantiating
-        add_tess_overlay_mollweide(ax_moll, tess, alpha=0.2, size=12)
+        # Add TESS footprints in ecliptic coords
+        tess = TESSCycle8Overlay()
+        _add_tess_overlay_ecliptic_mollweide(ax_ecl, tess, alpha=0.2, size=12)
 
-        # Clean up the axes
-        ax_moll.set_xlabel("RA (Mollweide; 0° in center, increasing to the left)")
-        ax_moll.set_ylabel("Dec")
-        plt.title("Spatial Distribution (Mollweide) - All, Known CVs, Target List")
-        plt.legend(loc='upper right')
-        # Mollweide often looks best with a custom grid
-        ax_moll.grid(True, alpha=0.3)
-
-        plt.savefig(os.path.join(plots_dir, 'spatial_mollweide_groups.png'), dpi=300, bbox_inches='tight')
+        ax_ecl.set_xlabel("Ecliptic Longitude (0° in center, ±180° at edges)")
+        ax_ecl.set_ylabel("Ecliptic Latitude")
+        plt.title("Spatial Distribution (Ecliptic) - All, Known CVs, Target List")
+        plt.legend(loc='lower left')
+        ax_ecl.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(plots_dir, "spatial_ecliptic_mollweide_groups.png"), dpi=300, bbox_inches='tight')
         plt.close()
 
-
-
-
-
-
-
-
-
+        # -----------------------------------------------------------------------
         # ROC Curve Plot using all candidates
+        # -----------------------------------------------------------------------
         print("Generating ROC curve plot...")
         if 'true_label' not in all_candidates.columns:
             all_candidates['true_label'] = all_candidates.get('is_known_cv', False).astype(int)
@@ -660,7 +633,9 @@ class PrimvsTessCrossMatch:
         plt.savefig(os.path.join(plots_dir, "roc_curve.png"), dpi=300)
         plt.close()
 
+        # -----------------------------------------------------------------------
         # Bailey Diagram Plot: Period vs Amplitude
+        # -----------------------------------------------------------------------
         print("Generating Bailey diagram...")
         plt.figure(figsize=(10,8))
         hb = plt.hexbin(all_candidates['true_period'], all_candidates['true_amplitude'], 
@@ -679,7 +654,9 @@ class PrimvsTessCrossMatch:
         plt.savefig(os.path.join(plots_dir, "bailey_diagram_groups.png"), dpi=300)
         plt.close()
 
+        # -----------------------------------------------------------------------
         # 2D PCA of Embedding Space (if embedding features exist)
+        # -----------------------------------------------------------------------
         embedding_features = [str(i) for i in range(64)]
         available_features = [col for col in embedding_features if col in all_candidates.columns]
         if len(available_features) >= 3:
@@ -699,7 +676,8 @@ class PrimvsTessCrossMatch:
                             gridsize=100, cmap='Greys', bins='log')
             plt.colorbar(hb, label='log10(count)')
             if not target_pca.empty:
-                plt.scatter(target_pca['pca_1'], target_pca['pca_2'], label='Target List', alpha=0.7, color='blue', marker='+',  s=30)
+                plt.scatter(target_pca['pca_1'], target_pca['pca_2'], label='Target List', 
+                            alpha=0.7, color='blue', marker='+',  s=30)
             if not known_candidates.empty:
                 known_pca = all_candidates[all_candidates['is_known_cv'] == True]
                 plt.scatter(known_pca['pca_1'], known_pca['pca_2'], label='Known CVs', color='red', marker='*', s=80)
@@ -712,11 +690,9 @@ class PrimvsTessCrossMatch:
             plt.close()
         else:
             print("Insufficient embedding features for PCA.")
-        
+
         print(f"Generated publication-quality summary plots in {plots_dir}")
         return True
-
-
 
 
     def generate_target_list(self):
@@ -830,75 +806,83 @@ class PrimvsTessCrossMatch:
 
 
 
-    def populate_tess_sectors_equatorial(self, size=12):
+
+
+
+
+
+    # Inside the PrimvsTessCrossMatch class, add this new function:
+    def populate_tess_sectors(self, size=12):
         """
-        Determines which TESS Cycle 8 sectors each candidate falls in using RA/Dec coordinates.
-        Uses the TESSCycle8Overlay camera_positions (which are in RA, Dec, roll) to compute
-        camera footprints, then checks each candidate's RA/Dec against these polygons.
-        The matching sectors are stored in the 'tess_sectors' column as a JSON string.
+        For each candidate in crossmatch_results, determine which TESS Cycle 8 sectors
+        (97-107) the candidate falls in using the TESSCycle8Overlay geometry.
+        The resulting sectors (if any) are stored in the 'tess_sectors' column as a comma-separated string.
+        A spatial plot is also generated for visual inspection.
         """
-        print("Populating tess_sectors using RA/Dec and TESS Cycle 8 equatorial footprint geometry...")
+        print("Populating tess_sectors for each candidate using TESSCycle8Overlay geometry...")
+        tess_overlay = TESSCycle8Overlay()
         
-        # Initialize TESSCycle8Overlay to get equatorial camera positions.
-        tess = TESSCycle8Overlay()
-        
-        # Pre-compute the polygon for each camera footprint for every sector using RA/Dec.
-        from matplotlib.path import Path  # Make sure this is imported at the top of your file.
+        # Pre-compute the polygon for each camera footprint for each sector
         sector_polygons = {}
-        for sector, cam_list in tess.camera_positions.items():
+        for sector, cam_list in tess_overlay.galactic_positions.items():
             polygons = []
-            for (ra_center, dec_center, roll) in cam_list:
+            for (l_center, b_center, roll) in cam_list:
                 # Define square vertices centered at (0,0)
-                vertices_ra = np.array([-size, size, size, -size, -size])
-                vertices_dec = np.array([-size, -size, size, size, -size])
+                vertices_l = np.array([-size, size, size, -size, -size])
+                vertices_b = np.array([-size, -size, size, size, -size])
                 roll_rad = np.radians(roll - 90)
-                rotated_ra = vertices_ra * np.cos(roll_rad) - vertices_dec * np.sin(roll_rad)
-                rotated_dec = vertices_ra * np.sin(roll_rad) + vertices_dec * np.cos(roll_rad)
-                poly_ra = ra_center + rotated_ra
-                poly_dec = dec_center + rotated_dec
-                vertices = np.column_stack([poly_ra, poly_dec])
+                rotated_l = vertices_l * np.cos(roll_rad) - vertices_b * np.sin(roll_rad)
+                rotated_b = vertices_l * np.sin(roll_rad) + vertices_b * np.cos(roll_rad)
+                poly_l = l_center + rotated_l
+                poly_b = b_center + rotated_b
+                vertices = np.column_stack([poly_l, poly_b])
                 polygons.append(Path(vertices))
             sector_polygons[sector] = polygons
 
-        # Ensure candidates have RA and Dec columns.
-        if 'ra' not in self.crossmatch_results.columns or 'dec' not in self.crossmatch_results.columns:
-            print("Error: RA and Dec columns not found in candidate data.")
-            return
+        # Ensure candidates have galactic coordinates; compute if necessary.
+        if 'l' not in self.crossmatch_results.columns or 'b' not in self.crossmatch_results.columns:
+            print("Computing galactic coordinates for candidates...")
+            ra_col = 'ra' if 'ra' in self.crossmatch_results.columns else 'RAJ2000'
+            dec_col = 'dec' if 'dec' in self.crossmatch_results.columns else 'DEJ2000'
+            coords = SkyCoord(ra=self.crossmatch_results[ra_col].values * u.degree,
+                               dec=self.crossmatch_results[dec_col].values * u.degree)
+            gal_coords = coords.galactic
+            self.crossmatch_results['l'] = gal_coords.l.degree
+            self.crossmatch_results['b'] = gal_coords.b.degree
 
-        # Loop over candidates and determine which sectors they're in.
-        import json
+        # Check each candidate's (l, b) against each sector's polygons
         tess_sector_list = []
+        # Inside the loop in populate_tess_sectors (and similarly in populate_tess_sectors_equatorial)
         for idx, row in self.crossmatch_results.iterrows():
-            candidate_ra = row['ra']
-            candidate_dec = row['dec']
+            candidate_l = row['l']
+            candidate_b = row['b']
             visible_sectors = []
             for sector, poly_list in sector_polygons.items():
                 for poly in poly_list:
-                    if poly.contains_point((candidate_ra, candidate_dec)):
+                    if poly.contains_point((candidate_l, candidate_b)):
                         visible_sectors.append(sector)
-                        break  # No need to check other cameras in the same sector.
-            # Instead of a comma-separated string, store as a JSON string
-            visible_sectors_str = json.dumps(sorted(visible_sectors)) if visible_sectors else json.dumps([])
+                        break  # No need to check other cameras in this sector
+            if visible_sectors:
+                visible_sectors_str = ','.join(map(str, sorted(visible_sectors)))
+            else:
+                visible_sectors_str = "0"   # <-- Changed from empty string to "0"
             tess_sector_list.append(visible_sectors_str)
-
         self.crossmatch_results['tess_sectors'] = tess_sector_list
-        print("Finished populating tess_sectors column using RA/Dec.")
+        print("Finished populating tess_sectors column.")
 
-        # Create a spatial plot for visual inspection.
+        # Create a spatial plot for visual inspection
         fig, ax = plt.subplots(figsize=(12, 10))
-        ax.scatter(self.crossmatch_results['ra'], self.crossmatch_results['dec'], 
+        ax.scatter(self.crossmatch_results['l'], self.crossmatch_results['b'], 
                    c='blue', s=20, label='Candidates', alpha=0.6)
-        # Use your equatorial overlay function to add the TESS footprints.
-        add_tess_overlay_equatorial(ax, alpha=0.2, size=size)
-        ax.set_xlabel("Right Ascension (RA)")
-        ax.set_ylabel("Declination (Dec)")
-        ax.set_title("Candidate Positions with TESS Cycle 8 Equatorial Footprints")
+        tess_overlay.add_to_plot(ax, focus_region=None, alpha=0.2)
+        ax.set_xlabel("Galactic Longitude (l)")
+        ax.set_ylabel("Galactic Latitude (b)")
+        ax.set_title("Candidate Positions with TESS Cycle 8 Footprints")
         ax.legend()
-        plot_path = os.path.join(self.output_dir, 'tess_sectors_equatorial_visualization.png')
+        plot_path = os.path.join(self.output_dir, 'tess_sectors_visualization.png')
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"Saved tess_sectors equatorial spatial plot to: {plot_path}")
-
+        print(f"Saved tess_sectors spatial plot to: {plot_path}")
 
 
 
@@ -912,7 +896,7 @@ class PrimvsTessCrossMatch:
         self.load_cv_candidates()
         self.perform_crossmatch()
         # Populate tess_sectors using the TESSCycle8Overlay geometry
-        #self.populate_tess_sectors()
+        self.populate_tess_sectors()
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
@@ -936,7 +920,7 @@ class PrimvsTessCrossMatch:
 def main():
     cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"  # or CSV
     output_dir = "../PRIMVS/cv_results/tess_crossmatch_results"
-    cv_prob_threshold = 0.3
+    cv_prob_threshold = 0.167
     search_radius = 5.0  # arcseconds
     tess_mag_limit = 16.0
     print(f"Initializing PRIMVS-TESS cross-matching pipeline with parameters:")
