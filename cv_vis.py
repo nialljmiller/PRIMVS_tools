@@ -663,6 +663,92 @@ class PrimvsTessCrossMatch:
                 print(f"  Error querying TESS data: {e}")
             print("-" * 80)
     
+
+
+
+
+
+
+
+
+
+
+    from matplotlib.path import Path  # Add at the top if not already imported
+
+    # Inside the PrimvsTessCrossMatch class, add this new function:
+    def populate_tess_sectors(self, size=12):
+        """
+        For each candidate in crossmatch_results, determine which TESS Cycle 8 sectors
+        (97-107) the candidate falls in using the TESSCycle8Overlay geometry.
+        The resulting sectors (if any) are stored in the 'tess_sectors' column as a comma-separated string.
+        A spatial plot is also generated for visual inspection.
+        """
+        print("Populating tess_sectors for each candidate using TESSCycle8Overlay geometry...")
+        tess_overlay = TESSCycle8Overlay()
+        
+        # Pre-compute the polygon for each camera footprint for each sector
+        sector_polygons = {}
+        for sector, cam_list in tess_overlay.galactic_positions.items():
+            polygons = []
+            for (l_center, b_center, roll) in cam_list:
+                # Define square vertices centered at (0,0)
+                vertices_l = np.array([-size, size, size, -size, -size])
+                vertices_b = np.array([-size, -size, size, size, -size])
+                roll_rad = np.radians(roll - 90)
+                rotated_l = vertices_l * np.cos(roll_rad) - vertices_b * np.sin(roll_rad)
+                rotated_b = vertices_l * np.sin(roll_rad) + vertices_b * np.cos(roll_rad)
+                poly_l = l_center + rotated_l
+                poly_b = b_center + rotated_b
+                vertices = np.column_stack([poly_l, poly_b])
+                polygons.append(Path(vertices))
+            sector_polygons[sector] = polygons
+
+        # Ensure candidates have galactic coordinates; compute if necessary.
+        if 'l' not in self.crossmatch_results.columns or 'b' not in self.crossmatch_results.columns:
+            print("Computing galactic coordinates for candidates...")
+            ra_col = 'ra' if 'ra' in self.crossmatch_results.columns else 'RAJ2000'
+            dec_col = 'dec' if 'dec' in self.crossmatch_results.columns else 'DEJ2000'
+            coords = SkyCoord(ra=self.crossmatch_results[ra_col].values * u.degree,
+                               dec=self.crossmatch_results[dec_col].values * u.degree)
+            gal_coords = coords.galactic
+            self.crossmatch_results['l'] = gal_coords.l.degree
+            self.crossmatch_results['b'] = gal_coords.b.degree
+
+        # Check each candidate's (l, b) against each sector's polygons
+        tess_sector_list = []
+        for idx, row in self.crossmatch_results.iterrows():
+            candidate_l = row['l']
+            candidate_b = row['b']
+            visible_sectors = []
+            for sector, poly_list in sector_polygons.items():
+                # If candidate falls in any camera footprint for this sector, mark it as visible
+                for poly in poly_list:
+                    if poly.contains_point((candidate_l, candidate_b)):
+                        visible_sectors.append(sector)
+                        break  # No need to check other cameras in the same sector
+            if visible_sectors:
+                visible_sectors_str = ','.join(map(str, sorted(visible_sectors)))
+            else:
+                visible_sectors_str = ''
+            tess_sector_list.append(visible_sectors_str)
+        self.crossmatch_results['tess_sectors'] = tess_sector_list
+        print("Finished populating tess_sectors column.")
+
+        # Create a spatial plot for visual inspection
+        fig, ax = plt.subplots(figsize=(12, 10))
+        ax.scatter(self.crossmatch_results['l'], self.crossmatch_results['b'], 
+                   c='blue', s=20, label='Candidates', alpha=0.6)
+        tess_overlay.add_to_plot(ax, focus_region=None, alpha=0.2)
+        ax.set_xlabel("Galactic Longitude (l)")
+        ax.set_ylabel("Galactic Latitude (b)")
+        ax.set_title("Candidate Positions with TESS Cycle 8 Footprints")
+        ax.legend()
+        plot_path = os.path.join(self.output_dir, 'tess_sectors_visualization.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Saved tess_sectors spatial plot to: {plot_path}")
+
+    # Modify run_pipeline to call populate_tess_sectors() after crossmatch:
     def run_pipeline(self):
         start_time = time.time()
         print("\n" + "="*80)
@@ -670,7 +756,9 @@ class PrimvsTessCrossMatch:
         print("="*80 + "\n")
         self.load_cv_candidates()
         self.perform_crossmatch()
-        #self.download_tess_lightcurves()
+        # Populate tess_sectors using the TESSCycle8Overlay geometry
+        self.populate_tess_sectors()
+        #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
         end_time = time.time()
@@ -680,6 +768,11 @@ class PrimvsTessCrossMatch:
         print(f"Results saved to: {self.output_dir}")
         print("="*80 + "\n")
         return True
+
+
+
+
+
 
 # -------------------------
 # Main Execution
