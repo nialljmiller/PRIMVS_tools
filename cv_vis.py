@@ -919,10 +919,7 @@ class PrimvsTessCrossMatch:
         #self.generate_target_list()
         #self.generate_summary_plots()
 
-        target_list = pd.read_csv(target_path)
-        star_names = target_list['sourceid'].values
-
-        save_lightcurves_to_csv(target_pathtarget_path)
+        save_lightcurves_to_csv(target_path)
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
