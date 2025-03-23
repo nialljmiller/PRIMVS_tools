@@ -684,7 +684,7 @@ class PrimvsTessCrossMatch:
         if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
             pool['composite_score'] = pool['cv_prob'] / pool['tic_tmag']
         else:
-            pool['composite_score'] = 0.0
+            pool['composite_score'] = 0.167
             print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
         
         # Make sure we have a flag for known CVs
