@@ -144,6 +144,36 @@ def download_lightcurves(tic_id, output_dir, cadence="short", max_cycles=8):
     
     return cycles
 
+def process_lightcurve(lc_file):
+    try:
+        # Load light curve
+        lc = lk.read(lc_file)
+        # Immediately convert to unitless numpy arrays
+        time = np.asarray(lc.time)
+        flux = np.asarray(lc.flux)
+        if hasattr(lc, 'flux_err') and lc.flux_err is not None:
+            error = np.asarray(lc.flux_err)
+        else:
+            error = np.ones_like(flux) * 0.001
+        
+        # If you still want to clean the data using remove_outliers,
+        # you might want to apply it to your numpy arrays manually.
+        # Alternatively, if remove_outliers is giving you trouble,
+        # you can skip it and use sigma_clip or your own outlier removal.
+        # For example:
+        # flux = sigma_clip(flux, sigma=5).data
+        
+        # Normalize flux by its median
+        median_flux = np.median(flux)
+        flux = flux / median_flux
+        error = error / median_flux
+        
+        return None, time, flux, error  # We don't need the original lightcurve anymore
+    except Exception as e:
+        print(f"Error processing {lc_file}: {e}")
+        return None, None, None, None
+
+
 
 def process_lightcurve(lc_file):
     """
