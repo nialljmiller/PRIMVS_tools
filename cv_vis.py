@@ -192,25 +192,24 @@ class PrimvsTessCrossMatch:
             else:
                 raise ValueError(f"Unsupported file format: {self.cv_candidates_file}")
             
+
+            # Convert negative galactic longitudes to the 0-360 range.
+            l_vals = candidates['l'].values
+            l_vals[l_vals > 180] -= 360
+            candidates['l'] = l_vals
+
+
+
             self.cv_candidates = candidates
             print(f"Loaded {len(candidates)} total CV candidates")
             
-            if 'cv_prob' in candidates.columns:
-                self.filtered_candidates = candidates[candidates['cv_prob'] >= self.cv_prob_threshold].copy()
-                print(f"Filtered to {len(self.filtered_candidates)} candidates with cv_prob >= {self.cv_prob_threshold}")
-            elif 'confidence' in candidates.columns:
-                self.filtered_candidates = candidates[candidates['confidence'] >= self.cv_prob_threshold].copy()
-                print(f"Filtered to {len(self.filtered_candidates)} candidates with confidence >= {self.cv_prob_threshold}")
-            elif 'probability' in candidates.columns:
-                self.filtered_candidates = candidates[candidates['probability'] >= self.cv_prob_threshold].copy()
-                print(f"Filtered to {len(self.filtered_candidates)} candidates with probability >= {self.cv_prob_threshold}")
-            else:
-                print("Warning: No CV probability column found. Using all candidates.")
-                self.filtered_candidates = candidates.copy()
+            self.filtered_candidates = candidates[candidates['cv_prob'] >= self.cv_prob_threshold].copy()
+            print(f"Filtered to {len(self.filtered_candidates)} candidates with cv_prob >= {self.cv_prob_threshold}")
+
             
-            filtered_path = os.path.join(self.output_dir, 'filtered_candidates.csv')
-            self.filtered_candidates.to_csv(filtered_path, index=False)
-            print(f"Saved filtered candidates to: {filtered_path}")
+            #filtered_path = os.path.join(self.output_dir, 'filtered_candidates.csv')
+            #self.filtered_candidates.to_csv(filtered_path, index=False)
+            #print(f"Saved filtered candidates to: {filtered_path}")
             return True
         except Exception as e:
             print(f"Error loading CV candidates: {e}")
@@ -377,10 +376,6 @@ class PrimvsTessCrossMatch:
         # Use crossmatch_results instead of cv_candidates to ensure 'tic_id' is present.
         all_candidates = self.crossmatch_results.copy()
 
-        # Convert negative galactic longitudes to the 0-360 range.
-        l_vals = all_candidates['l'].values
-        l_vals[l_vals > 180] -= 360
-        all_candidates['l'] = l_vals
 
         if 'is_known_cv' not in all_candidates.columns:
             all_candidates['is_known_cv'] = False
