@@ -922,7 +922,7 @@ class PrimvsTessCrossMatch:
         target_list = pd.read_csv(target_path)
         star_names = target_list['sourceid'].values
 
-        get_lightcurves(star_names)
+        get_lightcurves(target_pathtarget_path)
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
@@ -936,47 +936,60 @@ class PrimvsTessCrossMatch:
 
 
 
-import Virac as virac
+import os
+import virac
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
-def get_lightcurves(star_names):
+def save_lightcurves_to_csv(target_list_csv, dest_folder_name="target_csv"):
     """
-    Retrieves and filters light curves using virac for each star in star_names.
-    Returns a dictionary keyed by star name with the light curve details.
+    Loads a target list from a CSV file, uses the 'sourceid' column to fetch
+    the lightcurve via virac, filters the data, and saves each lightcurve as a CSV
+    in a new folder (dest_folder_name) located in the same directory as target_list_csv.
     """
-    lightcurves = {}
-    for star_name in tqdm(star_names):
+    # Load the target list CSV
+    target_list = pd.read_csv(target_list_csv)
+    print(f"Loaded {len(target_list)} targets from {target_list_csv}")
+    
+    # Determine directory and create destination folder
+    target_dir = os.path.dirname(os.path.abspath(target_list_csv))
+    dest_folder = os.path.join(target_dir, dest_folder_name)
+    os.makedirs(dest_folder, exist_ok=True)
+    print(f"Destination folder created: {dest_folder}")
+    
+    # Process each target
+    for idx, row in tqdm(target_list.iterrows(), total=len(target_list)):
+        source_id = str(row.get("sourceid", "")).strip()
+        if not source_id:
+            print(f"Warning: sourceid missing for row {idx}, skipping...")
+            continue
+        
         try:
-            # Fetch the light curve using virac
-            lc = virac.run_sourceid(int(star_name))
+            # Get lightcurve data using virac
+            lc = virac.run_sourceid(int(source_id))
             
-            # Filter by Ks filter and ensure positive magnitudes and errors
+            # Filter the lightcurve: select only Ks band and ensure positive magnitudes and errors
             lc = lc[lc['filter'].astype(str) == 'Ks']
             lc = lc[lc['hfad_mag'].astype(float) > 0]
             lc = lc[lc['hfad_emag'].astype(float) > 0]
             
             if len(lc) == 0:
-                print(f"Warning: No valid data for star {star_name}")
+                print(f"No valid data for source {source_id}, skipping...")
                 continue
-
-            # Calculate the time range of observations
+            
+            # Optionally, compute the time range if needed
             time_range = np.max(lc["mjdobs"]) - np.min(lc["mjdobs"])
-
-            # Store relevant info in the dictionary
-            lightcurves[star_name] = {
-                "name": lc["sourceid"].iloc[0],
-                "mag": lc["hfad_mag"],
-                "magerr": lc["hfad_emag"],
-                "time": lc["mjdobs"],
-                "ast_res_chi": lc["ast_res_chisq"],
-                "chi": lc["chi"],
-                "ambi_match": lc["ambiguous_match"],
-                "time_range": time_range
-            }
+            print(f"Source {source_id} time range: {time_range:.2f} days")
+            
+            # Save the filtered lightcurve to CSV
+            csv_filename = os.path.join(dest_folder, f"{source_id}.csv")
+            lc.to_csv(csv_filename, index=False)
+            print(f"Saved lightcurve CSV for source {source_id} to {csv_filename}")
+            
         except Exception as e:
-            print(f"Error processing star {star_name}: {e}")
-    return lightcurves
+            print(f"Error processing source {source_id}: {e}")
+
 
 
 
