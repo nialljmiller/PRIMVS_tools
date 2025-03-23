@@ -900,7 +900,7 @@ class PrimvsTessCrossMatch:
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
-        self.populate_tess_sectors_equatorial()
+        #self.populate_tess_sectors_equatorial()
         end_time = time.time()
         runtime = end_time - start_time
         print("\n" + "="*80)
