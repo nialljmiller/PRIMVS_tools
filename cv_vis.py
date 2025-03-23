@@ -372,7 +372,7 @@ class PrimvsTessCrossMatch:
             print("Target list not generated; cannot plot target list group.")
             targets = pd.DataFrame()
         else:
-            targets = self.targets.copy()
+            targets = self.target_list.copy()
             l_vals = targets['l'].values
             l_vals[l_vals < 0] += 360
             targets['l'] = l_vals
