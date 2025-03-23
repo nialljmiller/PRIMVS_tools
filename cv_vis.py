@@ -19,6 +19,9 @@ from mpl_toolkits.mplot3d import Axes3D
 
 from matplotlib.path import Path  # Add at the top if not already imported
 
+import os
+import shutil
+import pandas as pd
 
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -904,13 +907,15 @@ class PrimvsTessCrossMatch:
         print("\n" + "="*80)
         print("RUNNING PRIMVS-TESS CROSS-MATCH PIPELINE")
         print("="*80 + "\n")
-        self.load_cv_candidates()
-        self.perform_crossmatch()
+        #self.load_cv_candidates()
+        #self.perform_crossmatch()
         # Populate tess_sectors using the TESSCycle8Overlay geometry
-        self.populate_tess_sectors()
+        #self.populate_tess_sectors()
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
-        self.generate_target_list()
-        self.generate_summary_plots()
+        #self.generate_target_list()
+        #self.generate_summary_plots()
+        copy_target_npy_files(self.output_dir + 'tess_proposal_targets.csv')
+
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
         runtime = end_time - start_time
@@ -923,6 +928,59 @@ class PrimvsTessCrossMatch:
 
 
 
+
+def copy_target_npy_files(target_list_csv, token_dir="../LC_TOKEN", dest_folder_name="target_npy"):
+    """
+    This function reloads the target list from a CSV file and uses the 'sourceid' column to identify
+    the corresponding .npy files in the LC_TOKEN directory (which is in the same directory as this script)
+    and then copies them to a new folder in the same directory as the target list CSV.
+    
+    Parameters:
+      target_list_csv (str): Path to the target list CSV file.
+      token_dir (str): Directory where the LC_TOKEN npy files reside (relative to current working directory).
+      dest_folder_name (str): Name of the new folder where the npy files will be copied.
+    """
+    # Load the target list CSV
+    try:
+        target_list = pd.read_csv(target_list_csv)
+        print(f"Loaded {len(target_list)} targets from {target_list_csv}")
+    except Exception as e:
+        print(f"Fuck, could not load the target list CSV: {e}")
+        return
+
+    # Determine the directory of the target list CSV
+    target_dir = os.path.dirname(os.path.abspath(target_list_csv))
+    
+    # Create the destination folder inside the target list directory
+    dest_folder = os.path.join(target_dir, dest_folder_name)
+    os.makedirs(dest_folder, exist_ok=True)
+    print(f"Destination folder created: {dest_folder}")
+    
+    # Loop over each target and copy its corresponding npy file
+    copied_count = 0
+    missing_files = []
+    for idx, row in target_list.iterrows():
+        source_id = str(row.get("sourceid", "")).strip()
+        if not source_id:
+            print(f"Warning: sourceid missing for row {idx}, skipping...")
+            continue
+
+        npy_filename = f"{source_id}.npy"
+        src_file = os.path.join(token_dir, npy_filename)
+        
+        if os.path.exists(src_file):
+            try:
+                shutil.copy2(src_file, dest_folder)
+                copied_count += 1
+            except Exception as e:
+                print(f"Error copying {src_file}: {e}")
+        else:
+            print(f"Warning: {src_file} does not exist.")
+            missing_files.append(npy_filename)
+    
+    print(f"Copied {copied_count} npy files to {dest_folder}")
+    if missing_files:
+        print(f"{len(missing_files)} npy files were missing: {missing_files}")
 
 
 # -------------------------
