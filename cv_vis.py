@@ -17,6 +17,7 @@ from sklearn.decomposition import PCA
 import umap
 from mpl_toolkits.mplot3d import Axes3D
 
+from matplotlib.path import Path  # Add at the top if not already imported
 
 
 
@@ -673,7 +674,6 @@ class PrimvsTessCrossMatch:
 
 
 
-    from matplotlib.path import Path  # Add at the top if not already imported
 
     # Inside the PrimvsTessCrossMatch class, add this new function:
     def populate_tess_sectors(self, size=12):
