@@ -922,7 +922,7 @@ class PrimvsTessCrossMatch:
         target_list = pd.read_csv(target_path)
         star_names = target_list['sourceid'].values
 
-        get_lightcurves(target_path)
+        get_lightcurves(star_names)
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
