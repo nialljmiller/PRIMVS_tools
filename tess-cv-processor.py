@@ -108,9 +108,9 @@ def download_lightcurves(tic_id, output_dir, cadence="short", max_cycles=8):
     
     # Filter by cadence
     if cadence == "short":
-        search_result = search_result[search_result.exptime.astype(int) < 600]
+        search_result = search_result[search_result.exptime.value < 600]
     else:
-        search_result = search_result[search_result.exptime.astype(int) >= 600]
+        search_result = search_result[search_result.exptime.value >= 600]
     
     if len(search_result) == 0:
         print(f"No {cadence} cadence data found for TIC {tic_id}")
