@@ -920,7 +920,7 @@ class PrimvsTessCrossMatch:
 def main():
     cv_candidates_file = "../PRIMVS/cv_results/cv_candidates.fits"  # or CSV
     output_dir = "../PRIMVS/cv_results/tess_crossmatch_results"
-    cv_prob_threshold = 0.167
+    cv_prob_threshold = 0.67
     search_radius = 5.0  # arcseconds
     tess_mag_limit = 16.0
     print(f"Initializing PRIMVS-TESS cross-matching pipeline with parameters:")
