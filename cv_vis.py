@@ -17,128 +17,6 @@ from sklearn.decomposition import PCA
 import umap
 from mpl_toolkits.mplot3d import Axes3D
 
-# -------------------------
-# TESSCycle8Overlay class (for plotting footprints)
-# -------------------------
-class TESSCycle8Overlay:
-    """TESS Cycle 8 camera footprint visualization for CV candidates"""
-    
-    def __init__(self):
-        # TESS Year 8 camera positions (RA, Dec, Roll) in degrees
-        self.camera_positions = {
-            97: [(24.13, -9.32, 292.44), (34.60, -31.26, 296.14), (51.45, -51.83, 127.55), (90.00, -66.56, 161.25)],
-            98: [(76.26, 4.75, 275.70), (78.71, -19.13, 276.02), (82.05, -42.96, 97.78), (90.00, -66.56, 104.42)],
-            99: [(136.70, -10.03, 296.66), (149.01, -31.13, 301.08), (168.24, -50.40, 133.88), (206.58, -62.97, 166.47)],
-            100: [(160.77, -19.40, 290.79), (171.88, -41.46, 296.53), (194.15, -61.36, 134.29), (251.44, -70.27, 187.40)],
-            101: [(184.53, -29.77, 289.32), (197.12, -51.89, 297.73), (231.12, -70.22, 148.05), (303.95, -68.82, 217.35)],
-            102: [(210.05, -39.39, 292.95), (228.76, -60.37, 307.55), (284.10, -72.46, 179.13), (340.57, -60.80, 231.85)],
-            103: [(239.66, -46.44, 302.50), (269.50, -63.95, 327.47), (328.67, -66.46, 202.01), (5.45, -50.96, 234.00)],
-            104: [(273.80, -48.76, 317.02), (310.89, -60.43, 347.75), (357.50, -56.84, 208.16), (26.00, -41.28, 230.08)],
-            105: [(308.41, -45.00, 331.21), (343.49, -51.67, 357.83), (19.73, -46.57, 205.65), (45.61, -32.84, 222.47)],
-            106: [(338.92, -36.33, 339.59), (9.24, -40.96, 358.81), (39.96, -37.24, 198.48), (65.56, -26.76, 212.26)],
-            107: [(5.23, -25.55, 341.34), (31.87, -30.75, 354.10), (59.79, -30.20, 188.47), (85.93, -24.07, 200.58)]
-        }
-        self.galactic_positions = self._convert_to_galactic()
-    
-    def _convert_to_galactic(self):
-        """Convert equatorial to galactic coordinates"""
-        galactic_positions = {}
-        for sector, cameras in self.camera_positions.items():
-            galactic_positions[sector] = []
-            for ra, dec, roll in cameras:
-                coords = SkyCoord(ra=ra*u.degree, dec=dec*u.degree, frame='icrs')
-                gal = coords.galactic
-                l_deg = gal.l.degree
-                if l_deg > 180:
-                    l_deg -= 360
-                galactic_positions[sector].append((l_deg, gal.b.degree, roll))
-        return galactic_positions
-    
-    def add_to_plot(self, ax, focus_region=None, alpha=0.2):
-        """
-        Add TESS Cycle 8 camera footprints to a Galactic plot.
-        """
-        camera_colors = ['red', 'purple', 'blue', 'green']
-        if focus_region == 'bulge':
-            sectors = [103, 104, 105]
-            camera_indices = [0, 1]
-        elif focus_region == 'disk':
-            sectors = [102, 103]
-            camera_indices = [1, 2]
-        else:
-            sectors = list(self.galactic_positions.keys())
-            camera_indices = [0, 1, 2, 3]
-        
-        for sector in sectors:
-            for i in camera_indices:
-                if i >= len(self.galactic_positions[sector]):
-                    continue
-                l, b, roll = self.galactic_positions[sector][i]
-                self._add_camera_footprint(ax, l, b, roll, 
-                                           color=camera_colors[i],
-                                           alpha=alpha,
-                                           label=f"Camera {i+1}" if f"Camera {i+1}" not in [child.get_label() for child in ax.get_children() if hasattr(child, 'get_label')] else "",
-                                           sector=sector)
-        # Add legend for cameras
-        handles = []
-        labels = []
-        for i, color in enumerate(camera_colors):
-            if i in camera_indices:
-                handles.append(plt.Line2D([], [], color=color, marker='s', 
-                                          linestyle='None', markersize=10, alpha=0.6))
-                labels.append(f'Camera {i+1}')
-        if handles and labels:
-            ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
-        return ax
-    
-    def _add_camera_footprint(self, ax, l, b, roll, color='red', alpha=0.2, label="", sector=None, size=12):
-        """Add a single camera footprint on a Galactic plot"""
-        vertices_l = np.array([-size, size, size, -size, -size])
-        vertices_b = np.array([-size, -size, size, size, -size])
-        roll_rad = np.radians(roll-90)
-        rotated_l = vertices_l * np.cos(roll_rad) - vertices_b * np.sin(roll_rad)
-        rotated_b = vertices_l * np.sin(roll_rad) + vertices_b * np.cos(roll_rad)
-        vertices_l = l + rotated_l
-        vertices_b = b + rotated_b
-        polygon = Polygon(np.column_stack([vertices_l, vertices_b]),
-                          alpha=alpha, color=color, closed=True, label=label)
-        ax.add_patch(polygon)
-        if sector:
-            text = ax.text(l, b, str(sector), fontsize=8, ha='center', va='center',
-                           color='white', fontweight='bold')
-            text.set_path_effects([
-                patheffects.Stroke(linewidth=2, foreground='black'),
-                patheffects.Normal()
-            ])
-
-# -------------------------
-# Helper function to overlay TESS footprints in Equatorial coordinates
-# -------------------------
-def add_tess_overlay_equatorial(ax, alpha=0.2, size=12):
-    camera_colors = ['red', 'purple', 'blue', 'green']
-    from matplotlib.patches import Polygon
-    tess = TESSCycle8Overlay()
-    for sector, cameras in tess.camera_positions.items():
-        for i, (ra, dec, roll) in enumerate(cameras):
-            vertices_ra = np.array([-size, size, size, -size, -size])
-            vertices_dec = np.array([-size, -size, size, size, -size])
-            roll_rad = np.radians(roll-90)
-            rotated_ra = vertices_ra * np.cos(roll_rad) - vertices_dec * np.sin(roll_rad)
-            rotated_dec = vertices_ra * np.sin(roll_rad) + vertices_dec * np.cos(roll_rad)
-            vertices_ra = ra + rotated_ra
-            vertices_dec = dec + rotated_dec
-            polygon = Polygon(np.column_stack([vertices_ra, vertices_dec]),
-                              alpha=alpha, color=camera_colors[i % len(camera_colors)],
-                              closed=True)
-            ax.add_patch(polygon)
-            ax.text(ra, dec, str(sector), fontsize=8, ha='center', va='center',
-                    color='white', fontweight='bold',
-                    path_effects=[patheffects.Stroke(linewidth=2, foreground='black'),
-                                  patheffects.Normal()])
-    handles = [plt.Line2D([], [], color=color, marker='s', linestyle='None', markersize=10, alpha=0.6) for color in camera_colors]
-    labels = [f'Camera {i+1}' for i in range(len(camera_colors))]
-    ax.legend(handles, labels, loc='upper right', title="TESS Cycle 8")
-    return ax
 
 # -------------------------
 # PrimvsTessCrossMatch Pipeline Class
@@ -335,10 +213,9 @@ class PrimvsTessCrossMatch:
                 f.write(res + "\n")
         print(f"Download complete. Data saved to: {data_dir}")
         return True
-    
 
 
-
+        
     def generate_summary_plots(self):
         if self.cv_candidates is None:
             print("No candidate data available. Run load_cv_candidates() first.")
@@ -358,12 +235,10 @@ class PrimvsTessCrossMatch:
         # Use crossmatch_results instead of cv_candidates to ensure 'tic_id' is present.
         all_candidates = self.crossmatch_results.copy()
 
-
+        # Convert negative galactic longitudes to the 0-360 range.
         l_vals = all_candidates['l'].values
         l_vals[l_vals < 0] += 360
         all_candidates['l'] = l_vals
-
-
 
         if 'is_known_cv' not in all_candidates.columns:
             all_candidates['is_known_cv'] = False
@@ -377,12 +252,7 @@ class PrimvsTessCrossMatch:
             l_vals[l_vals < 0] += 360
             targets['l'] = l_vals
 
-
-
-
-
-
-        # Spatial Plot in Galactic Coordinates with TESS Overlay
+        # ----- Galactic Coordinates Plot -----
         plt.figure(figsize=(12,10))
         hb = plt.hexbin(all_candidates['l'], all_candidates['b'], gridsize=75, cmap='Greys', bins='log')
         plt.colorbar(hb, label='log10(count)')
@@ -399,6 +269,24 @@ class PrimvsTessCrossMatch:
         plt.grid(True, alpha=0.3)
         plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.png'), dpi=300, bbox_inches='tight')
         plt.savefig(os.path.join(plots_dir, 'spatial_galactic_groups.pdf'), format='pdf', bbox_inches='tight')
+        plt.close()
+
+        # ----- Equatorial Coordinates Plot (RA/Dec) -----
+        plt.figure(figsize=(12,10))
+        hb_eq = plt.hexbin(all_candidates['ra'], all_candidates['dec'], gridsize=75, cmap='Greys', bins='log')
+        plt.colorbar(hb_eq, label='log10(count)')
+        plt.scatter(known_candidates['ra'], known_candidates['dec'], label='Known CVs', color='red', marker='*', s=80)
+        if not targets.empty:
+            plt.scatter(targets['ra'], targets['dec'], label='Target List', color='blue', s=30, alpha=0.8)
+        plt.xlabel('Right Ascension (RA)')
+        plt.ylabel('Declination (Dec)')
+        plt.title('Spatial Distribution (Equatorial) - All, Known CVs, Target List')
+        ax_eq = plt.gca()
+        # If you have an overlay for RA/Dec, add it here. Otherwise, this plot will be as is.
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(plots_dir, 'spatial_equatorial_groups.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plots_dir, 'spatial_equatorial_groups.pdf'), format='pdf', bbox_inches='tight')
         plt.close()
 
         # ROC Curve Plot using all candidates
@@ -529,6 +417,79 @@ class PrimvsTessCrossMatch:
         print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
         return self.target_list
 
+
+
+    def generate_target_list(self):
+        """
+        Generate the final target list for the TESS GI proposal.
+        The final list will be exactly 100 targets and must include all known CVs.
+        For remaining slots, best candidates are selected based on a composite score:
+            composite_score = (cv_prob / tic_tmag) * n_cycle8
+        where n_cycle8 is the number of TESS Cycle 8 sectors (97-107) in which the target is observed.
+        """
+        if self.crossmatch_results is None:
+            print("No cross-match results available. Call perform_crossmatch() first.")
+            return False
+        print("Generating target list for TESS proposal...")
+
+        # Select only objects with a TIC match.
+        pool = self.crossmatch_results[self.crossmatch_results['in_tic'] == True].copy()
+
+        # Helper function to parse tess_sectors string into a list of ints.
+        def parse_tess_sectors(sectors):
+            if pd.isna(sectors):
+                return []
+            return [int(s.strip()) for s in str(sectors).split(',') if s.strip().isdigit()]
+        
+        # Only consider candidates with TESS data in Cycle 8 (sectors 97-107)
+        cycle8_range = set(range(97, 108))
+        pool = pool[pool['tess_sectors'].notna()]
+        pool['n_cycle8'] = pool['tess_sectors'].apply(lambda x: sum(1 for s in parse_tess_sectors(x) if s in cycle8_range))
+        pool = pool[pool['n_cycle8'] > 0]
+        
+        # Compute composite score incorporating cycle 8 observability.
+        if ('tic_tmag' in pool.columns) and ('cv_prob' in pool.columns):
+            pool['composite_score'] = (pool['cv_prob'] / pool['tic_tmag']) * pool['n_cycle8']
+        else:
+            pool['composite_score'] = 0.0
+            print("Warning: cv_prob or tic_tmag not available; composite score set to 0.")
+        
+        # Ensure known CVs are flagged
+        if 'is_known_cv' not in pool.columns:
+            pool['is_known_cv'] = False
+            print("Warning: is_known_cv column not found; assuming all are unknown.")
+        
+        known = pool[pool['is_known_cv'] == True].copy()
+        others = pool[pool['is_known_cv'] == False].copy()
+        others = others.sort_values('composite_score', ascending=False)
+        num_needed = 100 - len(known)
+        if num_needed < 0:
+            # In the unlikely event that known CVs exceed 100, select top 100 known by composite score.
+            final_targets = known.sort_values('composite_score', ascending=False).head(100)
+        else:
+            final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
+        
+        # If final list is less than 100, warn the user.
+        if len(final_targets) < 100:
+            print(f"Warning: Final target list has only {len(final_targets)} targets.")
+        else:
+            final_targets = final_targets.head(100)
+        
+        self.target_list = final_targets.copy()
+        target_list_path = os.path.join(self.output_dir, 'tess_targets.csv')
+        self.target_list.to_csv(target_list_path, index=False)
+        print(f"Generated target list with {len(self.target_list)} sources (100 targets expected).")
+        print(f"Full target list saved to: {target_list_path}")
+        
+        # Create a simplified version for proposal submission (including n_cycle8 for scrutiny).
+        proposal_columns = ['priority', 'sourceid', 'tic_id', 'ra', 'dec', 'tic_tmag', 'cv_prob', 'composite_score', 'n_cycle8']
+        proposal_columns = [col for col in proposal_columns if col in self.target_list.columns]
+        proposal_targets = self.target_list[proposal_columns].copy()
+        proposal_targets['target'] = proposal_targets['tic_id'].apply(lambda x: f"TIC {x}")
+        proposal_targets_path = os.path.join(self.output_dir, 'tess_proposal_targets.csv')
+        proposal_targets.to_csv(proposal_targets_path, index=False)
+        print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
+        return self.target_list
 
 
 
