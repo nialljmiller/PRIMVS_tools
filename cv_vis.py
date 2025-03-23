@@ -945,12 +945,8 @@ def copy_target_npy_files(target_list_csv, token_dir="../LC_TOKEN", dest_folder_
       dest_folder_name (str): Name of the new folder where the npy files will be copied.
     """
     # Load the target list CSV
-    try:
-        target_list = pd.read_csv(target_list_csv)
-        print(f"Loaded {len(target_list)} targets from {target_list_csv}")
-    except Exception as e:
-        print(f"Fuck, could not load the target list CSV: {e}")
-        return
+    target_list = pd.read_csv(target_list_csv)
+    print(f"Loaded {len(target_list)} targets from {target_list_csv}")
 
     # Determine the directory of the target list CSV
     target_dir = os.path.dirname(os.path.abspath(target_list_csv))
@@ -964,7 +960,7 @@ def copy_target_npy_files(target_list_csv, token_dir="../LC_TOKEN", dest_folder_
     copied_count = 0
     missing_files = []
     for idx, row in target_list.iterrows():
-        source_id = str(row.get("sourceid", "")).strip()
+        source_id = str(row.get("uniqueid", "")).strip()
         if not source_id:
             print(f"Warning: sourceid missing for row {idx}, skipping...")
             continue
