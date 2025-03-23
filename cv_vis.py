@@ -914,7 +914,7 @@ class PrimvsTessCrossMatch:
         #self.download_tess_lightcurves()  # Optional: uncomment if needed
         #self.generate_target_list()
         #self.generate_summary_plots()
-        copy_target_npy_files(self.output_dir + 'tess_proposal_targets.csv')
+        copy_target_npy_files(self.output_dir + '/tess_proposal_targets.csv')
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
