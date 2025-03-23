@@ -21,6 +21,10 @@ from matplotlib.path import Path  # Add at the top if not already imported
 
 
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+
 
 
 
@@ -303,10 +307,6 @@ class PrimvsTessCrossMatch:
         return True
     
 
-
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
 
     def process_candidate(idx, coord):
         candidate_result = {}
