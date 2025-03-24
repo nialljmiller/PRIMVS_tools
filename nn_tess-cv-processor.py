@@ -350,7 +350,7 @@ def create_nn_fap_sliding_window_periodogram(time, flux, periods, knn, model, wi
     return avg_power
 
 
-def find_orbital_period(time, flux, error, min_period=0.01, max_period=1.0, n_periods=1000):
+def find_orbital_period(time, flux, error):
     """
     Find orbital period using multiple NN_FAP periodogram methods.
     
@@ -379,17 +379,21 @@ def find_orbital_period(time, flux, error, min_period=0.01, max_period=1.0, n_pe
         - Sliding window method power array
         - Subtraction method power array
     """
-    # Create a period grid to search
-    periods = np.linspace(min_period, max_period, n_periods)
-    
+    , min_period=0.01, max_period=1.0, n_periods=1000
     # Load the NN_FAP model
     knn, model = NN_FAP.get_model(model_path='/home/njm/Period/NN_FAP/final_12l_dp_all/')
     
+    # Create a period grid to search
+    long_periods = np.linspace(0.1, 10, 100)
     # Method 1: Chunk periodogram
-    chunk_power = create_nn_fap_chunk_periodogram(time, flux, periods, knn, model)
+    chunk_power = create_nn_fap_chunk_periodogram(time, flux, long_periods, knn, model)
+    # Interpolate the chunk power onto the short_periods grid (our common grid)
+    chunk_power = np.interp(short_periods, long_periods, chunk_power)
     
+    # Create a period grid to search
+    short_periods = np.linspace(0.001, 1, 100)
     # Method 2: Sliding window periodogram
-    sliding_power = create_nn_fap_sliding_window_periodogram(time, flux, periods, knn, model)
+    sliding_power = create_nn_fap_sliding_window_periodogram(time, flux, short_periods, knn, model)
     
     # Method 3 (2b): Subtraction method to enhance short periods
     # Clip negative values to zero after subtraction
