@@ -488,6 +488,44 @@ class PrimvsTessCrossMatch:
         plt.savefig(os.path.join(plots_dir, "bailey_diagram_groups.png"), dpi=300)
         plt.close()
 
+
+
+        print("Generating Bailey diagram in hours with CV period gap...")
+
+        plt.figure(figsize=(10,8))
+
+        # Convert periods from days to hours
+        all_period_hours = all_candidates['true_period'] * 24
+        known_period_hours = known_candidates['true_period'] * 24
+        target_period_hours = targets['true_period'] * 24
+
+        # Hexbin for overall candidates (using hours now)
+        hb = plt.hexbin(all_period_hours, all_candidates['true_amplitude'], 
+                        gridsize=50, cmap='Greys', bins='log')
+        plt.colorbar(hb, label='log10(count)')
+
+        # Scatter plots for known CVs and target list
+        plt.scatter(known_period_hours, known_candidates['true_amplitude'], 
+                    label='Known CVs', color='red', marker='*', s=80)
+        plt.scatter(target_period_hours, targets['true_amplitude'], 
+                    label='Target List', color='blue', s=30, alpha=0.8)
+
+        # Highlight the CV period gap (roughly 2-3 hours)
+        plt.axvspan(2, 3, color='orange', alpha=0.3, label='CV Period Gap')
+
+        # Labels and title
+        plt.xlabel('True Period (hours)')
+        plt.ylabel('True Amplitude (mag)')
+        plt.title('Bailey Diagram: Period vs Amplitude (Hours)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        # Save the plot
+        plt.savefig(os.path.join(plots_dir, "bailey_diagram_hours.png"), dpi=300)
+        plt.close()
+
+
+
         # -----------------------------------------------------------------------
         # 2D PCA of Embedding Space (if embedding features exist)
         # -----------------------------------------------------------------------
