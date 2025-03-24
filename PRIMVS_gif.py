@@ -331,6 +331,7 @@ else:
     sampled_file_path = output_fp + fits_file + '_sampled.csv'
 
     for index, primus_line in df.iterrows():
+        print(primus_line)
         source_id = primus_line['sourceid']
 
         name = primus_line['sourceid']
