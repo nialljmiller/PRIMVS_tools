@@ -332,9 +332,9 @@ else:
 
     for index, primus_line in df.iterrows():
         print(primus_line)
-        source_id = primus_line['sourceid_1']
+        source_id = primus_line['sourceid']
 
-        name = primus_line['sourceid_1']
+        name = primus_line['sourceid']
         fap = primus_line['best_fap']  # Assuming you have a column 'best_fap'
         period = primus_line['true_period']  # Assuming you have a column 'true_period'
         amplitude = primus_line['true_amplitude']  # Assuming you have a column 'true_amplitude'
