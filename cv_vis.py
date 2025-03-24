@@ -500,15 +500,13 @@ class PrimvsTessCrossMatch:
         target_period_hours = targets['true_period'] * 24
 
         # Hexbin for overall candidates (using hours now)
-        hb = plt.hexbin(all_period_hours, all_candidates['true_amplitude'], 
-                        gridsize=50, cmap='Greys', bins='log')
-        plt.colorbar(hb, label='log10(count)')
-
+        plt.scatter(all_period_hours, all_candidates['true_amplitude'],color = 'grey', alpha=0.4)
+        
         # Scatter plots for known CVs and target list
         plt.scatter(known_period_hours, known_candidates['true_amplitude'], 
                     label='Known CVs', color='red', marker='*', s=80)
         plt.scatter(target_period_hours, targets['true_amplitude'], 
-                    label='Target List', color='blue', s=30, alpha=0.8)
+                    label='Target List', color='blue', marker='+', s=30)
 
         # Highlight the CV period gap (roughly 2-3 hours)
         plt.axvspan(2, 3, color='orange', alpha=0.3, label='CV Period Gap')
