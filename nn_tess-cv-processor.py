@@ -379,7 +379,6 @@ def find_orbital_period(time, flux, error):
         - Sliding window method power array
         - Subtraction method power array
     """
-    , min_period=0.01, max_period=1.0, n_periods=1000
     # Load the NN_FAP model
     knn, model = NN_FAP.get_model(model_path='/home/njm/Period/NN_FAP/final_12l_dp_all/')
     
