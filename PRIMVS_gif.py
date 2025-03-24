@@ -325,7 +325,7 @@ else:
     output_fp = '/beegfs/car/njm/PRIMVS/cv_results/target_list_gif/'
     #fits_file_path = '/beegfs/car/njm/OUTPUT/' + fits_file + '.fits'
     #df = read_fits_data(fits_file_path)
-    csv_file_path = '/beegfs/car/njm/PRIMVS.cv_results/tess_crossmatch_results/tess_big_targets.csv'
+    csv_file_path = '/beegfs/car/njm/PRIMVS/cv_results/tess_crossmatch_results/tess_big_targets.csv'
     df = pd.read_csv(csv_file_path)
 
     sampled_file_path = output_fp + fits_file + '_sampled.csv'
