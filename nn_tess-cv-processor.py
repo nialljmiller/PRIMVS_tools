@@ -110,7 +110,7 @@ print("Default CV targets:", DEFAULT_CV_TARGETS)
 def setup_args():
     """Set up command line arguments."""
     parser = argparse.ArgumentParser(description="Process TESS CV light curves across multiple cycles")
-    parser.add_argument("--output", type=str, default="../PRIMVS/cv_results/TESS/", 
+    parser.add_argument("--output", type=str, default="../PRIMVS/cv_results/NN_TESS/", 
                         help="Output directory for results")
     parser.add_argument("--tics", type=int, nargs="+", 
                         help="Specific TIC IDs to process (default: preset CVs)")
