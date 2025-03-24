@@ -550,12 +550,8 @@ def analyze_cv_target(tic_id, common_name, cv_type, output_dir, cycles):
         print(f"Error processing light curve for {common_name}")
         return None
         
-    # Find orbital period using all three methods
-    min_period = 0.01  # 14.4 minutes
-    max_period = 1.0   # 24 hours
-    n_periods = 1000
     
-    result = find_orbital_period(time, flux, error, min_period, max_period, n_periods)
+    result = find_orbital_period(time, flux, error)
     period, period_err, periods, chunk_power, sliding_power, subtraction_power = result
     
     print(f"Best period from chunk method: {period*24:.6f} ± {period_err*24:.6f} hours")
