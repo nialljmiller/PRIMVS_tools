@@ -313,7 +313,6 @@ if len(sys.argv) >= 2:
         print(repr(e))  # Displayin' the exception message like a tumbleweed in the wind
         print("We tried, but the creation of them gifs, it didn't work. Our efforts fell short, lost amidst the unforgiving currents of this forsaken realm.")
         print("You reckon this star [" + str(sysarg) +"] truly exists out there in the boundless cosmos? Or is it nothin' but a specter, taunting us from the black void?")
-        #print("The Judge's voice resonated, his tone as cold and unforgiving as the desolate plains they traversed. Listen well, kid, he spoke, his eyes gleaming with an unsettling fire. Our pursuit to create a phase gif and an MJD gif has faltered. The hands of fate have dealt their cruel hand, denying us the triumph we sought. He continued, his words carving through the air like a sharpened blade. In this vast and merciless universe, we have been bested. The cosmic secrets have eluded our grasp, slipping away like smoke in the wind. No amount of grit or sweat can mend this broken path. The Kid stood in silence, his spirit battered by the Judge's grim proclamation. The weight of failure settled upon their shoulders, heavy as the burden of their bloody journey. In that moment, they knew that some truths were destined to remain hidden, forever beyond their reach. The Judge's gaze pierced through the Kid, his voice an eerie whisper. Accept this defeat, young one, for it is the nature of our existence. The cosmic dance mocks our mortal desires, reminding us of our insignificance. Ride on, amidst the darkness and uncertainty, for there are yet mysteries that shall forever elude our grasp. And so, the Kid absorbed the Judges words, the bitter taste of failure lingering in their mouth. They rode onward, haunted by the knowledge that even the most relentless pursuit can end in naught but shadows and silence.")
         print("\n\nIt did not work")
         exit()
 else:
@@ -322,56 +321,13 @@ else:
     vvv_pixel_scale = 0.339  # The pixel scale in arcseconds per pixel
     fits_fp = '/beegfs/car/lsmith/vvv_data/images/'  # File path for them FITS images
     fits_file = 'PRIMVS_P_CLASS_GAIAnew'
-    output_fp = '/beegfs/car/njm/PRIMVS/dtree/gaia/'
-    fits_file_path = '/beegfs/car/njm/OUTPUT/' + fits_file + '.fits'
+    output_fp = '/beegfs/car/njm/PRIMVS/cv_results/target_list_gif/'
+    #fits_file_path = '/beegfs/car/njm/OUTPUT/' + fits_file + '.fits'
+    #df = read_fits_data(fits_file_path)
+    csv_file_path = '/beegfs/car/njm/PRIMVS.cv_results/tess_crossmatch_results/tess_big_targets.csv'
+    df = pd.read_csv(csv_file_path)
+
     sampled_file_path = output_fp + fits_file + '_sampled.csv'
-    df_filtered = read_fits_data(fits_file_path)
-
-    label_mapping = {
-        'WD': 'White Dwarf',
-        'ECL': 'Eclipsing Binary',
-        'S': 'Short-timescale',
-        'RS': 'RS Canum V',
-        'ELL': 'Ellipsoidal',    
-        'RR': 'RR Lyrae',        
-        'CEP': 'Cepheid',        
-        'SOLAR_LIKE': 'Solar-like',        
-        'DSCT|GDOR|SXPHE': 'Delta Scuti',        
-        'LPV': 'Long-period Variable',        
-        'YSO': 'YSO',        
-        'CV': 'Cataclysmic Variable',        
-        'MICROLENSING': 'Microlensing',        
-        'BE|GCAS|SDOR|WR': 'B-type',        
-    }
-
-    df_filtered['variable_type'] = df_filtered['variable_type'].map(label_mapping)
-    unique_classes = df_filtered['variable_type'].unique()
-    df_filtered['l'] = ((df_filtered['l'] + 180) % 360) - 180
-    df_filtered['log_true_period'] = np.log10(df_filtered['true_period'])
-    df_filtered['log_true_amplitude'] = np.log10(df_filtered['true_amplitude'])
-    df_filtered.rename(columns={'z_med_mag-ks_med_mag': 'Z-K'}, inplace=True)
-    df_filtered.rename(columns={'y_med_mag-ks_med_mag': 'Y-K'}, inplace=True)
-    df_filtered.rename(columns={'j_med_mag-ks_med_mag': 'J-K'}, inplace=True)
-    df_filtered.rename(columns={'h_med_mag-ks_med_mag': 'H-K'}, inplace=True)
-    df_filtered = df_filtered.loc[
-        (df_filtered['Z-K'] != 0) & 
-        (df_filtered['J-K'] != 0) & 
-        (df_filtered['H-K'] != 0) & 
-        (df_filtered['Y-K'] != 0)
-    ]
-
-    for column in ['Z-K', 'J-K', 'H-K', 'Y-K']:
-        mode_value = df_filtered[column].mode()[0]
-        df_filtered = df_filtered.loc[df_filtered[column] != mode_value]
-
-    df = df_filtered
-    df = df[df['ls_bal_fap'] < 0.00000000000000000000000000001]
-    df = df[df['true_amplitude'] > 0.5]
-    df = df[df['log_true_period'] < 2.7]
-    df = df[df['variable_probability'] > 0.7]
-    df = df[df['variable_confidence_metric'] > 0.9]
-    df = df[df['variable_entropy'] < 0.2]
-
 
     for index, primus_line in df.iterrows():
         source_id = primus_line['sourceid']
