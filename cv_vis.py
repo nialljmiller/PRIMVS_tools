@@ -512,7 +512,7 @@ class PrimvsTessCrossMatch:
 
         # Highlight the CV period gap (roughly 2-3 hours)
         plt.axvspan(2, 3, color='orange', alpha=0.3, label='CV Period Gap')
-
+        plt.xscale('log')
         # Labels and title
         plt.xlabel('True Period (hours)')
         plt.ylabel('True Amplitude (mag)')
