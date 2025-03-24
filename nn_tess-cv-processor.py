@@ -384,13 +384,13 @@ def find_orbital_period(time, flux, error):
     
     # Create a period grid to search
     long_periods = np.linspace(0.1, 10, 100)
+    short_periods = np.linspace(0.001, 1, 100)
     # Method 1: Chunk periodogram
     chunk_power = create_nn_fap_chunk_periodogram(time, flux, long_periods, knn, model)
     # Interpolate the chunk power onto the short_periods grid (our common grid)
     chunk_power = np.interp(short_periods, long_periods, chunk_power)
     
     # Create a period grid to search
-    short_periods = np.linspace(0.001, 1, 100)
     # Method 2: Sliding window periodogram
     sliding_power = create_nn_fap_sliding_window_periodogram(time, flux, short_periods, knn, model)
     
