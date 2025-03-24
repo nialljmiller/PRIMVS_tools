@@ -91,7 +91,6 @@ def gif_genny_phase(primus_line):
     ra = primus_line['ra']
     dec = primus_line['dec']
     amplitude = primus_line['true_amplitude']
-    star_class = primus_line['variable_type']
 
     lightcurve = Virac.run_sourceid(int(name))
     lightcurve = lightcurve[np.where(lightcurve['filter'].astype(str) == 'Ks')[0]]
