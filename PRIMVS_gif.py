@@ -137,15 +137,15 @@ def gif_genny_phase(primus_line):
         anim = FuncAnimation(fig, update, frames=len(lightcurve), interval=1, repeat=True)  # Make an animation using the update function and 10 frames
 
         # Define the base directory and subdirectory using the star class
-        base_dir = '/beegfs/car/njm/PRIMVS/LC_GIF/phase/'
-        star_class_dir = os.path.join(base_dir, str(star_class).replace(' ', '_'))
+        base_dir = '/beegfs/car/njm/PRIMVS/cv_results/target_list_gif/'
+        #star_class_dir = os.path.join(base_dir, str(star_class).replace(' ', '_'))
 
         # Check if the directory exists, and if not, create it
-        if not os.path.exists(star_class_dir):
-            os.makedirs(star_class_dir)
+        #if not os.path.exists(star_class_dir):
+        #    os.makedirs(star_class_dir)
 
         # Define the full file path
-        file_path = os.path.join(star_class_dir, f"{str(name)}_phase.gif")
+        file_path = os.path.join(base_dir, f"{str(name)}_phase.gif")
 
         # Save the animation at the specified path
         anim.save(file_path, writer='imagemagick', fps=6)
