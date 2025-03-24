@@ -4,6 +4,7 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 import numpy as np
 import glob
+import pandas as pd
 import Virac as Virac
 import sys
 import random
