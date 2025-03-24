@@ -148,9 +148,6 @@ def download_lightcurves(tic_id, output_dir, cadence="short", max_cycles=1):
         print(f"No {cadence} cadence data found for TIC {tic_id}")
         return {}
     
-    # Sort by observation date (newest first)
-    search_result = search_result.sort_by("observation_start")[::-1]
-    
     print(f"Found {len(search_result)} {cadence} cadence observations, using most recent {max_cycles}")
     
     # Get most recent cycles
