@@ -266,7 +266,7 @@ def create_nn_fap_periodogram(time, flux, min_period=0.01, max_period=1.0, n_per
         - Power array (1-FAP values)
     """
     # Load the NN_FAP model
-    #knn, model = NN_FAP.get_model()
+    knn, model = NN_FAP.get_model(model_path = '/home/njm/Period/NN_FAP/final_12l_dp_all/')
     
     # Create a period grid to search
     periods = np.linspace(min_period, max_period, n_periods)
@@ -283,7 +283,7 @@ def create_nn_fap_periodogram(time, flux, min_period=0.01, max_period=1.0, n_per
             indices.sort()  # Keep them in time order
             
             # Calculate NN_FAP for this period using the subsampled data
-            fap = NN_FAP.inference(period, flux[indices], time[indices])#, knn, model)
+            fap = NN_FAP.inference(period, flux[indices], time[indices], knn, model)
             power[i] = 1.0 - fap  # Convert to power (higher is better)
     else:
         # If we have 200 or fewer points, we can use them all
