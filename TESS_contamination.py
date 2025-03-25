@@ -8,7 +8,6 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 
 
-
 def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_arcsec=21.0):
     # Load the target list CSV
     target_list = pd.read_csv(target_list_csv)
@@ -92,10 +91,8 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                             # Fall back to sourceid
                             contam_lc = virac.run_sourceid(int(contam_sourceid))
                         
-                        print(contam_lc)
-                        exit()
                         # Get Ks-band measurements
-                        contam_ks_mask = contam_lc['filter'] == 'ks'
+                        contam_ks_mask = contam_lc['filter'] == 'Ks'
                         if np.sum(contam_ks_mask) == 0:
                             continue
                             
@@ -237,6 +234,10 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         print(f"Results saved to {output_file}")
     
     return results_df
+
+
+
+
 
 def visualize_contamination(results_df, output_folder='contamination_plots'):
     """
