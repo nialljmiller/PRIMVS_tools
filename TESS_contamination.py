@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+TESS Contamination Analysis using Gaia
+
+This script analyzes contamination in TESS photometry by identifying
+Gaia sources within a TESS pixel of the target.
+"""
+
 import os
 import numpy as np
 import pandas as pd
@@ -8,10 +16,9 @@ import astropy.units as u
 from astroquery.gaia import Gaia
 from astropy.table import Table
 
-def analyze_tess_contamination_gaia(target_list_csv, output_file=None, search_radius_arcsec=21.0):
+def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_arcsec=21.0):
     """
     Analyzes potential photometric contamination for TESS observations using Gaia data.
-    Always uses online Gaia query with minimal error handling.
     
     Parameters:
     -----------
@@ -42,63 +49,55 @@ def analyze_tess_contamination_gaia(target_list_csv, output_file=None, search_ra
         # Create SkyCoord object for the target
         target_coords = SkyCoord(ra=target_ra*u.degree, dec=target_dec*u.degree)
         
-        # First, query Gaia for the target star to get its magnitude
-        target_query = f"""
-        SELECT source_id, ra, dec, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_mag, 
-               phot_g_mean_flux, phot_g_mean_flux_error, parallax
-        FROM gaiadr3.gaia_source
-        WHERE 1=CONTAINS(
-            POINT('ICRS', ra, dec),
-            CIRCLE('ICRS', {target_ra}, {target_dec}, 2/3600))
-        """
-        
-        target_result = Gaia.launch_job_async(target_query)
-        target_data = target_result.get_results()
-        
-        # If not found, use generic values
-        if len(target_data) == 0:
-            print(f"Target {target_sourceid} not found in Gaia, using generic values")
-            target_g_mag = 15.0  # Generic magnitude
-            target_flux = 10**(-0.4 * target_g_mag)
-            target_flux_error = target_flux * 0.01  # Assume 1% error
-            target_variability = 0.001  # Assume low variability
-            gaia_source_id = None
-            target_g_rp = 0.5  # Assuming a typical G-RP color
-        else:
-            # Use the closest match
-            distances = target_coords.separation(SkyCoord(ra=target_data['ra']*u.degree, 
-                                                        dec=target_data['dec']*u.degree))
-            closest_idx = np.argmin(distances)
-            
-            target_g_mag = float(target_data[closest_idx]['phot_g_mean_mag'])
-            target_flux = float(target_data[closest_idx]['phot_g_mean_flux'])
-            target_flux_error = float(target_data[closest_idx]['phot_g_mean_flux_error'])
-            target_variability = target_flux_error / target_flux if target_flux > 0 else 0.01
-            gaia_source_id = int(target_data[closest_idx]['source_id'])
-            
-            # Calculate G-RP color if available (useful for stellar type estimation)
-            if 'phot_rp_mean_mag' in target_data.colnames and not np.isnan(target_data[closest_idx]['phot_rp_mean_mag']):
-                target_g_rp = float(target_data[closest_idx]['phot_g_mean_mag'] - target_data[closest_idx]['phot_rp_mean_mag'])
-            else:
-                target_g_rp = 0.5  # Default value
-        
-        # Next, query Gaia for all stars in the TESS pixel around the target
-        contam_query = f"""
-        SELECT source_id, ra, dec, phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_mag,
-               phot_g_mean_flux, phot_g_mean_flux_error, parallax, pmra, pmdec,
-               phot_variable_flag
+        # Search Gaia for all stars in a TESS pixel radius around the target
+        query = f"""
+        SELECT *
         FROM gaiadr3.gaia_source
         WHERE 1=CONTAINS(
             POINT('ICRS', ra, dec),
             CIRCLE('ICRS', {target_ra}, {target_dec}, {search_radius_arcsec}/3600))
-            AND source_id != {gaia_source_id if gaia_source_id else 0}
         """
         
-        contam_result = Gaia.launch_job_async(contam_query)
-        contam_data = contam_result.get_results()
+        job = Gaia.launch_job_async(query)
+        stars = job.get_results()
         
-        # Count the number of contaminating sources
-        num_contaminants = len(contam_data)
+        # Default target properties if we don't find a match
+        target_g_mag = 15.0
+        target_flux = 10**(-0.4 * target_g_mag)
+        target_flux_error = target_flux * 0.01
+        target_variability = 0.001
+        gaia_source_id = None
+        target_g_rp = 0.5
+        
+        # If we found stars, check if any is our target
+        if len(stars) > 0:
+            # Calculate angular separations from target position
+            star_coords = SkyCoord(ra=stars['ra']*u.degree, dec=stars['dec']*u.degree)
+            separations = target_coords.separation(star_coords)
+            
+            # Find the closest star - if it's within ~2 arcsec, it's likely our target
+            closest_idx = np.argmin(separations.arcsec)
+            
+            if separations[closest_idx].arcsec < 2.0:
+                # This is likely our target
+                target_data = stars[closest_idx]
+                gaia_source_id = int(target_data['source_id'])
+                target_g_mag = float(target_data['phot_g_mean_mag'])
+                target_flux = float(target_data['phot_g_mean_flux'])
+                target_flux_error = float(target_data['phot_g_mean_flux_error'])
+                target_variability = target_flux_error / target_flux
+                
+                # Get color if available
+                if 'phot_rp_mean_mag' in stars.colnames and not np.isnan(target_data['phot_rp_mean_mag']):
+                    target_g_rp = float(target_data['phot_g_mean_mag'] - target_data['phot_rp_mean_mag'])
+        
+        # Find contaminating stars (all stars except the identified target)
+        contaminants = stars
+        if gaia_source_id is not None:
+            contaminants = stars[stars['source_id'] != gaia_source_id]
+        
+        # Count contaminants
+        num_contaminants = len(contaminants)
         
         # Process each contaminant
         contaminant_info = []
@@ -106,71 +105,65 @@ def analyze_tess_contamination_gaia(target_list_csv, output_file=None, search_ra
         total_flux_contamination_ratio = 0.0
         
         for i in range(num_contaminants):
-            contam_row = contam_data[i]
-            contam_sourceid = int(contam_row['source_id'])
-            contam_ra = float(contam_row['ra'])
-            contam_dec = float(contam_row['dec'])
+            contam = contaminants[i]
             
-            # Calculate separation
+            # Get basic properties
+            contam_sourceid = int(contam['source_id'])
+            contam_ra = float(contam['ra'])
+            contam_dec = float(contam['dec'])
+            
+            # Calculate angular separation
             contam_coords = SkyCoord(ra=contam_ra*u.degree, dec=contam_dec*u.degree)
             contam_separation = target_coords.separation(contam_coords).arcsec
             
-            # Get magnitude and flux
-            contam_g_mag = float(contam_row['phot_g_mean_mag'])
-            contam_flux = float(contam_row['phot_g_mean_flux'])
-            contam_flux_error = float(contam_row['phot_g_mean_flux_error'])
+            # Get photometric properties
+            contam_g_mag = float(contam['phot_g_mean_mag'])
+            contam_flux = float(contam['phot_g_mean_flux'])
+            contam_flux_error = float(contam['phot_g_mean_flux_error'])
             
-            # Estimate variability based on flux error and Gaia variability flag
-            contam_var_flag = contam_row['phot_variable_flag']
-            if contam_var_flag == 'VARIABLE':
-                # Higher variability estimate for stars flagged as variable
-                contam_variability = max(0.05, contam_flux_error / contam_flux if contam_flux > 0 else 0.05)
+            # Calculate variability
+            if 'phot_variable_flag' in contam.colnames and contam['phot_variable_flag'] == 'VARIABLE':
+                contam_variability = max(0.05, contam_flux_error / contam_flux)
+                contam_var_flag = 'VARIABLE'
             else:
-                # Base variability on flux error
-                contam_variability = contam_flux_error / contam_flux if contam_flux > 0 else 0.01
+                contam_variability = contam_flux_error / contam_flux
+                contam_var_flag = '-'
             
-            # Calculate flux ratio of contaminant to target
-            flux_ratio = contam_flux / target_flux if target_flux > 0 else 0.0
+            # Calculate flux ratio and distance-weighted contribution
+            flux_ratio = contam_flux / target_flux
             
-            # Calculate the distance-based weighting (PSF approximation)
-            # Assuming PSF follows approximately Gaussian profile
-            # TESS PSF FWHM is approximately 2 pixels or about 42 arcsec
-            psf_sigma = 42.0 / 2.355  # Convert FWHM to sigma
+            # TESS PSF weighting (Gaussian approximation)
+            psf_sigma = 42.0 / 2.355  # TESS PSF FWHM ~42 arcsec
             distance_weight = np.exp(-(contam_separation**2) / (2 * psf_sigma**2))
             
-            # Calculate weighted flux contribution
+            # Calculate contamination metrics
             weighted_flux_ratio = flux_ratio * distance_weight
-            
-            # Calculate noise contribution
-            # Units: relative photometric noise contributed to target (in parts-per-million)
             noise_contribution_ppm = weighted_flux_ratio * contam_variability * 1e6
             
-            # Add to total noise contribution
+            # Add to totals
             total_noise_contribution += noise_contribution_ppm
-            
-            # Add to total flux contamination ratio
             total_flux_contamination_ratio += weighted_flux_ratio
             
-            # Get color information if available
-            if 'phot_rp_mean_mag' in contam_row.colnames and not np.isnan(contam_row['phot_rp_mean_mag']):
-                contam_g_rp = float(contam_row['phot_g_mean_mag'] - contam_row['phot_rp_mean_mag'])
-            else:
-                contam_g_rp = 0.5  # Default value
+            # Get additional properties if available
+            contam_g_rp = 0.5
+            if 'phot_rp_mean_mag' in contam.colnames and not np.isnan(contam['phot_rp_mean_mag']):
+                contam_g_rp = float(contam['phot_g_mean_mag'] - contam['phot_rp_mean_mag'])
             
-            # Get proper motion information if available
-            if 'pmra' in contam_row.colnames and not np.isnan(contam_row['pmra']):
-                pmra = float(contam_row['pmra'])
-                pmdec = float(contam_row['pmdec'])
+            # Get proper motion if available
+            pmra = 0.0
+            pmdec = 0.0
+            pm_total = 0.0
+            
+            if 'pmra' in contam.colnames and not np.isnan(contam['pmra']):
+                pmra = float(contam['pmra'])
+                if 'pmdec' in contam.colnames and not np.isnan(contam['pmdec']):
+                    pmdec = float(contam['pmdec'])
                 pm_total = np.sqrt(pmra**2 + pmdec**2)
-            else:
-                pmra = 0.0
-                pmdec = 0.0
-                pm_total = 0.0
             
-            # Store contaminant information
+            # Store contaminant details
             contaminant_info.append({
                 'contam_sourceid': contam_sourceid,
-                'contam_ra': contam_ra, 
+                'contam_ra': contam_ra,
                 'contam_dec': contam_dec,
                 'separation_arcsec': contam_separation,
                 'contam_g_mag': contam_g_mag,
@@ -187,7 +180,7 @@ def analyze_tess_contamination_gaia(target_list_csv, output_file=None, search_ra
                 'noise_contribution_ppm': noise_contribution_ppm
             })
         
-        # Create a record for this target
+        # Store target results
         result = {
             'target_sourceid': target_sourceid,
             'gaia_source_id': gaia_source_id,
@@ -205,13 +198,10 @@ def analyze_tess_contamination_gaia(target_list_csv, output_file=None, search_ra
         
         results.append(result)
     
-    # Convert results to DataFrame
+    # Convert to DataFrame
     results_df = pd.DataFrame(results)
     
-    # Print summary of the DataFrame
-    print(f"Created DataFrame with {len(results_df)} rows and columns: {results_df.columns.tolist()}")
-    
-    # Save results if output file is specified
+    # Save to file if requested
     if output_file:
         results_df.to_pickle(output_file)
         print(f"Results saved to {output_file}")
@@ -221,12 +211,19 @@ def analyze_tess_contamination_gaia(target_list_csv, output_file=None, search_ra
 def visualize_contamination(results_df, output_folder='contamination_plots'):
     """
     Creates visualization plots for the contamination analysis.
+    
+    Parameters:
+    -----------
+    results_df : DataFrame
+        Results from analyze_tess_contamination function
+    output_folder : str
+        Folder to save visualization plots
     """
     os.makedirs(output_folder, exist_ok=True)
     
     # Plot 1: Histogram of number of contaminants per target
     plt.figure(figsize=(10, 6))
-    plt.hist(results_df['num_contaminants'].dropna(), bins=20)
+    plt.hist(results_df['num_contaminants'], bins=20)
     plt.xlabel('Number of Contaminants')
     plt.ylabel('Frequency')
     plt.title('Distribution of Contaminant Counts per Target')
@@ -236,9 +233,9 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     
     # Plot 2: Histogram of total noise contributions (in ppm)
     plt.figure(figsize=(10, 6))
-    valid_scores = results_df['total_noise_contribution_ppm'].replace(0, np.nan).dropna()
-    if len(valid_scores) > 0:
-        plt.hist(valid_scores, bins=20)
+    valid_noise = results_df['total_noise_contribution_ppm'].replace(0, np.nan).dropna()
+    if len(valid_noise) > 0:
+        plt.hist(valid_noise, bins=20)
         plt.xlabel('Total Noise Contribution (ppm)')
         plt.ylabel('Frequency')
         plt.title('Distribution of Noise Contributions from Contaminating Sources')
@@ -269,8 +266,8 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     if len(valid_data) > 0:
         noise_log = np.log10(valid_data['total_noise_contribution_ppm'])
         sc = plt.scatter(valid_data['target_ra'], valid_data['target_dec'], 
-                        c=noise_log,
-                        cmap='viridis', alpha=0.7, s=30)
+                         c=noise_log,
+                         cmap='viridis', alpha=0.7, s=30)
         cbar = plt.colorbar(sc)
         cbar.set_label('Log10(Noise Contribution in ppm)')
         plt.xlabel('RA (deg)')
@@ -289,15 +286,16 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
             contaminants = target['contaminant_details']
             if not contaminants or len(contaminants) == 0:
                 continue
+                
             contam_df = pd.DataFrame(contaminants)
             if len(contam_df) == 0:
                 continue
-            
+                
             plt.figure(figsize=(10, 8))
             plt.scatter(0, 0, s=300, c='red', marker='*', label='Target')
             
             size_scale = 500 * contam_df['weighted_flux_ratio'] / contam_df['weighted_flux_ratio'].max()
-            size_scale = size_scale.clip(20, 500)
+            size_scale = size_scale.clip(20, 500)  # Limit marker sizes
             
             sc = plt.scatter(
                 (contam_df['contam_ra'] - target['target_ra']) * np.cos(np.radians(target['target_dec'])) * 3600,
@@ -308,7 +306,8 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
                 alpha=0.7
             )
             
-            pixel_size = 21.0
+            # Draw TESS pixel
+            pixel_size = 21.0  # arcsec
             plt.plot([-pixel_size/2, pixel_size/2, pixel_size/2, -pixel_size/2, -pixel_size/2],
                     [-pixel_size/2, -pixel_size/2, pixel_size/2, pixel_size/2, -pixel_size/2],
                     'k--', alpha=0.5, label='TESS pixel')
@@ -321,14 +320,21 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.axis('equal')
-            plt.xlim(-pixel_size * 0.75, pixel_size * 0.75)
-            plt.ylim(-pixel_size * 0.75, pixel_size * 0.75)
+            plt.xlim(-pixel_size * 1.5, pixel_size * 1.5)
+            plt.ylim(-pixel_size * 1.5, pixel_size * 1.5)
             plt.savefig(os.path.join(output_folder, f'target_{target["target_sourceid"]}_contamination.png'), dpi=300)
             plt.close()
 
 def save_contamination_report(results_df, output_file='contamination_report.csv'):
     """
     Saves a detailed report of the contamination analysis.
+    
+    Parameters:
+    -----------
+    results_df : DataFrame
+        Results from analyze_tess_contamination function
+    output_file : str
+        Path to save the report CSV
     """
     # Create a list to store flattened results
     flattened_results = []
@@ -398,9 +404,9 @@ if __name__ == "__main__":
     # Create output directory if it doesn't exist
     os.makedirs(output_fp, exist_ok=True)
     
-    # Run analysis (always using online query)
+    # Run analysis using Gaia data
     print(f"Analyzing TESS contamination for targets in {target_list_csv}...")
-    results = analyze_tess_contamination_gaia(target_list_csv, output_file)
+    results = analyze_tess_contamination(target_list_csv, output_file)
     
     # Create visualizations
     print(f"Creating visualization plots in {plots_folder}...")
