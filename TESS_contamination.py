@@ -90,7 +90,7 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
             contaminants = stars
             if gaia_source_id is not None:
                 # Create mask for all stars except target
-                mask = stars['source_id'] != gaia_source_id
+                mask = stars['SOURCE_ID'] != gaia_source_id
                 contaminants = stars[mask]
         
         # Count contaminants
