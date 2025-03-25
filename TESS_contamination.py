@@ -665,12 +665,6 @@ def visualize_contamination_enhanced(results_df, output_folder='contamination_pl
         plt.grid(True, which='both', alpha=0.3)
         plt.legend(loc='upper left')
         
-        # Add text about interpretation
-        text = (
-            "High contamination (>10%)\n"
-            "can significantly impact\n"
-            "transit depth measurements"
-        )
         plt.text(0.02, 0.98, text, transform=plt.gca().transAxes, fontsize=12,
                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),
                verticalalignment='top')
