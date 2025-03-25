@@ -43,10 +43,22 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         try:
             # Get target light curve data
             target_lc = virac.run_sourceid(target_sourceid)
-            target_mag = np.median(target_lc['hfad_mag'][target_lc['filter'] == 'Ks'])
+            
+            # Get Ks-band measurements
+            target_ks_data = target_lc['hfad_mag'][target_lc['filter'] == 'Ks']
+            
+            # Skip if no Ks-band data
+            if len(target_ks_data) == 0:
+                print(f"Warning: No Ks-band data for target {target_sourceid}")
+                continue
+                
+            target_mag = np.median(target_ks_data)
             
             # Calculate variability for target (using standard deviation of magnitude)
-            target_var = np.std(target_lc['hfad_mag'][target_lc['filter'] == 'Ks'])
+            target_var = np.std(target_ks_data)
+            
+            # Convert target magnitude to flux (arbitrary units)
+            target_flux = 10**(-0.4 * target_mag)
             
             # Find nearby sources that could contaminate
             try:
@@ -74,7 +86,8 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                 
                 # Analyze each contaminant
                 contaminant_info = []
-                total_contamination_score = 0.0
+                total_noise_contribution = 0.0
+                total_flux_contamination_ratio = 0.0
                 
                 for idx in nearby_indices:
                     contam_sourceid = source_ids[idx]
@@ -85,28 +98,43 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                     try:
                         # Get contaminant light curve
                         contam_lc = virac.run_sourceid(int(contam_sourceid))
-                        contam_mag = np.median(contam_lc['hfad_mag'][contam_lc['filter'] == 'Ks'])
-                        contam_var = np.std(contam_lc['hfad_mag'][contam_lc['filter'] == 'Ks'])
                         
-                        # Calculate contamination score based on the criteria:
-                        # a) Brightness: brighter stars have higher impact
-                        # b) Variability: more variable stars have higher impact
-                        # c) Proximity: closer stars have higher impact
+                        # Get Ks-band measurements
+                        contam_ks_data = contam_lc['hfad_mag'][contam_lc['filter'] == 'Ks']
                         
-                        # Brightness impact (use flux ratio, not magnitude)
-                        brightness_impact = 10**((target_mag - contam_mag)/2.5)
+                        # Skip if no Ks-band data
+                        if len(contam_ks_data) == 0:
+                            continue
+                            
+                        contam_mag = np.median(contam_ks_data)
+                        contam_var = np.std(contam_ks_data)
                         
-                        # Variability impact (normalized by target variability)
-                        variability_impact = contam_var / max(target_var, 0.001)
+                        # Convert contaminant magnitude to flux
+                        contam_flux = 10**(-0.4 * contam_mag)
                         
-                        # Proximity impact (inverse of separation, normalized to search radius)
-                        proximity_impact = (search_radius_arcsec - contam_separation) / search_radius_arcsec
+                        # Calculate flux ratio of contaminant to target
+                        flux_ratio = contam_flux / target_flux
                         
-                        # Combined contamination score (product of all factors)
-                        contam_score = brightness_impact * variability_impact * proximity_impact
+                        # Calculate the distance-based weighting (PSF approximation)
+                        # Assuming PSF follows approximately Gaussian profile
+                        # TESS PSF FWHM is approximately 2 pixels or about 42 arcsec
+                        psf_sigma = 42.0 / 2.355  # Convert FWHM to sigma
+                        distance_weight = np.exp(-(contam_separation**2) / (2 * psf_sigma**2))
                         
-                        # Add to total contamination score
-                        total_contamination_score += contam_score
+                        # Calculate weighted flux contribution
+                        weighted_flux_ratio = flux_ratio * distance_weight
+                        
+                        # Calculate noise contribution based on:
+                        # 1. Weighted flux ratio (how much of contaminant's flux affects the target)
+                        # 2. Contaminant's variability (more variable stars contribute more noise)
+                        # Units: relative photometric noise contributed to target (in parts-per-million)
+                        noise_contribution_ppm = weighted_flux_ratio * contam_var * 1e6
+                        
+                        # Add to total noise contribution
+                        total_noise_contribution += noise_contribution_ppm
+                        
+                        # Add to total flux contamination ratio
+                        total_flux_contamination_ratio += weighted_flux_ratio
                         
                         # Store contaminant information
                         contaminant_info.append({
@@ -116,10 +144,11 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                             'separation_arcsec': contam_separation,
                             'contam_mag': contam_mag,
                             'contam_variability': contam_var,
-                            'brightness_impact': brightness_impact,
-                            'variability_impact': variability_impact,
-                            'proximity_impact': proximity_impact,
-                            'contamination_score': contam_score
+                            'contam_flux': contam_flux,
+                            'flux_ratio': flux_ratio,
+                            'distance_weight': distance_weight,
+                            'weighted_flux_ratio': weighted_flux_ratio,
+                            'noise_contribution_ppm': noise_contribution_ppm
                         })
                     except Exception as e:
                         print(f"Error processing contaminant {contam_sourceid}: {e}")
@@ -130,9 +159,11 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                     'target_ra': target_ra,
                     'target_dec': target_dec,
                     'target_mag': target_mag,
+                    'target_flux': target_flux,
                     'target_variability': target_var,
                     'num_contaminants': num_contaminants,
-                    'total_contamination_score': total_contamination_score,
+                    'total_noise_contribution_ppm': total_noise_contribution,
+                    'total_flux_contamination_ratio': total_flux_contamination_ratio,
                     'contaminant_details': contaminant_info
                 }
                 
@@ -145,14 +176,17 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                     'target_ra': target_ra,
                     'target_dec': target_dec,
                     'target_mag': target_mag,
+                    'target_flux': target_flux,
                     'target_variability': target_var,
                     'num_contaminants': 0,
-                    'total_contamination_score': 0.0,
+                    'total_noise_contribution_ppm': 0.0,
+                    'total_flux_contamination_ratio': 0.0,
                     'contaminant_details': []
                 })
                 
         except Exception as e:
             print(f"Error processing target {target_sourceid}: {e}")
+            continue
     
     # Convert results to DataFrame for easier analysis
     results_df = pd.DataFrame([{
@@ -160,9 +194,11 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         'target_ra': r['target_ra'], 
         'target_dec': r['target_dec'],
         'target_mag': r.get('target_mag', np.nan),
+        'target_flux': r.get('target_flux', np.nan),
         'target_variability': r.get('target_variability', np.nan),
         'num_contaminants': r['num_contaminants'],
-        'total_contamination_score': r['total_contamination_score'],
+        'total_noise_contribution_ppm': r.get('total_noise_contribution_ppm', 0.0),
+        'total_flux_contamination_ratio': r.get('total_flux_contamination_ratio', 0.0),
         'contaminant_details': r['contaminant_details']
     } for r in results])
     
@@ -188,95 +224,153 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     
     # Plot 1: Histogram of number of contaminants per target
     plt.figure(figsize=(10, 6))
-    plt.hist(results_df['num_contaminants'], bins=20)
+    plt.hist(results_df['num_contaminants'].dropna(), bins=20)
     plt.xlabel('Number of Contaminants')
     plt.ylabel('Frequency')
     plt.title('Distribution of Contaminant Counts per Target')
     plt.savefig(os.path.join(output_folder, 'contaminant_counts.png'))
     plt.close()
     
-    # Plot 2: Histogram of total contamination scores
+    # Plot 2: Histogram of total noise contributions (in ppm)
     plt.figure(figsize=(10, 6))
-    # Use log scale for better visualization of wide range of values
-    log_scores = np.log10(results_df['total_contamination_score'] + 1e-10)
-    plt.hist(log_scores, bins=20)
-    plt.xlabel('Log10(Total Contamination Score)')
-    plt.ylabel('Frequency')
-    plt.title('Distribution of Total Contamination Scores (Log Scale)')
-    plt.savefig(os.path.join(output_folder, 'contamination_scores.png'))
+    # Filter out zeros and NaN values
+    valid_scores = results_df['total_noise_contribution_ppm'].replace(0, np.nan).dropna()
+    if len(valid_scores) > 0:
+        plt.hist(valid_scores, bins=20)
+        plt.xlabel('Total Noise Contribution (ppm)')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of Noise Contributions from Contaminating Sources')
+        plt.savefig(os.path.join(output_folder, 'noise_contributions.png'))
+    else:
+        print("Warning: No valid noise contribution values to plot")
     plt.close()
     
-    # Plot 3: Scatter plot of contamination score vs. target magnitude
+    # Plot 3: Histogram of total noise contributions (log scale)
     plt.figure(figsize=(10, 6))
-    plt.scatter(results_df['target_mag'], 
-                np.log10(results_df['total_contamination_score'] + 1e-10),
-                alpha=0.6)
-    plt.xlabel('Target Magnitude (Ks)')
-    plt.ylabel('Log10(Total Contamination Score)')
-    plt.title('Contamination Score vs. Target Magnitude')
-    plt.savefig(os.path.join(output_folder, 'score_vs_magnitude.png'))
+    if len(valid_scores) > 0:
+        log_scores = np.log10(valid_scores)
+        plt.hist(log_scores, bins=20)
+        plt.xlabel('Log10(Noise Contribution in ppm)')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of Noise Contributions (Log Scale)')
+        plt.savefig(os.path.join(output_folder, 'noise_contributions_log.png'))
     plt.close()
     
-    # Plot 4: Spatial distribution of targets colored by contamination
+    # Plot 4: Scatter plot of noise contribution vs. target magnitude
+    plt.figure(figsize=(10, 6))
+    valid_data = results_df.dropna(subset=['target_mag', 'total_noise_contribution_ppm'])
+    if len(valid_data) > 0:
+        plt.scatter(valid_data['target_mag'], 
+                    valid_data['total_noise_contribution_ppm'],
+                    alpha=0.6)
+        plt.xlabel('Target Magnitude (Ks)')
+        plt.ylabel('Noise Contribution (ppm)')
+        plt.title('Contamination Noise vs. Target Magnitude')
+        plt.yscale('log')
+        plt.grid(True, which="both", ls="-", alpha=0.2)
+    else:
+        plt.text(0.5, 0.5, 'No valid data points to plot', 
+                 horizontalalignment='center', verticalalignment='center')
+    plt.savefig(os.path.join(output_folder, 'noise_vs_magnitude.png'))
+    plt.close()
+    
+    # Plot 5: Spatial distribution of targets colored by noise contribution
     plt.figure(figsize=(12, 10))
-    sc = plt.scatter(results_df['target_ra'], results_df['target_dec'], 
-                     c=np.log10(results_df['total_contamination_score'] + 1e-10),
-                     cmap='viridis', alpha=0.7)
-    plt.colorbar(sc, label='Log10(Contamination Score)')
-    plt.xlabel('RA (deg)')
-    plt.ylabel('Dec (deg)')
-    plt.title('Spatial Distribution of Targets Colored by Contamination Score')
-    plt.grid(True, alpha=0.3)
-    plt.savefig(os.path.join(output_folder, 'spatial_contamination.png'))
+    valid_data = results_df.dropna(subset=['target_ra', 'target_dec', 'total_noise_contribution_ppm'])
+    if len(valid_data) > 0:
+        # Use log scale for coloring since noise contributions can vary by orders of magnitude
+        noise_log = np.log10(valid_data['total_noise_contribution_ppm'].replace(0, 1e-1))
+        sc = plt.scatter(valid_data['target_ra'], valid_data['target_dec'], 
+                         c=noise_log,
+                         cmap='viridis', alpha=0.7)
+        cbar = plt.colorbar(sc)
+        cbar.set_label('Log10(Noise Contribution in ppm)')
+        plt.xlabel('RA (deg)')
+        plt.ylabel('Dec (deg)')
+        plt.title('Spatial Distribution of Targets Colored by Contamination Noise')
+        plt.grid(True, alpha=0.3)
+    else:
+        plt.text(0.5, 0.5, 'No valid data points to plot', 
+                 horizontalalignment='center', verticalalignment='center')
+    plt.savefig(os.path.join(output_folder, 'spatial_noise_contribution.png'))
     plt.close()
     
-    # Plot 5: Create detailed plots for top 10 most contaminated targets
-    top_targets = results_df.sort_values('total_contamination_score', ascending=False).head(10)
-    
-    for i, (_, target) in enumerate(top_targets.iterrows()):
-        contaminants = target['contaminant_details']
-        if not contaminants:
-            continue
+    # Plot 6: Create detailed plots for top 10 most contaminated targets
+    valid_targets = results_df.dropna(subset=['total_noise_contribution_ppm'])
+    if len(valid_targets) > 0:
+        top_targets = valid_targets.sort_values('total_noise_contribution_ppm', ascending=False).head(10)
+        
+        for i, (_, target) in enumerate(top_targets.iterrows()):
+            contaminants = target['contaminant_details']
+            if not contaminants or len(contaminants) == 0:
+                continue
+                
+            # Create DataFrame from contaminant details
+            contam_df = pd.DataFrame(contaminants)
+            if len(contam_df) == 0:
+                continue
+                
+            # Create a plot showing the target and its contaminants
+            plt.figure(figsize=(10, 8))
             
-        # Create DataFrame from contaminant details
-        contam_df = pd.DataFrame(contaminants)
-        
-        # Create a plot showing the target and its contaminants
-        plt.figure(figsize=(10, 8))
-        
-        # Plot target
-        plt.scatter(0, 0, s=300, c='red', marker='*', label='Target')
-        
-        # Plot contaminants
-        sc = plt.scatter(
-            (contam_df['contam_ra'] - target['target_ra']) * np.cos(np.radians(target['target_dec'])) * 3600,
-            (contam_df['contam_dec'] - target['target_dec']) * 3600,
-            s=100 * contam_df['brightness_impact'] / max(contam_df['brightness_impact'].max(), 1),
-            c=contam_df['variability_impact'],
-            cmap='plasma',
-            alpha=0.7
-        )
-        
-        # Draw TESS pixel
-        pixel_size = 21.0  # arcsec
-        plt.plot([-pixel_size/2, pixel_size/2, pixel_size/2, -pixel_size/2, -pixel_size/2],
-                [-pixel_size/2, -pixel_size/2, pixel_size/2, pixel_size/2, -pixel_size/2],
-                'k--', alpha=0.5, label='TESS pixel')
-        
-        plt.colorbar(sc, label='Variability Impact')
-        plt.xlabel('ΔRA (arcsec)')
-        plt.ylabel('ΔDec (arcsec)')
-        plt.title(f'Target {target["target_sourceid"]} with Contamination Score: {target["total_contamination_score"]:.2f}')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.axis('equal')
-        
-        # Set limits slightly larger than TESS pixel
-        plt.xlim(-pixel_size * 0.75, pixel_size * 0.75)
-        plt.ylim(-pixel_size * 0.75, pixel_size * 0.75)
-        
-        plt.savefig(os.path.join(output_folder, f'target_{target["target_sourceid"]}_contamination.png'))
-        plt.close()
+            # Plot target
+            plt.scatter(0, 0, s=300, c='red', marker='*', label='Target')
+            
+            # Plot contaminants
+            try:
+                # Size of points proportional to weighted flux ratio
+                size_scale = 500 * contam_df['weighted_flux_ratio'] / contam_df['weighted_flux_ratio'].max()
+                
+                # Color based on noise contribution
+                sc = plt.scatter(
+                    (contam_df['contam_ra'] - target['target_ra']) * np.cos(np.radians(target['target_dec'])) * 3600,
+                    (contam_df['contam_dec'] - target['target_dec']) * 3600,
+                    s=size_scale,
+                    c=contam_df['noise_contribution_ppm'],
+                    cmap='plasma',
+                    alpha=0.7,
+                    norm=plt.Normalize(vmin=0, vmax=contam_df['noise_contribution_ppm'].max())
+                )
+                
+                # Draw TESS pixel
+                pixel_size = 21.0  # arcsec
+                plt.plot([-pixel_size/2, pixel_size/2, pixel_size/2, -pixel_size/2, -pixel_size/2],
+                        [-pixel_size/2, -pixel_size/2, pixel_size/2, pixel_size/2, -pixel_size/2],
+                        'k--', alpha=0.5, label='TESS pixel')
+                
+                cbar = plt.colorbar(sc)
+                cbar.set_label('Noise Contribution (ppm)')
+                plt.xlabel('ΔRA (arcsec)')
+                plt.ylabel('ΔDec (arcsec)')
+                plt.title(f'Target {target["target_sourceid"]} - Total Noise: {target["total_noise_contribution_ppm"]:.1f} ppm')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.axis('equal')
+                
+                # Set limits slightly larger than TESS pixel
+                plt.xlim(-pixel_size * 0.75, pixel_size * 0.75)
+                plt.ylim(-pixel_size * 0.75, pixel_size * 0.75)
+                
+                plt.savefig(os.path.join(output_folder, f'target_{target["target_sourceid"]}_contamination.png'))
+            except Exception as e:
+                print(f"Error creating detailed plot for target {target['target_sourceid']}: {e}")
+            plt.close()
+    
+    # Plot 7: Noise contribution vs. flux contamination ratio
+    plt.figure(figsize=(10, 6))
+    valid_data = results_df.dropna(subset=['total_noise_contribution_ppm', 'total_flux_contamination_ratio'])
+    if len(valid_data) > 0:
+        plt.scatter(valid_data['total_flux_contamination_ratio'] * 100, 
+                    valid_data['total_noise_contribution_ppm'],
+                    alpha=0.6)
+        plt.xlabel('Total Flux Contamination (%)')
+        plt.ylabel('Noise Contribution (ppm)')
+        plt.title('Relationship Between Flux Contamination and Noise Contribution')
+        plt.yscale('log')
+        plt.xscale('log')
+        plt.grid(True, which="both", ls="-", alpha=0.2)
+    plt.savefig(os.path.join(output_folder, 'noise_vs_flux_contamination.png'))
+    plt.close()
 
 def save_contamination_report(results_df, output_file='contamination_report.csv'):
     """
@@ -301,27 +395,29 @@ def save_contamination_report(results_df, output_file='contamination_report.csv'
             'target_mag': target['target_mag'],
             'target_variability': target['target_variability'],
             'num_contaminants': target['num_contaminants'],
-            'total_contamination_score': target['total_contamination_score']
+            'total_noise_contribution_ppm': target['total_noise_contribution_ppm'],
+            'total_flux_contamination_ratio': target['total_flux_contamination_ratio']
         }
         
         # If there are no contaminants, add a single row
-        if target['num_contaminants'] == 0:
+        if target['num_contaminants'] == 0 or not isinstance(target['contaminant_details'], list):
             flattened_results.append(target_data)
         else:
             # Add a row for each contaminant
             for contam in target['contaminant_details']:
                 row = target_data.copy()
                 row.update({
-                    'contam_sourceid': contam['contam_sourceid'],
-                    'contam_ra': contam['contam_ra'],
-                    'contam_dec': contam['contam_dec'],
-                    'separation_arcsec': contam['separation_arcsec'],
-                    'contam_mag': contam['contam_mag'],
-                    'contam_variability': contam['contam_variability'],
-                    'brightness_impact': contam['brightness_impact'],
-                    'variability_impact': contam['variability_impact'],
-                    'proximity_impact': contam['proximity_impact'],
-                    'contamination_score': contam['contamination_score']
+                    'contam_sourceid': contam.get('contam_sourceid', np.nan),
+                    'contam_ra': contam.get('contam_ra', np.nan),
+                    'contam_dec': contam.get('contam_dec', np.nan),
+                    'separation_arcsec': contam.get('separation_arcsec', np.nan),
+                    'contam_mag': contam.get('contam_mag', np.nan),
+                    'contam_variability': contam.get('contam_variability', np.nan),
+                    'contam_flux': contam.get('contam_flux', np.nan),
+                    'flux_ratio': contam.get('flux_ratio', np.nan),
+                    'distance_weight': contam.get('distance_weight', np.nan),
+                    'weighted_flux_ratio': contam.get('weighted_flux_ratio', np.nan),
+                    'noise_contribution_ppm': contam.get('noise_contribution_ppm', np.nan)
                 })
                 flattened_results.append(row)
     
