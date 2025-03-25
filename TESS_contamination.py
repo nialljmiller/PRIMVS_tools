@@ -33,9 +33,14 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
     
     # Process each target
     for idx, row in tqdm(target_list.iterrows(), total=len(target_list)):
-        target_sourceid = int(row['sourceid'])
-        target_ra = float(row['ra'])
-        target_dec = float(row['dec'])
+        # Extract target info, handling potential data type issues
+        try:
+            target_sourceid = int(row['sourceid'])
+            target_ra = float(row['ra'])
+            target_dec = float(row['dec'])
+        except (ValueError, TypeError) as e:
+            print(f"Error extracting basic data for target at index {idx}: {e}")
+            continue
         
         # Create SkyCoord object for the target
         target_coords = SkyCoord(ra=target_ra*u.degree, dec=target_dec*u.degree)
@@ -47,9 +52,21 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
             # Get Ks-band measurements
             target_ks_data = target_lc['hfad_mag'][target_lc['filter'] == 'Ks']
             
-            # Skip if no Ks-band data
+            # Handle case with no Ks-band data
             if len(target_ks_data) == 0:
                 print(f"Warning: No Ks-band data for target {target_sourceid}")
+                results.append({
+                    'target_sourceid': target_sourceid,
+                    'target_ra': target_ra,
+                    'target_dec': target_dec,
+                    'target_mag': np.nan,
+                    'target_flux': np.nan,
+                    'target_variability': np.nan,
+                    'num_contaminants': 0,
+                    'total_noise_contribution_ppm': 0.0,
+                    'total_flux_contamination_ratio': 0.0,
+                    'contaminant_details': []
+                })
                 continue
                 
             target_mag = np.median(target_ks_data)
@@ -186,21 +203,51 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                 
         except Exception as e:
             print(f"Error processing target {target_sourceid}: {e}")
+            results.append({
+                'target_sourceid': target_sourceid,
+                'target_ra': target_ra,
+                'target_dec': target_dec,
+                'target_mag': np.nan,
+                'target_flux': np.nan,
+                'target_variability': np.nan,
+                'num_contaminants': 0,
+                'total_noise_contribution_ppm': 0.0,
+                'total_flux_contamination_ratio': 0.0,
+                'contaminant_details': []
+            })
             continue
     
     # Convert results to DataFrame for easier analysis
-    results_df = pd.DataFrame([{
-        'target_sourceid': r['target_sourceid'],
-        'target_ra': r['target_ra'], 
-        'target_dec': r['target_dec'],
-        'target_mag': r.get('target_mag', np.nan),
-        'target_flux': r.get('target_flux', np.nan),
-        'target_variability': r.get('target_variability', np.nan),
-        'num_contaminants': r['num_contaminants'],
-        'total_noise_contribution_ppm': r.get('total_noise_contribution_ppm', 0.0),
-        'total_flux_contamination_ratio': r.get('total_flux_contamination_ratio', 0.0),
-        'contaminant_details': r['contaminant_details']
-    } for r in results])
+    if not results:
+        print("Warning: No results to convert to DataFrame")
+        return pd.DataFrame()
+        
+    # Create a list of dictionaries with all required fields
+    processed_results = []
+    for r in results:
+        try:
+            processed_results.append({
+                'target_sourceid': r['target_sourceid'],
+                'target_ra': r['target_ra'], 
+                'target_dec': r['target_dec'],
+                'target_mag': r.get('target_mag', np.nan),
+                'target_flux': r.get('target_flux', np.nan),
+                'target_variability': r.get('target_variability', np.nan),
+                'num_contaminants': r.get('num_contaminants', 0),
+                'total_noise_contribution_ppm': r.get('total_noise_contribution_ppm', 0.0),
+                'total_flux_contamination_ratio': r.get('total_flux_contamination_ratio', 0.0),
+                'contaminant_details': r.get('contaminant_details', [])
+            })
+        except KeyError as e:
+            print(f"Warning: Missing key in result dict: {e}")
+            # Skip this result if it's missing required keys
+            
+    results_df = pd.DataFrame(processed_results)
+    
+    # Print summary of the DataFrame
+    print(f"Created DataFrame with {len(results_df)} rows and columns: {results_df.columns.tolist()}")
+    print(f"Data types: {results_df.dtypes}")
+    print(f"Number of non-null values in each column:\n{results_df.count()}")
     
     # Save results if output file is specified
     if output_file:
@@ -220,6 +267,20 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     output_folder : str
         Folder to save visualization plots
     """
+    # Check if DataFrame is empty
+    if results_df.empty:
+        print("Warning: No data to visualize. Results DataFrame is empty.")
+        return
+        
+    # Check for required columns
+    required_columns = ['num_contaminants', 'total_noise_contribution_ppm', 'target_mag', 
+                       'target_ra', 'target_dec', 'total_flux_contamination_ratio']
+    missing_columns = [col for col in required_columns if col not in results_df.columns]
+    
+    if missing_columns:
+        print(f"Warning: Missing required columns: {missing_columns}")
+        print(f"Available columns: {results_df.columns.tolist()}")
+        return
     os.makedirs(output_folder, exist_ok=True)
     
     # Plot 1: Histogram of number of contaminants per target
