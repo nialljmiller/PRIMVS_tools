@@ -492,35 +492,104 @@ class PrimvsTessCrossMatch:
 
         print("Generating Bailey diagram in hours with CV period gap...")
 
-        plt.figure(figsize=(10,8))
+        #------------------
+        # Style & Settings
+        #------------------
+        # You can tweak these to match your publication's style guidelines
+        plt.rcParams.update({
+            'figure.figsize': (10, 8),
+            'font.size': 14,
+            'axes.linewidth': 1.2,
+            'axes.labelsize': 16,
+            'xtick.labelsize': 14,
+            'ytick.labelsize': 14,
+            'xtick.direction': 'in',
+            'ytick.direction': 'in',
+            'xtick.major.size': 8,
+            'xtick.minor.size': 4,
+            'ytick.major.size': 8,
+            'ytick.minor.size': 4,
+            'legend.fontsize': 14
+        })
 
+        #------------------
+        # Data Prep
+        #------------------
         # Convert periods from days to hours
         all_period_hours = all_candidates['true_period'] * 24
         known_period_hours = known_candidates['true_period'] * 24
         target_period_hours = targets['true_period'] * 24
-
-        # Hexbin for overall candidates (using hours now)
-        plt.scatter(all_period_hours, all_candidates['true_amplitude'],color = 'grey', alpha=0.4)
         
-        # Scatter plots for known CVs and target list
-        plt.scatter(known_period_hours, known_candidates['true_amplitude'], 
-                    label='Known CVs', color='red', marker='*', s=80)
-        plt.scatter(target_period_hours, targets['true_amplitude'], 
-                    label='Target List', color='blue', marker='+', s=30)
+        all_amp = all_candidates['true_amplitude']
+        known_amp = known_candidates['true_amplitude']
+        target_amp = targets['true_amplitude']
+
+        # Determine plot ranges from the known CVs, with a little buffer
+        # so everything looks neat.
+        x_min = 0.8 * np.min(known_period_hours)
+        x_max = 1.2 * np.max(known_period_hours)
+        y_min = 0.8 * np.min(known_amp)
+        y_max = 1.2 * np.max(known_amp)
+
+        #------------------
+        # Create Figure
+        #------------------
+        fig, ax = plt.subplots()
+
+        # 2D histogram to show density of all candidates (grey)
+        # Increase bins for a smoother look. Apply LogNorm if you want to highlight density.
+        h = ax.hist2d(
+            all_period_hours, all_amp, 
+            bins=[200, 200],
+            range=[[x_min, x_max], [y_min, y_max]],
+            cmap='Greys',
+            norm=matplotlib.colors.LogNorm(),
+            alpha=1.0
+        )
+        
+        # Optionally remove colorbar for an even cleaner look,
+        # but if you want it, uncomment:
+        # cb = plt.colorbar(h[3], ax=ax)
+        # cb.set_label('Number of Objects')
+
+        # Scatter the known CVs and targets on top
+        ax.scatter(known_period_hours, known_amp,
+                   label='Known CVs', color='red', marker='*', s=100, edgecolor='k', linewidth=0.5)
+        ax.scatter(target_period_hours, target_amp,
+                   label='Target List', color='blue', marker='+', s=100, linewidth=1.5)
 
         # Highlight the CV period gap (roughly 2-3 hours)
-        plt.axvspan(2, 3, color='orange', alpha=0.3, label='CV Period Gap')
-        plt.xscale('log')
-        # Labels and title
-        plt.xlabel('True Period (hours)')
-        plt.ylabel('True Amplitude (mag)')
-        plt.title('Bailey Diagram: Period vs Amplitude (Hours)')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
+        ax.axvspan(2, 3, color='orange', alpha=0.3, label='CV Period Gap')
+
+        # Set log scale on the period axis
+        ax.set_xscale('log')
+        
+        # Set axis limits
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+
+        # Axis labels
+        ax.set_xlabel('True Period (hours)')
+        ax.set_ylabel('True Amplitude (ks)')  # Change to (mag) if needed
+
+        # Make sure we have minor ticks
+        ax.minorticks_on()
+        ax.grid(True, alpha=0.3)
+
+        # Legend
+        ax.legend(loc='best')
+
+        # Tight layout for neatness
+        fig.tight_layout()
 
         # Save the plot
-        plt.savefig(os.path.join(plots_dir, "bailey_diagram_hours.png"), dpi=300)
+        outname = os.path.join(plots_dir, "bailey_diagram_hours.png")
+        plt.savefig(outname, dpi=300)
         plt.close()
+
+        print(f"Plot saved to {outname}")
+
+
 
 
 
