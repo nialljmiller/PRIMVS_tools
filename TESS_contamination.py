@@ -35,9 +35,7 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         
         # Filter for Ks-band measurements
         ks_mask = target_lc['filter'] == 'Ks'
-        if np.sum(ks_mask) == 0:
-            raise ValueError("No Ks-band measurements for this target")
-            
+
         target_mag = np.median(target_lc['hfad_mag'][ks_mask])
         
         # Calculate variability for target (using standard deviation of magnitude)
