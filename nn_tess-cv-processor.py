@@ -350,86 +350,6 @@ def create_nn_fap_sliding_window_periodogram(time, flux, periods, knn, model, wi
     return avg_power
 
 
-def find_orbital_period(time, flux, error):
-    """
-    Find orbital period using multiple NN_FAP periodogram methods.
-    
-    Parameters:
-    -----------
-    time : array
-        Time array (days)
-    flux : array
-        Flux array (normalized)
-    error : array
-        Error array
-    min_period : float
-        Minimum period to search (days)
-    max_period : float
-        Maximum period to search (days)
-    n_periods : int
-        Number of periods to test
-        
-    Returns:
-    --------
-    tuple
-        - Best period from method 1 (days)
-        - Period uncertainty (days)
-        - Periods array
-        - Chunk method power array
-        - Sliding window method power array
-        - Subtraction method power array
-    """
-    # Load the NN_FAP model
-    knn, model = NN_FAP.get_model(model_path='/home/njm/Period/NN_FAP/final_12l_dp_all/')
-    
-    # Create a period grid to search
-    long_periods = np.linspace(0.1, 10, 100)
-    short_periods = np.linspace(0.001, 1, 100)
-    # Method 1: Chunk periodogram
-    chunk_power = create_nn_fap_chunk_periodogram(time, flux, long_periods, knn, model)
-    # Interpolate the chunk power onto the short_periods grid (our common grid)
-    chunk_power = np.interp(short_periods, long_periods, chunk_power)
-    
-    # Create a period grid to search
-    # Method 2: Sliding window periodogram
-    sliding_power = create_nn_fap_sliding_window_periodogram(time, flux, short_periods, knn, model)
-    
-    # Method 3 (2b): Subtraction method to enhance short periods
-    # Clip negative values to zero after subtraction
-    subtraction_power = np.clip(sliding_power - chunk_power, 0, None)
-    
-    # Find the best period from each method
-    chunk_best_idx = np.argmax(chunk_power)
-    sliding_best_idx = np.argmax(sliding_power)
-    subtraction_best_idx = np.argmax(subtraction_power)
-    
-    chunk_best_period = periods[chunk_best_idx]
-    sliding_best_period = periods[sliding_best_idx]
-    subtraction_best_period = periods[subtraction_best_idx]
-    
-    print(f"Method 1 (Chunk): Best period = {chunk_best_period*24:.6f} hours")
-    print(f"Method 2 (Sliding): Best period = {sliding_best_period*24:.6f} hours")
-    print(f"Method 3 (Subtraction): Best period = {subtraction_best_period*24:.6f} hours")
-    
-    # Use the best period from the chunk method (Method 1) as the default
-    best_period = subtraction_best_period
-    best_idx = subtraction_best_idx
-    
-    # Estimate uncertainty based on the width of the peak
-    try:
-        # Find indices where power is greater than half the max power
-        high_power_idx = np.where(chunk_power > 0.5 * chunk_power[best_idx])[0]
-        if len(high_power_idx) > 1:
-            # Use the width of the peak as the uncertainty
-            period_uncertainty = 0.5 * (periods[high_power_idx[-1]] - periods[high_power_idx[0]])
-        else:
-            # If we can't determine the width, use 1% of the period as a default
-            period_uncertainty = 0.01 * best_period
-    except:
-        period_uncertainty = 0.01 * best_period
-    
-    return best_period, period_uncertainty, periods, chunk_power, sliding_power, subtraction_power
-
 
 
 def find_orbital_period(time, flux, error):
@@ -488,8 +408,8 @@ def find_orbital_period(time, flux, error):
     print(f"Method 3 (Subtraction): Best period = {subtraction_best_period*24:.6f} hours")
     
     # Use the best period from the chunk method (Method 1) as the default
-    best_period = chunk_best_period
-    best_idx = chunk_best_idx
+    best_period = subtraction_best_period
+    best_idx = subtraction_best_idx
     
     # Estimate uncertainty based on the width of the peak
     try:
@@ -505,6 +425,8 @@ def find_orbital_period(time, flux, error):
         period_uncertainty = 0.01 * best_period
     
     return best_period, period_uncertainty, short_periods, chunk_power, sliding_power, subtraction_power
+
+
 
 def phase_fold_lightcurve(time, flux, error, period):
     """
@@ -537,6 +459,8 @@ def phase_fold_lightcurve(time, flux, error, period):
     error = error[sort_idx]
     
     return phase, flux, error
+
+
 
 
 def bin_phased_lightcurve(phase, flux, error, bins=100):
@@ -578,6 +502,8 @@ def bin_phased_lightcurve(phase, flux, error, bins=100):
             binned_error[i] = np.nan
     
     return bin_centers, binned_flux, binned_error
+
+
 
 
 def analyze_cv_target(tic_id, common_name, cv_type, output_dir, cycles):
@@ -669,6 +595,8 @@ def analyze_cv_target(tic_id, common_name, cv_type, output_dir, cycles):
     create_summary_plots(common_name, cv_type, analysis_result, target_dir)
     
     return analysis_result
+
+
 
 
 def create_summary_plots(star_name, cv_type, result, output_dir):

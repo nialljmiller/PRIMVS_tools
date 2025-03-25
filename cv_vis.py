@@ -191,36 +191,19 @@ class PrimvsTessCrossMatch:
         self.target_list = None  # final 100 targets
     
     def load_cv_candidates(self):
-        try:
-            if self.cv_candidates_file.endswith('.fits'):
-                candidates = Table.read(self.cv_candidates_file).to_pandas()
-            elif self.cv_candidates_file.endswith('.csv'):
-                candidates = pd.read_csv(self.cv_candidates_file)
-            else:
-                raise ValueError(f"Unsupported file format: {self.cv_candidates_file}")
-            
-
+            candidates = Table.read(self.cv_candidates_file).to_pandas()
             # Convert negative galactic longitudes to the 0-360 range.
             l_vals = candidates['l'].values
             l_vals[l_vals > 180] -= 360
             candidates['l'] = l_vals
 
-
-
             self.cv_candidates = candidates
             print(f"Loaded {len(candidates)} total CV candidates")
-            
+
             self.filtered_candidates = candidates[candidates['cv_prob'] >= self.cv_prob_threshold].copy()
             print(f"Filtered to {len(self.filtered_candidates)} candidates with cv_prob >= {self.cv_prob_threshold}")
 
-            
-            #filtered_path = os.path.join(self.output_dir, 'filtered_candidates.csv')
-            #self.filtered_candidates.to_csv(filtered_path, index=False)
-            #print(f"Saved filtered candidates to: {filtered_path}")
             return True
-        except Exception as e:
-            print(f"Error loading CV candidates: {e}")
-            return False
     
 
 
