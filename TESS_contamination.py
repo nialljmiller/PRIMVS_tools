@@ -76,8 +76,7 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
             if separations[closest_idx].arcsec < 2.0:
                 # Set target properties from closest match
                 closest_star = stars[closest_idx]
-                print(closest_star)
-                gaia_source_id = int(closest_star['source_id'])
+                gaia_source_id = int(closest_star['SOURCE_ID'])
                 target_g_mag = float(closest_star['phot_g_mean_mag'])
                 target_flux = float(closest_star['phot_g_mean_flux'])
                 target_flux_error = float(closest_star['phot_g_mean_flux_error'])
