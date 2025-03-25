@@ -25,6 +25,8 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
     DataFrame containing contamination analysis results
     """
     # Load the target list CSV
+
+    # Load the target list CSV
     target_list = pd.read_csv(target_list_csv)
     print(f"Loaded {len(target_list)} targets from {target_list_csv}")
     
@@ -33,14 +35,9 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
     
     # Process each target
     for idx, row in tqdm(target_list.iterrows(), total=len(target_list)):
-        # Extract target info, handling potential data type issues
-        try:
-            target_sourceid = int(row['sourceid'])
-            target_ra = float(row['ra'])
-            target_dec = float(row['dec'])
-        except (ValueError, TypeError) as e:
-            print(f"Error extracting basic data for target at index {idx}: {e}")
-            continue
+        target_sourceid = int(row['sourceid'])
+        target_ra = float(row['ra'])
+        target_dec = float(row['dec'])
         
         # Create SkyCoord object for the target
         target_coords = SkyCoord(ra=target_ra*u.degree, dec=target_dec*u.degree)
@@ -48,31 +45,10 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         try:
             # Get target light curve data
             target_lc = virac.run_sourceid(target_sourceid)
-            
-            # Get Ks-band measurements
-            target_ks_data = target_lc['hfad_mag'][target_lc['filter'] == 'Ks']
-            
-            # Handle case with no Ks-band data
-            if len(target_ks_data) == 0:
-                print(f"Warning: No Ks-band data for target {target_sourceid}")
-                results.append({
-                    'target_sourceid': target_sourceid,
-                    'target_ra': target_ra,
-                    'target_dec': target_dec,
-                    'target_mag': np.nan,
-                    'target_flux': np.nan,
-                    'target_variability': np.nan,
-                    'num_contaminants': 0,
-                    'total_noise_contribution_ppm': 0.0,
-                    'total_flux_contamination_ratio': 0.0,
-                    'contaminant_details': []
-                })
-                continue
-                
-            target_mag = np.median(target_ks_data)
+            target_mag = np.median(target_lc['hfad_mag'][target_lc['filter'] == 'Ks'])
             
             # Calculate variability for target (using standard deviation of magnitude)
-            target_var = np.std(target_ks_data)
+            target_var = np.std(target_lc['hfad_mag'][target_lc['filter'] == 'Ks'])
             
             # Convert target magnitude to flux (arbitrary units)
             target_flux = 10**(-0.4 * target_mag)
