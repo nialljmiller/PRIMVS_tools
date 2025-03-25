@@ -1005,6 +1005,8 @@ class PrimvsTessCrossMatch:
         print("="*80 + "\n")
         self.load_cv_candidates()
         #self.perform_crossmatch()
+        print(f"Loaded candidates")        
+
         self.crossmatch_results = pd.read_csv(crossmatch_path)
         print(f"Reloaded crossmatch results from: {crossmatch_path}")        
         # Populate tess_sectors using the TESSCycle8Overlay geometry
