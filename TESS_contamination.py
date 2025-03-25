@@ -86,7 +86,7 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                     print(f"Failed to get contaminant using coordinates: {contam_coord_error}")
                     # Fall back to sourceid
                     contam_lc = virac.run_sourceid(int(contam_sourceid))
-                print(contam_lc)
+
                 # Get Ks-band measurements
                 contam_ks_mask = contam_lc['filter'] == 'Ks'
                 if np.sum(contam_ks_mask) == 0:
