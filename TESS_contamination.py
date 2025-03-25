@@ -663,12 +663,7 @@ def visualize_contamination_enhanced(results_df, output_folder='contamination_pl
         plt.title('Flux Contamination Ratio vs. Target Magnitude', fontsize=16)
         plt.yscale('log')
         plt.grid(True, which='both', alpha=0.3)
-        plt.legend(loc='upper left')
-        
-        plt.text(0.02, 0.98, text, transform=plt.gca().transAxes, fontsize=12,
-               bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),
-               verticalalignment='top')
-        
+        plt.legend(loc='upper left')        
         plt.savefig(os.path.join(output_folder, 'contamination_ratio_vs_magnitude.png'), dpi=300)
     plt.close()
     
