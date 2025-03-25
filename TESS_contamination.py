@@ -25,177 +25,144 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         # Create SkyCoord object for the target
         target_coords = SkyCoord(ra=target_ra*u.degree, dec=target_dec*u.degree)
         
+        # Try to get target light curve data using coordinates instead of sourceid
         try:
-            # Try to get target light curve data using coordinates instead of sourceid
-            try:
-                target_lc = virac.run_coords(target_ra, target_dec)
-            except Exception as coord_error:
-                print(f"Failed to get light curve using coordinates: {coord_error}")
-                # Fall back to trying sourceid
-                target_lc = virac.run_sourceid(target_sourceid)
+            target_lc = virac.run_coords(target_ra, target_dec)
+        except Exception as coord_error:
+            print(f"Failed to get light curve using coordinates: {coord_error}")
+            # Fall back to trying sourceid
+            target_lc = virac.run_sourceid(target_sourceid)
+        
+        # Filter for Ks-band measurements
+        ks_mask = target_lc['filter'] == 'Ks'
+        if np.sum(ks_mask) == 0:
+            raise ValueError("No Ks-band measurements for this target")
             
-            # Filter for Ks-band measurements
-            ks_mask = target_lc['filter'] == 'Ks'
-            if np.sum(ks_mask) == 0:
-                raise ValueError("No Ks-band measurements for this target")
-                
-            target_mag = np.median(target_lc['hfad_mag'][ks_mask])
+        target_mag = np.median(target_lc['hfad_mag'][ks_mask])
+        
+        # Calculate variability for target (using standard deviation of magnitude)
+        target_var = np.std(target_lc['hfad_mag'][ks_mask])
+        
+        # Convert target magnitude to flux (arbitrary units)
+        target_flux = 10**(-0.4 * target_mag)
+        
+
+            # Get the filepath corresponding to this position
+            filepath = virac.coords_to_filename(target_ra, target_dec)
+            lc_file = virac.open_lc_file(filepath)
             
-            # Calculate variability for target (using standard deviation of magnitude)
-            target_var = np.std(target_lc['hfad_mag'][ks_mask])
+            # Get all sources in the file
+            source_ra = lc_file["sourceList/ra"][:]  
+            source_dec = lc_file["sourceList/dec"][:]
+            source_ids = lc_file["sourceList/sourceid"][:]
             
-            # Convert target magnitude to flux (arbitrary units)
-            target_flux = 10**(-0.4 * target_mag)
+            # Create SkyCoord objects for all sources
+            catalog_coords = SkyCoord(ra=source_ra*u.degree, dec=source_dec*u.degree)
             
-            # Find nearby sources that could contaminate
-            try:
-                # Get the filepath corresponding to this position
-                filepath = virac.coords_to_filename(target_ra, target_dec)
-                lc_file = virac.open_lc_file(filepath)
+            # Find separations
+            seps = target_coords.separation(catalog_coords)
+            
+            # Find nearby sources (excluding the target itself)
+            nearby_mask = (seps.arcsec <= search_radius_arcsec) & (source_ids != target_sourceid)
+            nearby_indices = np.where(nearby_mask)[0]
+            
+            # Count the number of contaminating sources
+            num_contaminants = len(nearby_indices)
+            
+            # Analyze each contaminant
+            contaminant_info = []
+            total_noise_contribution = 0.0
+            total_flux_contamination_ratio = 0.0
+            
+            for idx in nearby_indices:
+                contam_sourceid = source_ids[idx]
+                contam_ra = source_ra[idx]
+                contam_dec = source_dec[idx]
+                contam_separation = seps[idx].arcsec
                 
-                # Get all sources in the file
-                source_ra = lc_file["sourceList/ra"][:]  
-                source_dec = lc_file["sourceList/dec"][:]
-                source_ids = lc_file["sourceList/sourceid"][:]
-                
-                # Create SkyCoord objects for all sources
-                catalog_coords = SkyCoord(ra=source_ra*u.degree, dec=source_dec*u.degree)
-                
-                # Find separations
-                seps = target_coords.separation(catalog_coords)
-                
-                # Find nearby sources (excluding the target itself)
-                nearby_mask = (seps.arcsec <= search_radius_arcsec) & (source_ids != target_sourceid)
-                nearby_indices = np.where(nearby_mask)[0]
-                
-                # Count the number of contaminating sources
-                num_contaminants = len(nearby_indices)
-                
-                # Analyze each contaminant
-                contaminant_info = []
-                total_noise_contribution = 0.0
-                total_flux_contamination_ratio = 0.0
-                
-                for idx in nearby_indices:
-                    contam_sourceid = source_ids[idx]
-                    contam_ra = source_ra[idx]
-                    contam_dec = source_dec[idx]
-                    contam_separation = seps[idx].arcsec
-                    
+                try:
+                    # Try to get contaminant light curve using coordinates first
                     try:
-                        # Try to get contaminant light curve using coordinates first
-                        try:
-                            contam_lc = virac.run_coords(contam_ra, contam_dec)
-                        except Exception as contam_coord_error:
-                            print(f"Failed to get contaminant using coordinates: {contam_coord_error}")
-                            # Fall back to sourceid
-                            contam_lc = virac.run_sourceid(int(contam_sourceid))
-                        print(contam_lc)
-                        # Get Ks-band measurements
-                        contam_ks_mask = contam_lc['filter'] == 'Ks'
-                        if np.sum(contam_ks_mask) == 0:
-                            continue
-                            
-                        contam_ks_data = contam_lc['hfad_mag'][contam_ks_mask]
+                        contam_lc = virac.run_coords(contam_ra, contam_dec)
+                    except Exception as contam_coord_error:
+                        print(f"Failed to get contaminant using coordinates: {contam_coord_error}")
+                        # Fall back to sourceid
+                        contam_lc = virac.run_sourceid(int(contam_sourceid))
+                    print(contam_lc)
+                    # Get Ks-band measurements
+                    contam_ks_mask = contam_lc['filter'] == 'Ks'
+                    if np.sum(contam_ks_mask) == 0:
+                        continue
                         
-                        # Skip if no Ks-band data
-                        if len(contam_ks_data) == 0:
-                            continue
-                            
-                        contam_mag = np.median(contam_ks_data)
-                        contam_var = np.std(contam_ks_data)
+                    contam_ks_data = contam_lc['hfad_mag'][contam_ks_mask]
+                    
+                    # Skip if no Ks-band data
+                    if len(contam_ks_data) == 0:
+                        continue
                         
-                        # Convert contaminant magnitude to flux
-                        contam_flux = 10**(-0.4 * contam_mag)
-                        
-                        # Calculate flux ratio of contaminant to target
-                        flux_ratio = contam_flux / target_flux
-                        
-                        # Calculate the distance-based weighting (PSF approximation)
-                        # Assuming PSF follows approximately Gaussian profile
-                        # TESS PSF FWHM is approximately 2 pixels or about 42 arcsec
-                        psf_sigma = 42.0 / 2.355  # Convert FWHM to sigma
-                        distance_weight = np.exp(-(contam_separation**2) / (2 * psf_sigma**2))
-                        
-                        # Calculate weighted flux contribution
-                        weighted_flux_ratio = flux_ratio * distance_weight
-                        
-                        # Calculate noise contribution based on:
-                        # 1. Weighted flux ratio (how much of contaminant's flux affects the target)
-                        # 2. Contaminant's variability (more variable stars contribute more noise)
-                        # Units: relative photometric noise contributed to target (in parts-per-million)
-                        noise_contribution_ppm = weighted_flux_ratio * contam_var * 1e6
-                        
-                        # Add to total noise contribution
-                        total_noise_contribution += noise_contribution_ppm
-                        
-                        # Add to total flux contamination ratio
-                        total_flux_contamination_ratio += weighted_flux_ratio
-                        
-                        # Store contaminant information
-                        contaminant_info.append({
-                            'contam_sourceid': contam_sourceid,
-                            'contam_ra': contam_ra, 
-                            'contam_dec': contam_dec,
-                            'separation_arcsec': contam_separation,
-                            'contam_mag': contam_mag,
-                            'contam_variability': contam_var,
-                            'contam_flux': contam_flux,
-                            'flux_ratio': flux_ratio,
-                            'distance_weight': distance_weight,
-                            'weighted_flux_ratio': weighted_flux_ratio,
-                            'noise_contribution_ppm': noise_contribution_ppm
-                        })
-                    except Exception as e:
-                        print(f"Error processing contaminant {contam_sourceid}: {e}")
-                
-                # Create a record for this target
-                result = {
-                    'target_sourceid': target_sourceid,
-                    'target_ra': target_ra,
-                    'target_dec': target_dec,
-                    'target_mag': target_mag,
-                    'target_flux': target_flux,
-                    'target_variability': target_var,
-                    'num_contaminants': num_contaminants,
-                    'total_noise_contribution_ppm': total_noise_contribution,
-                    'total_flux_contamination_ratio': total_flux_contamination_ratio,
-                    'contaminant_details': contaminant_info
-                }
-                
-                results.append(result)
-                
-            except Exception as e:
-                print(f"Error finding nearby sources for target {target_sourceid}: {e}")
-                results.append({
-                    'target_sourceid': target_sourceid,
-                    'target_ra': target_ra,
-                    'target_dec': target_dec,
-                    'target_mag': target_mag,
-                    'target_flux': target_flux,
-                    'target_variability': target_var,
-                    'num_contaminants': 0,
-                    'total_noise_contribution_ppm': 0.0,
-                    'total_flux_contamination_ratio': 0.0,
-                    'contaminant_details': []
-                })
-                
-        except Exception as e:
-            print(f"Error processing target {target_sourceid}: {e}")
-            results.append({
+                    contam_mag = np.median(contam_ks_data)
+                    contam_var = np.std(contam_ks_data)
+                    
+                    # Convert contaminant magnitude to flux
+                    contam_flux = 10**(-0.4 * contam_mag)
+                    
+                    # Calculate flux ratio of contaminant to target
+                    flux_ratio = contam_flux / target_flux
+                    
+                    # Calculate the distance-based weighting (PSF approximation)
+                    # Assuming PSF follows approximately Gaussian profile
+                    # TESS PSF FWHM is approximately 2 pixels or about 42 arcsec
+                    psf_sigma = 42.0 / 2.355  # Convert FWHM to sigma
+                    distance_weight = np.exp(-(contam_separation**2) / (2 * psf_sigma**2))
+                    
+                    # Calculate weighted flux contribution
+                    weighted_flux_ratio = flux_ratio * distance_weight
+                    
+                    # Calculate noise contribution based on:
+                    # 1. Weighted flux ratio (how much of contaminant's flux affects the target)
+                    # 2. Contaminant's variability (more variable stars contribute more noise)
+                    # Units: relative photometric noise contributed to target (in parts-per-million)
+                    noise_contribution_ppm = weighted_flux_ratio * contam_var * 1e6
+                    
+                    # Add to total noise contribution
+                    total_noise_contribution += noise_contribution_ppm
+                    
+                    # Add to total flux contamination ratio
+                    total_flux_contamination_ratio += weighted_flux_ratio
+                    
+                    # Store contaminant information
+                    contaminant_info.append({
+                        'contam_sourceid': contam_sourceid,
+                        'contam_ra': contam_ra, 
+                        'contam_dec': contam_dec,
+                        'separation_arcsec': contam_separation,
+                        'contam_mag': contam_mag,
+                        'contam_variability': contam_var,
+                        'contam_flux': contam_flux,
+                        'flux_ratio': flux_ratio,
+                        'distance_weight': distance_weight,
+                        'weighted_flux_ratio': weighted_flux_ratio,
+                        'noise_contribution_ppm': noise_contribution_ppm
+                    })
+                except Exception as e:
+                    print(f"Error processing contaminant {contam_sourceid}: {e}")
+            
+            # Create a record for this target
+            result = {
                 'target_sourceid': target_sourceid,
                 'target_ra': target_ra,
                 'target_dec': target_dec,
-                'target_mag': np.nan,
-                'target_flux': np.nan,
-                'target_variability': np.nan,
-                'num_contaminants': 0,
-                'total_noise_contribution_ppm': 0.0,
-                'total_flux_contamination_ratio': 0.0,
-                'contaminant_details': []
-            })
-            continue
-    
+                'target_mag': target_mag,
+                'target_flux': target_flux,
+                'target_variability': target_var,
+                'num_contaminants': num_contaminants,
+                'total_noise_contribution_ppm': total_noise_contribution,
+                'total_flux_contamination_ratio': total_flux_contamination_ratio,
+                'contaminant_details': contaminant_info
+            }
+            
+            results.append(result)
+
     # Convert results to DataFrame for easier analysis
     if not results:
         print("Warning: No results to convert to DataFrame")
