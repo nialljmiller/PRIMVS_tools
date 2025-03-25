@@ -7,25 +7,9 @@ import virac
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 
-def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_arcsec=21.0):
-    """
-    Analyzes potential photometric contamination for TESS observations.
-    
-    Parameters:
-    -----------
-    target_list_csv : str
-        Path to CSV file containing target list with at least 'sourceid', 'ra', 'dec' columns
-    output_file : str, optional
-        Path to save the contamination analysis results
-    search_radius_arcsec : float, optional
-        Search radius in arcseconds (default: 21.0 arcsec, which is the TESS pixel scale)
-        
-    Returns:
-    --------
-    DataFrame containing contamination analysis results
-    """
-    # Load the target list CSV
 
+
+def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_arcsec=21.0):
     # Load the target list CSV
     target_list = pd.read_csv(target_list_csv)
     print(f"Loaded {len(target_list)} targets from {target_list_csv}")
@@ -43,12 +27,23 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
         target_coords = SkyCoord(ra=target_ra*u.degree, dec=target_dec*u.degree)
         
         try:
-            # Get target light curve data
-            target_lc = virac.run_sourceid(target_sourceid)
-            target_mag = np.median(target_lc['hfad_mag'][target_lc['filter'] == 'Ks'])
+            # Try to get target light curve data using coordinates instead of sourceid
+            try:
+                target_lc = virac.run_coords(target_ra, target_dec)
+            except Exception as coord_error:
+                print(f"Failed to get light curve using coordinates: {coord_error}")
+                # Fall back to trying sourceid
+                target_lc = virac.run_sourceid(target_sourceid)
+            
+            # Filter for Ks-band measurements
+            ks_mask = target_lc['filter'] == 'Ks'
+            if np.sum(ks_mask) == 0:
+                raise ValueError("No Ks-band measurements for this target")
+                
+            target_mag = np.median(target_lc['hfad_mag'][ks_mask])
             
             # Calculate variability for target (using standard deviation of magnitude)
-            target_var = np.std(target_lc['hfad_mag'][target_lc['filter'] == 'Ks'])
+            target_var = np.std(target_lc['hfad_mag'][ks_mask])
             
             # Convert target magnitude to flux (arbitrary units)
             target_flux = 10**(-0.4 * target_mag)
@@ -89,11 +84,20 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
                     contam_separation = seps[idx].arcsec
                     
                     try:
-                        # Get contaminant light curve
-                        contam_lc = virac.run_sourceid(int(contam_sourceid))
+                        # Try to get contaminant light curve using coordinates first
+                        try:
+                            contam_lc = virac.run_coords(contam_ra, contam_dec)
+                        except Exception as contam_coord_error:
+                            print(f"Failed to get contaminant using coordinates: {contam_coord_error}")
+                            # Fall back to sourceid
+                            contam_lc = virac.run_sourceid(int(contam_sourceid))
                         
                         # Get Ks-band measurements
-                        contam_ks_data = contam_lc['hfad_mag'][contam_lc['filter'] == 'Ks']
+                        contam_ks_mask = contam_lc['filter'] == 'Ks'
+                        if np.sum(contam_ks_mask) == 0:
+                            continue
+                            
+                        contam_ks_data = contam_lc['hfad_mag'][contam_ks_mask]
                         
                         # Skip if no Ks-band data
                         if len(contam_ks_data) == 0:
