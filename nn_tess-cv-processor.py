@@ -236,17 +236,18 @@ def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
 
 
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 import numpy as np
 
-def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
-    # Define a helper to call NN_FAP.inference for a single period
-    def infer(period):
-        fap = NN_FAP.inference(period, flux, time, knn, model)
-        return 1.0 - fap  # Convert to power (higher is better)
+# Define this at module level so it can be pickled
+def inference_helper(period, time, flux, knn, model):
+    fap = NN_FAP.inference(period, flux, time, knn, model)
+    return 1.0 - fap  # Convert to power
 
+def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
+    infer_partial = partial(inference_helper, time=time, flux=flux, knn=knn, model=model)
     with ProcessPoolExecutor() as executor:
-        power = list(executor.map(infer, periods))
-    
+        power = list(executor.map(infer_partial, periods))
     return np.array(power)
 
 
