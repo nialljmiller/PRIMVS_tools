@@ -106,7 +106,7 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
             for i in range(num_contaminants):
                 # Get basic contaminant info
                 contam = contaminants[i]
-                contam_id = int(contam['source_id'])
+                contam_id = int(contam['SOURCE_ID'])
                 contam_ra = float(contam['ra'])
                 contam_dec = float(contam['dec'])
                 
