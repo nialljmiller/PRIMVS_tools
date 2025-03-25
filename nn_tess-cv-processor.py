@@ -412,8 +412,8 @@ def find_orbital_period(time, flux, error):
     print(f"Method 3 (Subtraction): Best period = {subtraction_best_period*24:.6f} hours")
     
     # Use the best period from the chunk method (Method 1) as the default
-    best_period = chunk_best_period
-    best_idx = chunk_best_idx
+    best_period = subtraction_best_period
+    best_idx = subtraction_best_idx
     
     # Estimate uncertainty based on the width of the peak
     try:
