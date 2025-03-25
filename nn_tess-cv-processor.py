@@ -234,6 +234,23 @@ def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
     return power
 
 
+
+from concurrent.futures import ProcessPoolExecutor
+import numpy as np
+
+def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
+    # Define a helper to call NN_FAP.inference for a single period
+    def infer(period):
+        fap = NN_FAP.inference(period, flux, time, knn, model)
+        return 1.0 - fap  # Convert to power (higher is better)
+
+    with ProcessPoolExecutor() as executor:
+        power = list(executor.map(infer, periods))
+    
+    return np.array(power)
+
+
+
 def create_nn_fap_chunk_periodogram(time, flux, periods, knn, model):
     """
     Method 1: Create a periodogram by splitting the light curve into chunks of 200 points,
