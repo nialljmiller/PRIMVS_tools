@@ -320,7 +320,7 @@ def find_orbital_period(time, flux, error):
 
     
     # Create period grids to search
-    long_periods = np.linspace(0.1, 10, 100)
+    long_periods = np.linspace(0.001, 1, 100)
     short_periods = np.linspace(0.001, 1, 100)
     
     # Method 1: Chunk periodogram
