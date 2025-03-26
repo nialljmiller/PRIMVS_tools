@@ -27,6 +27,15 @@ from scipy import stats
 from scipy.signal import savgol_filter
 from astropy.io import fits
 import NN_FAP  # Import the NN_FAP package
+from functools import lru_cache
+import NN_FAP
+
+@lru_cache(maxsize=1)
+def get_nn_fap_model(model_path='/home/njm/Period/NN_FAP/final_12l_dp_all/'):
+    return NN_FAP.get_model(model_path)
+
+
+
 
 def remove_units_from_fits(fits_file):
     """
@@ -234,137 +243,51 @@ def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
     return power
 
 
-
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
-import numpy as np
 
-# Define this at module level so it can be pickled
-def inference_helper(period, time, flux, knn, model):
-    fap = NN_FAP.inference(period, flux, time, knn, model)
-    return 1.0 - fap  # Convert to power
+def chunk_periodogram_worker(args):
+    chunk_time, chunk_flux, periods, model_path = args
+    knn, model = get_nn_fap_model(model_path)
+    power = np.array([
+        1.0 - NN_FAP.inference(period, chunk_flux, chunk_time, knn, model)
+        for period in periods
+    ])
+    return power
 
-def create_nn_fap_single_periodogram(time, flux, periods, knn, model):
-    infer_partial = partial(inference_helper, time=time, flux=flux, knn=knn, model=model)
-    with ProcessPoolExecutor() as executor:
-        power = list(executor.map(infer_partial, periods))
-    return np.array(power)
-
-
-
-def create_nn_fap_chunk_periodogram(time, flux, periods, knn, model):
-    """
-    Method 1: Create a periodogram by splitting the light curve into chunks of 200 points,
-    computing a periodogram for each chunk, and averaging them.
-    
-    Parameters:
-    -----------
-    time : array
-        Time array (days)
-    flux : array
-        Flux array (normalized)
-    periods : array
-        Periods to test
-    knn : object
-        KNN model from NN_FAP
-    model : object
-        Neural network model from NN_FAP
-        
-    Returns:
-    --------
-    array
-        Power array (1-FAP values)
-    """
-    n_points = len(time)
+def create_nn_fap_chunk_periodogram(time, flux, periods, model_path, n_workers=32):
     chunk_size = 200
-    n_chunks = max(1, n_points // chunk_size)
-    
-    print(f"Creating chunk periodogram with {n_chunks} chunks of {chunk_size} points each")
-    
-    # Initialize the power array
+    chunks = [
+        (time[i:i+chunk_size], flux[i:i+chunk_size], periods, model_path)
+        for i in range(0, len(time), chunk_size) if len(time[i:i+chunk_size]) >= 50
+    ]
     avg_power = np.zeros(len(periods))
-    
-    # Process each chunk
-    for i in range(n_chunks):
-        start_idx = i * chunk_size
-        end_idx = min(start_idx + chunk_size, n_points)
-        
-        # If we don't have enough points for a full chunk, just use what we have
-        if end_idx - start_idx < 50:  # Minimum number of points for NN_FAP
-            continue
-            
-        chunk_time = time[start_idx:end_idx]
-        chunk_flux = flux[start_idx:end_idx]
-        
-        # Compute the periodogram for this chunk
-        chunk_power = create_nn_fap_single_periodogram(chunk_time, chunk_flux, periods, knn, model)
-        
-        # Add to the average
-        avg_power += chunk_power
-    
-    # Normalize by the number of chunks
-    if n_chunks > 0:
-        avg_power /= n_chunks
-    
+
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        results = list(tqdm(executor.map(chunk_periodogram_worker, chunks), total=len(chunks), desc="Chunk Periodogram"))
+
+    avg_power = np.mean(results, axis=0)
     return avg_power
 
 
-def create_nn_fap_sliding_window_periodogram(time, flux, periods, knn, model, window_size=200, step=50):
-    """
-    Method 2: Create a periodogram using a sliding window of 200 points.
-    
-    Parameters:
-    -----------
-    time : array
-        Time array (days)
-    flux : array
-        Flux array (normalized)
-    periods : array
-        Periods to test
-    knn : object
-        KNN model from NN_FAP
-    model : object
-        Neural network model from NN_FAP
-    window_size : int
-        Size of the sliding window (default: 200)
-    step : int
-        Step size for the sliding window (default: 50)
-        
-    Returns:
-    --------
-    array
-        Power array (1-FAP values)
-    """
-    n_points = len(time)
-    n_windows = max(1, (n_points - window_size) // step + 1)
-    
-    print(f"Creating sliding window periodogram with {n_windows} windows of {window_size} points each (step: {step})")
-    
-    # Initialize the power array
-    avg_power = np.zeros(len(periods))
-    
-    # Process each window
-    for i in range(n_windows):
-        start_idx = i * step
-        end_idx = min(start_idx + window_size, n_points)
-        
-        # If we don't have enough points for a full window, just use what we have
-        if end_idx - start_idx < 50:  # Minimum number of points for NN_FAP
-            continue
-            
-        window_time = time[start_idx:end_idx]
-        window_flux = flux[start_idx:end_idx]
-        
-        # Compute the periodogram for this window
-        window_power = create_nn_fap_single_periodogram(window_time, window_flux, periods, knn, model)
-        
-        # Add to the average
-        avg_power += window_power
-    
-    # Normalize by the number of windows
-    if n_windows > 0:
-        avg_power /= n_windows
-    
+def sliding_window_worker(args):
+    window_time, window_flux, periods, model_path = args
+    knn, model = get_nn_fap_model(model_path)
+    power = np.array([
+        1.0 - NN_FAP.inference(period, window_flux, window_time, knn, model)
+        for period in periods
+    ])
+    return power
+
+def create_nn_fap_sliding_window_periodogram(time, flux, periods, model_path, window_size=200, step=50, n_workers=32):
+    windows = [
+        (time[i:i+window_size], flux[i:i+window_size], periods, model_path)
+        for i in range(0, len(time)-window_size+1, step) if len(time[i:i+window_size]) >= 50
+    ]
+
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        results = list(tqdm(executor.map(sliding_window_worker, windows), total=len(windows), desc="Sliding Window Periodogram"))
+
+    avg_power = np.mean(results, axis=0)
     return avg_power
 
 
@@ -393,20 +316,19 @@ def find_orbital_period(time, flux, error):
         - Sliding window method power array
         - Subtraction method power array
     """
-    # Load the NN_FAP model
-    knn, model = NN_FAP.get_model(model_path='/home/njm/Period/NN_FAP/final_12l_dp_all/')
+
+
     
     # Create period grids to search
     long_periods = np.linspace(0.1, 10, 100)
     short_periods = np.linspace(0.001, 1, 100)
     
     # Method 1: Chunk periodogram
-    chunk_power = create_nn_fap_chunk_periodogram(time, flux, long_periods, knn, model)
-    # Interpolate the chunk power onto the short_periods grid (our common grid)
-    chunk_power = np.interp(short_periods, long_periods, chunk_power)
+    model_path = '/home/njm/Period/NN_FAP/final_12l_dp_all/'
+    sliding_power = create_nn_fap_sliding_window_periodogram(time, flux, short_periods, model_path, n_workers=80)
     
-    # Method 2: Sliding window periodogram
-    sliding_power = create_nn_fap_sliding_window_periodogram(time, flux, short_periods, knn, model)
+    chunk_power = create_nn_fap_chunk_periodogram(time, flux, long_periods, model_path, n_workers=80)
+    chunk_power = np.interp(short_periods, long_periods, chunk_power)
     
     # Method 3 (2b): Subtraction method to enhance short periods
     # Clip negative values to zero after subtraction
