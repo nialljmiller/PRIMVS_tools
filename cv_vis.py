@@ -193,7 +193,7 @@ class PrimvsTessCrossMatch:
 
 
 
-        
+
     def load_cv_candidates(self):
         """
         Load CV candidates from FITS file with improved error handling and timeout constraints.
@@ -222,6 +222,8 @@ class PrimvsTessCrossMatch:
         except Exception as e:
             print(f"Error loading candidates file: {e}")
             return False
+
+
 
 
 
