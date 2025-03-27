@@ -805,8 +805,8 @@ def visualize_contamination_enhanced(results_df, output_folder='contamination_pl
 
 if __name__ == "__main__":
     # Parameters
-    output_fp = '/beegfs/car/njm/PRIMVS/cv_results/contamination/'
-    target_list_csv = '/beegfs/car/njm/PRIMVS/cv_results/tess_crossmatch_results/tess_big_targets.csv'
+    output_fp = '../PRIMVS/cv_results/contamination/'
+    target_list_csv = 'targets.csv'
     output_file = output_fp + "gaia_contamination_results.pkl"
     report_file = output_fp + "gaia_contamination_report.csv"
     plots_folder = output_fp + "gaia_contamination_plots"
