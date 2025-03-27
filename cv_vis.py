@@ -681,7 +681,7 @@ class PrimvsTessCrossMatch:
         others = pool[pool['is_known_cv'] == False].copy()
         others = others.sort_values('composite_score', ascending=False)
         
-        num_needed = 100 - len(known)
+        num_needed = 1000 - len(known)
         if num_needed < 0:
             final_targets = known.sort_values('composite_score', ascending=False).head(100)
         else:
