@@ -683,7 +683,7 @@ class PrimvsTessCrossMatch:
         
         num_needed = 1000 - len(known)
         if num_needed < 0:
-            final_targets = known.sort_values('composite_score', ascending=False).head(100)
+            final_targets = known.sort_values('confidence', ascending=False).head(100)
         else:
             final_targets = pd.concat([known, others.head(num_needed)], ignore_index=True)
         
