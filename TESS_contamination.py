@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple TESS Contamination Analysis using Gaia
+Optimized TESS Contamination Analysis using Gaia
 """
 
 import os
@@ -11,170 +11,297 @@ from tqdm import tqdm
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astroquery.gaia import Gaia
+import concurrent.futures
+import time
+from functools import partial
+import warnings
+from astropy.utils.exceptions import AstropyWarning
 
-def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_arcsec=21.0):
+# Suppress Astropy warnings
+warnings.filterwarnings('ignore', category=AstropyWarning)
+
+def batch_gaia_query(coords_batch, search_radius_arcsec=21.0, batch_size=100):
     """
-    Simple TESS contamination analysis using Gaia data
+    Perform a single Gaia query for a batch of coordinates
+    
+    Parameters:
+    -----------
+    coords_batch : list of tuples
+        List of (ra, dec) tuples for targets
+    search_radius_arcsec : float
+        Search radius in arcseconds
+    batch_size : int
+        Maximum number of coordinates to query at once
+        
+    Returns:
+    --------
+    dict
+        Dictionary mapping (ra, dec) to list of nearby Gaia stars
     """
-    # Load the target list CSV
-    target_list = pd.read_csv(target_list_csv)
-    print(f"Loaded {len(target_list)} targets from {target_list_csv}")
+    results = {}
     
-    # Create empty lists to store results
-    results = []
-    
-    # Process each target
-    for idx, row in tqdm(target_list.iterrows(), total=len(target_list)):
-        target_sourceid = int(row['sourceid'])
-        target_ra = float(row['ra'])
-        target_dec = float(row['dec'])
+    # Process in smaller batches to avoid query timeouts
+    for i in range(0, len(coords_batch), batch_size):
+        batch = coords_batch[i:i+batch_size]
         
-        # Create SkyCoord object for the target
-        target_coords = SkyCoord(ra=target_ra, dec=target_dec, unit='deg')
+        # Create ADQL query with multiple target positions
+        adql_constraints = []
+        for j, (ra, dec) in enumerate(batch):
+            adql_constraints.append(
+                f"1=CONTAINS(POINT('ICRS', ra, dec), "
+                f"CIRCLE('ICRS', {ra}, {dec}, {search_radius_arcsec}/3600))"
+            )
         
-        # Query Gaia for stars in TESS pixel
+        adql_constraint = " OR ".join(adql_constraints)
+        
         query = f"""
         SELECT 
             source_id, ra, dec, 
             phot_g_mean_mag, phot_rp_mean_mag, phot_bp_mean_mag,
             phot_g_mean_flux, phot_g_mean_flux_error
         FROM gaiadr3.gaia_source
-        WHERE 1=CONTAINS(
-            POINT('ICRS', ra, dec),
-            CIRCLE('ICRS', {target_ra}, {target_dec}, {search_radius_arcsec}/3600))
+        WHERE {adql_constraint}
         """
         
-        job = Gaia.launch_job_async(query)
-        stars = job.get_results()
-        
-        # Default values if no target is found
-        target_g_mag = 15.0
-        target_flux = 10**(-0.4 * target_g_mag)
-        target_flux_error = target_flux * 0.01
-        target_variability = 0.001
-        gaia_source_id = None
-        target_g_rp = 0.5
-        
-        # No stars found in pixel
-        if len(stars) == 0:
-            print(f"No Gaia sources near target {target_sourceid}")
-        else:
-            # Create coordinates without units
-            star_ra = stars['ra'].data.data
-            star_dec = stars['dec'].data.data
+        try:
+            job = Gaia.launch_job_async(query)
+            all_stars = job.get_results()
             
-            # Convert to SkyCoord objects with explicit units
-            all_coords = SkyCoord(ra=star_ra, dec=star_dec, unit='deg')
+            # Create SkyCoord object for all stars
+            if len(all_stars) > 0:
+                all_star_coords = SkyCoord(ra=all_stars['ra'].data.data, 
+                                        dec=all_stars['dec'].data.data, 
+                                        unit='deg')
+                
+                # For each target, find associated stars
+                for ra, dec in batch:
+                    target_coord = SkyCoord(ra=ra, dec=dec, unit='deg')
+                    separations = target_coord.separation(all_star_coords)
+                    
+                    # Filter stars within search radius
+                    mask = separations.arcsec <= search_radius_arcsec
+                    if np.any(mask):
+                        results[(ra, dec)] = all_stars[mask]
+                    else:
+                        results[(ra, dec)] = []
+            else:
+                # No stars found, set empty result for all targets in batch
+                for ra, dec in batch:
+                    results[(ra, dec)] = []
+                    
+        except Exception as e:
+            print(f"Error in Gaia query batch {i//batch_size}: {e}")
+            # Set empty results for this batch
+            for ra, dec in batch:
+                results[(ra, dec)] = []
+                
+        # Add a small delay to avoid overloading the Gaia server
+        time.sleep(1)
             
-            # Calculate separations
-            separations = target_coords.separation(all_coords)
+    return results
+
+def process_target_contamination(target_data, nearby_stars):
+    """
+    Process contamination data for a single target
+    
+    Parameters:
+    -----------
+    target_data : dict
+        Dictionary with target information
+    nearby_stars : astropy.table.Table
+        Table of nearby Gaia stars
+        
+    Returns:
+    --------
+    dict
+        Dictionary with contamination results
+    """
+    target_sourceid = target_data['sourceid']
+    target_ra = target_data['ra']
+    target_dec = target_data['dec']
+    
+    # Create SkyCoord object for the target
+    target_coords = SkyCoord(ra=target_ra, dec=target_dec, unit='deg')
+    
+    # Default values if no target is found
+    target_g_mag = 15.0
+    target_flux = 10**(-0.4 * target_g_mag)
+    target_flux_error = target_flux * 0.01
+    target_variability = 0.001
+    gaia_source_id = None
+    target_g_rp = 0.5
+    
+    # No stars found in pixel
+    if len(nearby_stars) == 0:
+        contaminants = []
+    else:
+        # Create coordinates without units
+        star_ra = nearby_stars['ra'].data.data
+        star_dec = nearby_stars['dec'].data.data
+        
+        # Convert to SkyCoord objects with explicit units
+        all_coords = SkyCoord(ra=star_ra, dec=star_dec, unit='deg')
+        
+        # Calculate separations
+        separations = target_coords.separation(all_coords)
+        
+        # Find the closest star to target position
+        closest_idx = np.argmin(separations.arcsec)
+        
+        # If within 2 arcsec, likely our target
+        if separations[closest_idx].arcsec < 2.0:
+            # Set target properties from closest match
+            closest_star = nearby_stars[closest_idx]
+            gaia_source_id = int(closest_star['SOURCE_ID'])
+            target_g_mag = float(closest_star['phot_g_mean_mag'])
+            target_flux = float(closest_star['phot_g_mean_flux'])
+            target_flux_error = float(closest_star['phot_g_mean_flux_error'])
+            target_variability = target_flux_error / target_flux if target_flux > 0 else 0.01
             
-            # Find the closest star to target position
-            closest_idx = np.argmin(separations.arcsec)
+            # Get G-RP color if available
+            if 'phot_rp_mean_mag' in nearby_stars.colnames and not np.isnan(closest_star['phot_rp_mean_mag']):
+                target_g_rp = float(closest_star['phot_g_mean_mag'] - closest_star['phot_rp_mean_mag'])
+        
+        # Find contaminating stars (all except target)
+        contaminants = nearby_stars
+        if gaia_source_id is not None:
+            # Create mask for all stars except target
+            mask = nearby_stars['SOURCE_ID'] != gaia_source_id
+            contaminants = nearby_stars[mask]
+    
+    # Count contaminants
+    num_contaminants = len(contaminants)
+    
+    # Process each contaminant
+    contaminant_info = []
+    total_noise_contribution = 0.0
+    total_flux_contamination_ratio = 0.0
+    
+    # Skip if no contaminants
+    if num_contaminants > 0:
+        # Get TESS PSF sigma (used multiple times)
+        psf_sigma = 42.0 / 2.355  # TESS PSF FWHM ~42 arcsec
+        
+        for i in range(num_contaminants):
+            # Get basic contaminant info
+            contam = contaminants[i]
+            contam_id = int(contam['SOURCE_ID'])
+            contam_ra = float(contam['ra'])
+            contam_dec = float(contam['dec'])
             
-            # If within 2 arcsec, likely our target
-            if separations[closest_idx].arcsec < 2.0:
-                # Set target properties from closest match
-                closest_star = stars[closest_idx]
-                gaia_source_id = int(closest_star['SOURCE_ID'])
-                target_g_mag = float(closest_star['phot_g_mean_mag'])
-                target_flux = float(closest_star['phot_g_mean_flux'])
-                target_flux_error = float(closest_star['phot_g_mean_flux_error'])
-                target_variability = target_flux_error / target_flux if target_flux > 0 else 0.01
-                
-                # Get G-RP color if available
-                if 'phot_rp_mean_mag' in stars.colnames and not np.isnan(closest_star['phot_rp_mean_mag']):
-                    target_g_rp = float(closest_star['phot_g_mean_mag'] - closest_star['phot_rp_mean_mag'])
+            # Calculate separation
+            contam_coords = SkyCoord(ra=contam_ra, dec=contam_dec, unit='deg')
+            contam_separation = target_coords.separation(contam_coords).arcsec
             
-            # Find contaminating stars (all except target)
-            contaminants = stars
-            if gaia_source_id is not None:
-                # Create mask for all stars except target
-                mask = stars['SOURCE_ID'] != gaia_source_id
-                contaminants = stars[mask]
+            # Get photometric data
+            contam_g_mag = float(contam['phot_g_mean_mag'])
+            contam_flux = float(contam['phot_g_mean_flux'])
+            contam_flux_error = float(contam['phot_g_mean_flux_error'])
+            
+            # Calculate variability (just use flux error)
+            contam_variability = contam_flux_error / contam_flux if contam_flux > 0 else 0.01
+            
+            # Calculate flux ratio
+            flux_ratio = contam_flux / target_flux if target_flux > 0 else 0.0
+            
+            # TESS PSF weighting (Gaussian approximation)
+            distance_weight = np.exp(-(contam_separation**2) / (2 * psf_sigma**2))
+            
+            # Calculate contamination metrics
+            weighted_flux_ratio = flux_ratio * distance_weight
+            noise_contribution_ppm = weighted_flux_ratio * contam_variability * 1e6
+            
+            # Update totals
+            total_noise_contribution += noise_contribution_ppm
+            total_flux_contamination_ratio += weighted_flux_ratio
+            
+            # Get color if available
+            contam_g_rp = 0.5
+            if 'phot_rp_mean_mag' in contam.colnames and not np.isnan(contam['phot_rp_mean_mag']):
+                contam_g_rp = float(contam['phot_g_mean_mag'] - contam['phot_rp_mean_mag'])
+            
+            # Store contaminant info
+            contaminant_info.append({
+                'contam_sourceid': contam_id,
+                'contam_ra': contam_ra,
+                'contam_dec': contam_dec,
+                'separation_arcsec': contam_separation,
+                'contam_g_mag': contam_g_mag,
+                'contam_g_rp': contam_g_rp,
+                'contam_variability': contam_variability,
+                'contam_flux': contam_flux,
+                'flux_ratio': flux_ratio,
+                'distance_weight': distance_weight,
+                'weighted_flux_ratio': weighted_flux_ratio,
+                'noise_contribution_ppm': noise_contribution_ppm
+            })
+    
+    # Store target results
+    result = {
+        'target_sourceid': target_sourceid,
+        'gaia_source_id': gaia_source_id,
+        'target_ra': target_ra,
+        'target_dec': target_dec,
+        'target_g_mag': target_g_mag,
+        'target_g_rp': target_g_rp,
+        'target_flux': target_flux,
+        'target_variability': target_variability,
+        'num_contaminants': num_contaminants,
+        'total_noise_contribution_ppm': total_noise_contribution,
+        'total_flux_contamination_ratio': total_flux_contamination_ratio,
+        'contaminant_details': contaminant_info
+    }
+    
+    return result
+
+def analyze_tess_contamination_optimized(target_list_csv, output_file=None, search_radius_arcsec=21.0, 
+                                       batch_size=100, max_workers=10):
+    """
+    Optimized TESS contamination analysis using Gaia data with batched queries and parallelization
+    """
+    # Load the target list CSV
+    target_list = pd.read_csv(target_list_csv)
+    print(f"Loaded {len(target_list)} targets from {target_list_csv}")
+    
+    # Extract coordinates for batch querying
+    coords = [(float(row['ra']), float(row['dec'])) for _, row in target_list.iterrows()]
+    
+    # Query Gaia for all targets in batches
+    print("Querying Gaia for all targets in batches...")
+    all_stars = {}
+    
+    # Process batches of coordinates
+    for i in tqdm(range(0, len(coords), batch_size)):
+        coords_batch = coords[i:i+batch_size]
+        batch_results = batch_gaia_query(coords_batch, search_radius_arcsec, batch_size=min(50, batch_size))
+        all_stars.update(batch_results)
+    
+    # Process results with parallelization
+    print("Processing contamination results in parallel...")
+    results = []
+    
+    # Function to process a single target with pre-queried stars
+    def process_target(row, all_stars_dict):
+        target_ra = float(row['ra'])
+        target_dec = float(row['dec'])
+        stars = all_stars_dict.get((target_ra, target_dec), [])
+        return process_target_contamination(row, stars)
+    
+    # Use partial function to pass the stars dictionary
+    process_func = partial(process_target, all_stars_dict=all_stars)
+    
+    # Use ThreadPoolExecutor for I/O bound tasks
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {executor.submit(process_func, row): idx 
+                        for idx, row in target_list.iterrows()}
         
-        # Count contaminants
-        num_contaminants = len(contaminants) if 'contaminants' in locals() else 0
-        
-        # Process each contaminant
-        contaminant_info = []
-        total_noise_contribution = 0.0
-        total_flux_contamination_ratio = 0.0
-        
-        # Skip if no contaminants
-        if num_contaminants > 0:
-            for i in range(num_contaminants):
-                # Get basic contaminant info
-                contam = contaminants[i]
-                contam_id = int(contam['SOURCE_ID'])
-                contam_ra = float(contam['ra'])
-                contam_dec = float(contam['dec'])
-                
-                # Calculate separation
-                contam_coords = SkyCoord(ra=contam_ra, dec=contam_dec, unit='deg')
-                contam_separation = target_coords.separation(contam_coords).arcsec
-                
-                # Get photometric data
-                contam_g_mag = float(contam['phot_g_mean_mag'])
-                contam_flux = float(contam['phot_g_mean_flux'])
-                contam_flux_error = float(contam['phot_g_mean_flux_error'])
-                
-                # Calculate variability (just use flux error)
-                contam_variability = contam_flux_error / contam_flux if contam_flux > 0 else 0.01
-                
-                # Calculate flux ratio
-                flux_ratio = contam_flux / target_flux if target_flux > 0 else 0.0
-                
-                # TESS PSF weighting (Gaussian approximation)
-                psf_sigma = 42.0 / 2.355  # TESS PSF FWHM ~42 arcsec
-                distance_weight = np.exp(-(contam_separation**2) / (2 * psf_sigma**2))
-                
-                # Calculate contamination metrics
-                weighted_flux_ratio = flux_ratio * distance_weight
-                noise_contribution_ppm = weighted_flux_ratio * contam_variability * 1e6
-                
-                # Update totals
-                total_noise_contribution += noise_contribution_ppm
-                total_flux_contamination_ratio += weighted_flux_ratio
-                
-                # Get color if available
-                contam_g_rp = 0.5
-                if 'phot_rp_mean_mag' in contam.colnames and not np.isnan(contam['phot_rp_mean_mag']):
-                    contam_g_rp = float(contam['phot_g_mean_mag'] - contam['phot_rp_mean_mag'])
-                
-                # Store contaminant info
-                contaminant_info.append({
-                    'contam_sourceid': contam_id,
-                    'contam_ra': contam_ra,
-                    'contam_dec': contam_dec,
-                    'separation_arcsec': contam_separation,
-                    'contam_g_mag': contam_g_mag,
-                    'contam_g_rp': contam_g_rp,
-                    'contam_variability': contam_variability,
-                    'contam_flux': contam_flux,
-                    'flux_ratio': flux_ratio,
-                    'distance_weight': distance_weight,
-                    'weighted_flux_ratio': weighted_flux_ratio,
-                    'noise_contribution_ppm': noise_contribution_ppm
-                })
-        
-        # Store target results
-        result = {
-            'target_sourceid': target_sourceid,
-            'gaia_source_id': gaia_source_id,
-            'target_ra': target_ra,
-            'target_dec': target_dec,
-            'target_g_mag': target_g_mag,
-            'target_g_rp': target_g_rp,
-            'target_flux': target_flux,
-            'target_variability': target_variability,
-            'num_contaminants': num_contaminants,
-            'total_noise_contribution_ppm': total_noise_contribution,
-            'total_flux_contamination_ratio': total_flux_contamination_ratio,
-            'contaminant_details': contaminant_info
-        }
-        
-        results.append(result)
+        for future in tqdm(concurrent.futures.as_completed(future_to_idx), total=len(future_to_idx)):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                idx = future_to_idx[future]
+                print(f"Error processing target {idx}: {e}")
     
     # Convert to DataFrame
     results_df = pd.DataFrame(results)
@@ -186,15 +313,26 @@ def analyze_tess_contamination(target_list_csv, output_file=None, search_radius_
     
     return results_df
 
-def visualize_contamination(results_df, output_folder='contamination_plots'):
+# The visualization functions can remain mostly the same
+# Just adding some optimizations to make them faster
+
+def visualize_contamination_optimized(results_df, output_folder='contamination_plots'):
     """
-    Creates visualization plots for the contamination analysis.
+    Creates visualization plots for the contamination analysis with optimizations.
     """
     os.makedirs(output_folder, exist_ok=True)
     
+    # For large datasets, sample data to speed up visualization
+    sample_size = min(10000, len(results_df))
+    if len(results_df) > sample_size:
+        print(f"Sampling {sample_size} targets for visualization...")
+        results_sample = results_df.sample(sample_size, random_state=42)
+    else:
+        results_sample = results_df
+    
     # Plot 1: Histogram of number of contaminants per target
     plt.figure(figsize=(10, 6))
-    plt.hist(results_df['num_contaminants'], bins=20)
+    plt.hist(results_sample['num_contaminants'], bins=20)
     plt.xlabel('Number of Contaminants')
     plt.ylabel('Frequency')
     plt.title('Distribution of Contaminant Counts per Target')
@@ -204,7 +342,7 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     
     # Plot 2: Histogram of total noise contributions
     plt.figure(figsize=(10, 6))
-    valid_noise = results_df['total_noise_contribution_ppm'].replace(0, np.nan).dropna()
+    valid_noise = results_sample['total_noise_contribution_ppm'].replace(0, np.nan).dropna()
     if len(valid_noise) > 0:
         plt.hist(valid_noise, bins=20)
         plt.xlabel('Total Noise Contribution (ppm)')
@@ -216,12 +354,18 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     
     # Plot 3: Scatter plot of noise contribution vs. target magnitude
     plt.figure(figsize=(10, 6))
-    valid_data = results_df.dropna(subset=['target_g_mag', 'total_noise_contribution_ppm'])
+    valid_data = results_sample.dropna(subset=['target_g_mag', 'total_noise_contribution_ppm'])
     valid_data = valid_data[valid_data['total_noise_contribution_ppm'] > 0]
     if len(valid_data) > 0:
-        plt.scatter(valid_data['target_g_mag'], 
-                   valid_data['total_noise_contribution_ppm'],
-                   alpha=0.6)
+        # Use hexbin for large datasets for better performance
+        if len(valid_data) > 1000:
+            plt.hexbin(valid_data['target_g_mag'], valid_data['total_noise_contribution_ppm'],
+                     gridsize=50, cmap='viridis', bins='log')
+            plt.colorbar(label='log10(count)')
+        else:
+            plt.scatter(valid_data['target_g_mag'], 
+                       valid_data['total_noise_contribution_ppm'],
+                       alpha=0.6)
         plt.xlabel('Target G Magnitude')
         plt.ylabel('Noise Contribution (ppm)')
         plt.title('Contamination Noise vs. Target Magnitude')
@@ -232,15 +376,24 @@ def visualize_contamination(results_df, output_folder='contamination_plots'):
     
     # Plot 4: Spatial distribution of targets colored by noise contribution
     plt.figure(figsize=(12, 10))
-    valid_data = results_df.dropna(subset=['target_ra', 'target_dec', 'total_noise_contribution_ppm'])
+    valid_data = results_sample.dropna(subset=['target_ra', 'target_dec', 'total_noise_contribution_ppm'])
     valid_data = valid_data[valid_data['total_noise_contribution_ppm'] > 0]
     if len(valid_data) > 0:
-        noise_log = np.log10(valid_data['total_noise_contribution_ppm'])
-        sc = plt.scatter(valid_data['target_ra'], valid_data['target_dec'], 
-                       c=noise_log,
-                       cmap='viridis', alpha=0.7, s=30)
-        cbar = plt.colorbar(sc)
-        cbar.set_label('Log10(Noise Contribution in ppm)')
+        # Use hexbin for large datasets
+        if len(valid_data) > 1000:
+            hb = plt.hexbin(valid_data['target_ra'], valid_data['target_dec'],
+                          C=np.log10(valid_data['total_noise_contribution_ppm']),
+                          reduce_C_function=np.median,
+                          gridsize=50, cmap='viridis')
+            cb = plt.colorbar(hb)
+            cb.set_label('Log10(Median Noise Contribution in ppm)')
+        else:
+            noise_log = np.log10(valid_data['total_noise_contribution_ppm'])
+            sc = plt.scatter(valid_data['target_ra'], valid_data['target_dec'], 
+                           c=noise_log,
+                           cmap='viridis', alpha=0.7, s=30)
+            cbar = plt.colorbar(sc)
+            cbar.set_label('Log10(Noise Contribution in ppm)')
         plt.xlabel('RA (deg)')
         plt.ylabel('Dec (deg)')
         plt.title('Spatial Distribution of Targets Colored by Contamination Noise')
@@ -305,504 +458,6 @@ def save_contamination_report(results_df, output_file='contamination_report.csv'
     
     return report_df
 
-
-
-
-
-def visualize_contamination_enhanced(results_df, output_folder='contamination_plots'):
-    """
-    Creates enhanced visualization plots for the contamination analysis
-    with more informative features.
-    """
-    import os
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    import seaborn as sns
-    from matplotlib.gridspec import GridSpec
-    
-    os.makedirs(output_folder, exist_ok=True)
-    
-    # Set a consistent style for all plots
-    plt.style.use('seaborn-v0_8-whitegrid')
-    
-    # Plot 1: Enhanced histogram of contaminant counts with cumulative distribution
-    plt.figure(figsize=(12, 8))
-    ax1 = plt.subplot(111)
-    
-    # Create histogram with density=True for percentage
-    n, bins, patches = ax1.hist(results_df['num_contaminants'], bins=30, 
-                               alpha=0.7, color='steelblue', 
-                               edgecolor='black', density=True,
-                               label='Frequency')
-    
-    # Add cumulative distribution
-    ax2 = ax1.twinx()
-    counts, edges = np.histogram(results_df['num_contaminants'], bins=30)
-    cum_counts = np.cumsum(counts) / len(results_df)
-    ax2.plot(edges[:-1], cum_counts, 'r-', linewidth=2, label='Cumulative %')
-    ax2.set_ylim(0, 1.05)
-    
-    # Add statistics to the plot
-    mean_contams = results_df['num_contaminants'].mean()
-    median_contams = results_df['num_contaminants'].median()
-    max_contams = results_df['num_contaminants'].max()
-    
-    stats_text = f"Mean: {mean_contams:.1f}\nMedian: {median_contams:.1f}\nMax: {max_contams:.0f}"
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax1.text(0.05, 0.95, stats_text, transform=ax1.transAxes, fontsize=12,
-             verticalalignment='top', bbox=props)
-    
-    # Add labels and title
-    ax1.set_xlabel('Number of Contaminating Sources', fontsize=14)
-    ax1.set_ylabel('Density (Proportion per bin)', fontsize=14)
-    ax2.set_ylabel('Cumulative Proportion', fontsize=14)
-    plt.title('Distribution of Contaminating Sources per Target', fontsize=16)
-    
-    # Combine legends
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'contaminant_counts_enhanced.png'), dpi=300)
-    plt.close()
-    
-    # Plot 2: Enhanced noise contribution distribution
-    plt.figure(figsize=(12, 8))
-    valid_noise = results_df['total_noise_contribution_ppm'].replace(0, np.nan).dropna()
-    
-    if len(valid_noise) > 0:
-        # Create subplot grid
-        gs = GridSpec(2, 1, height_ratios=[3, 1])
-        ax1 = plt.subplot(gs[0])
-        ax2 = plt.subplot(gs[1])
-        
-        # Plot histogram with log scale on x-axis for main plot
-        log_noise = np.log10(valid_noise)
-        sns.histplot(log_noise, bins=30, kde=True, ax=ax1, color='darkblue')
-        
-        # Add percentile lines
-        percentiles = [50, 90, 95, 99]
-        colors = ['green', 'orange', 'red', 'purple']
-        
-        for p, c in zip(percentiles, colors):
-            percentile_val = np.percentile(log_noise, p)
-            ax1.axvline(x=percentile_val, color=c, linestyle='--', 
-                       linewidth=2, label=f'{p}th percentile')
-        
-        # Add box plot below
-        sns.boxplot(x=log_noise, ax=ax2, orient='h', color='steelblue')
-        
-        # Add summary statistics
-        stats_text = (
-            f"Mean: {10**(np.mean(log_noise)):.1f} ppm\n"
-            f"Median: {10**(np.median(log_noise)):.1f} ppm\n"
-            f"95th percentile: {10**(np.percentile(log_noise, 95)):.1f} ppm\n"
-            f"Max: {valid_noise.max():.1f} ppm"
-        )
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes, fontsize=12,
-                verticalalignment='top', bbox=props)
-        
-        # Format x-axis with original values
-        def log_format(x, pos):
-            return f'{10**x:.0f}'
-        
-        from matplotlib.ticker import FuncFormatter
-        ax1.xaxis.set_major_formatter(FuncFormatter(log_format))
-        ax2.xaxis.set_major_formatter(FuncFormatter(log_format))
-        
-        # Add labels
-        ax1.set_xlabel('')
-        ax1.set_ylabel('Frequency', fontsize=14)
-        ax2.set_xlabel('Noise Contribution (ppm)', fontsize=14)
-        ax2.set_ylabel('')
-        
-        ax1.set_title('Distribution of Noise Contributions from Contaminating Sources', fontsize=16)
-        ax1.legend(loc='upper left')
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'noise_contributions_enhanced.png'), dpi=300)
-    plt.close()
-    
-    # Plot 3: Enhanced scatter plot with hexbin density and individual points
-    plt.figure(figsize=(14, 10))
-    valid_data = results_df.dropna(subset=['target_g_mag', 'total_noise_contribution_ppm'])
-    valid_data = valid_data[valid_data['total_noise_contribution_ppm'] > 0]
-    
-    if len(valid_data) > 0:
-        # Create a grid of subplots
-        gs = GridSpec(3, 3, width_ratios=[3, 1, 0.2], height_ratios=[1, 3, 0.2])
-        
-        # Main scatter plot
-        ax_main = plt.subplot(gs[1, 0])
-        
-        # Create hexbin plot for density
-        hexbin = ax_main.hexbin(valid_data['target_g_mag'], 
-                               np.log10(valid_data['total_noise_contribution_ppm']),
-                               gridsize=40, cmap='viridis', 
-                               mincnt=1, bins='log')
-        
-        # Add a colorbar
-        ax_cb = plt.subplot(gs[1, 2])
-        cb = plt.colorbar(hexbin, cax=ax_cb)
-        cb.set_label('log10(count)', rotation=270, labelpad=15)
-        
-        # Add histogram on top and right showing marginal distributions
-        ax_top = plt.subplot(gs[0, 0])
-        ax_right = plt.subplot(gs[1, 1])
-        
-        sns.histplot(valid_data['target_g_mag'], ax=ax_top, color='navy')
-        ax_top.set_xlim(ax_main.get_xlim())
-        ax_top.set_ylabel('Count')
-        ax_top.set_xlabel('')
-        ax_top.spines['right'].set_visible(False)
-        ax_top.spines['top'].set_visible(False)
-        
-        sns.histplot(y=np.log10(valid_data['total_noise_contribution_ppm']), ax=ax_right, color='navy')
-        ax_right.set_ylim(ax_main.get_ylim())
-        ax_right.set_xlabel('Count')
-        ax_right.set_ylabel('')
-        ax_right.spines['right'].set_visible(False)
-        ax_right.spines['top'].set_visible(False)
-        
-        # Add trendline
-        try:
-            from scipy import stats
-            slope, intercept, r_value, p_value, std_err = stats.linregress(
-                valid_data['target_g_mag'],
-                np.log10(valid_data['total_noise_contribution_ppm']))
-            
-            x = np.array(ax_main.get_xlim())
-            y = slope * x + intercept
-            ax_main.plot(x, y, 'r-', label=f'Fit: $\\log{{Noise}} = {slope:.2f}G {intercept:+.2f}$\n$R^2 = {r_value**2:.2f}$')
-            ax_main.legend(loc='upper left')
-        except:
-            # Skip trendline if regression fails
-            pass
-        
-        # Format y-axis with original values
-        def log10_format(y, pos):
-            return f'{10**y:.0f}'
-        
-        ax_main.yaxis.set_major_formatter(FuncFormatter(log10_format))
-        
-        # Add labels and title
-        ax_main.set_xlabel('Target G Magnitude', fontsize=14)
-        ax_main.set_ylabel('Noise Contribution (ppm)', fontsize=14)
-        ax_main.set_title('Contamination Noise vs. Target Magnitude', fontsize=16)
-        
-        # Add grid
-        ax_main.grid(True, which="both", ls="-", alpha=0.2)
-        
-        plt.savefig(os.path.join(output_folder, 'noise_vs_magnitude_enhanced.png'), dpi=300)
-    plt.close()
-    
-    # Plot 4: Enhanced spatial distribution with sky density map
-    plt.figure(figsize=(14, 12))
-    valid_data = results_df.dropna(subset=['target_ra', 'target_dec', 'total_noise_contribution_ppm'])
-    valid_data = valid_data[valid_data['total_noise_contribution_ppm'] > 0]
-    
-    if len(valid_data) > 0:
-        # Create subplots
-        gs = GridSpec(1, 2, width_ratios=[20, 1])
-        ax = plt.subplot(gs[0, 0])
-        
-        # Use a normalized log scale for colors
-        noise_log = np.log10(valid_data['total_noise_contribution_ppm'])
-        vmin, vmax = noise_log.min(), noise_log.max()
-        
-        # Create a custom color normalization
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-        
-        # Create hexbin density map
-        hexbin = ax.hexbin(valid_data['target_ra'], valid_data['target_dec'], 
-                          C=noise_log, 
-                          reduce_C_function=np.median,
-                          gridsize=50, cmap='viridis', 
-                          norm=norm)
-        
-        # Add colorbar
-        ax_cb = plt.subplot(gs[0, 1])
-        cb = plt.colorbar(hexbin, cax=ax_cb)
-        
-        # Format colorbar with original values
-        def log10_format(x, pos):
-            return f'{10**x:.0f}'
-        
-        cb.ax.yaxis.set_major_formatter(FuncFormatter(log10_format))
-        cb.set_label('Median Noise Contribution (ppm)', rotation=270, labelpad=15)
-        
-        # Add ecliptic coordinates (approximate)
-        ra = np.linspace(0, 360, 360)
-        dec = np.zeros_like(ra)  # Ecliptic plane (approximately)
-        ax.plot(ra, dec, 'r--', alpha=0.5, label='Ecliptic plane (approx.)')
-        
-        # Add TESS observing regions (approximate)
-        # TESS observes in 13 sectors per hemisphere
-        for sector in range(13):
-            center_ra = (sector * 360/13 + 180) % 360
-            ax.axvline(x=center_ra, color='grey', alpha=0.3, linestyle=':')
-        
-        # Add labels
-        ax.set_xlabel('RA (deg)', fontsize=14)
-        ax.set_ylabel('Dec (deg)', fontsize=14)
-        ax.set_title('Spatial Distribution of Target Contamination', fontsize=16)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper right')
-        
-        # Add density information
-        count_per_area = len(valid_data) / ((ax.get_xlim()[1] - ax.get_xlim()[0]) * 
-                                        (ax.get_ylim()[1] - ax.get_ylim()[0]))
-        density_text = f"Target density: {count_per_area:.1f} targets/sq.deg"
-        ax.text(0.02, 0.02, density_text, transform=ax.transAxes, fontsize=12,
-               bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
-        
-        plt.savefig(os.path.join(output_folder, 'spatial_noise_contribution_enhanced.png'), dpi=300)
-    plt.close()
-    
-    # Plot 5: New plot - Contamination vs stellar color (G-RP)
-    plt.figure(figsize=(12, 8))
-    valid_data = results_df.dropna(subset=['target_g_rp', 'total_noise_contribution_ppm'])
-    valid_data = valid_data[valid_data['total_noise_contribution_ppm'] > 0]
-    
-    if len(valid_data) > 0:
-        # Create hexbin color plot
-        hexbin = plt.hexbin(valid_data['target_g_rp'], 
-                          np.log10(valid_data['total_noise_contribution_ppm']),
-                          gridsize=40, cmap='plasma', 
-                          mincnt=1, bins='log')
-        
-        # Add colorbar
-        cb = plt.colorbar(hexbin)
-        cb.set_label('log10(count)', rotation=270, labelpad=15)
-        
-        # Add stellar type annotations
-        stellar_types = [
-            {'g_rp': -0.3, 'type': 'O/B stars', 'y': 1.0},
-            {'g_rp': 0.0, 'type': 'A stars', 'y': 1.5},
-            {'g_rp': 0.4, 'type': 'F stars', 'y': 2.0},
-            {'g_rp': 0.7, 'type': 'G stars', 'y': 2.5},
-            {'g_rp': 1.0, 'type': 'K stars', 'y': 3.0},
-            {'g_rp': 1.5, 'type': 'M stars', 'y': 3.5}
-        ]
-        
-        for star in stellar_types:
-            plt.annotate(star['type'], 
-                        xy=(star['g_rp'], star['y']), 
-                        xytext=(star['g_rp'], star['y']),
-                        bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.7),
-                        ha='center')
-            plt.axvline(x=star['g_rp'], color='black', linestyle=':', alpha=0.3)
-        
-        # Try to add trendline
-        try:
-            from scipy import stats
-            slope, intercept, r_value, p_value, std_err = stats.linregress(
-                valid_data['target_g_rp'],
-                np.log10(valid_data['total_noise_contribution_ppm']))
-            
-            x = np.array([valid_data['target_g_rp'].min(), valid_data['target_g_rp'].max()])
-            y = slope * x + intercept
-            plt.plot(x, y, 'r-', linewidth=2, 
-                   label=f'Fit: $\\log{{Noise}} = {slope:.2f}(G-RP) {intercept:+.2f}$\n$R^2 = {r_value**2:.2f}$')
-            plt.legend(loc='upper left')
-        except:
-            pass
-        
-        # Format y-axis with original values
-        def log10_format(y, pos):
-            return f'{10**y:.0f}'
-        
-        plt.gca().yaxis.set_major_formatter(FuncFormatter(log10_format))
-        
-        # Add labels
-        plt.xlabel('G-RP Color (Gaia)', fontsize=14)
-        plt.ylabel('Noise Contribution (ppm)', fontsize=14)
-        plt.title('Contamination Noise vs. Stellar Color', fontsize=16)
-        plt.grid(True, alpha=0.3)
-        
-        plt.savefig(os.path.join(output_folder, 'color_vs_noise_contribution.png'), dpi=300)
-    plt.close()
-    
-    # Plot 6: New plot - Contamination ratio vs target magnitude
-    plt.figure(figsize=(12, 8))
-    valid_data = results_df.dropna(subset=['target_g_mag', 'total_flux_contamination_ratio'])
-    valid_data = valid_data[valid_data['total_flux_contamination_ratio'] > 0]
-    
-    if len(valid_data) > 0:
-        # Define a custom colormap based on contamination severity
-        cmap = plt.cm.get_cmap('RdYlGn_r')
-        
-        # Create scatter plot with custom coloring
-        sc = plt.scatter(valid_data['target_g_mag'], 
-                       valid_data['total_flux_contamination_ratio'], 
-                       c=valid_data['total_flux_contamination_ratio'],
-                       cmap=cmap,
-                       norm=mcolors.LogNorm(vmin=max(0.001, valid_data['total_flux_contamination_ratio'].min()), 
-                                       vmax=max(1.0, valid_data['total_flux_contamination_ratio'].max())),
-                       s=30, alpha=0.7)
-        
-        # Add colorbar
-        cbar = plt.colorbar(sc)
-        cbar.set_label('Flux Contamination Ratio', rotation=270, labelpad=15)
-        
-        # Add contamination level thresholds
-        thresholds = [0.01, 0.05, 0.1, 0.5]
-        labels = ['1%', '5%', '10%', '50%']
-        colors = ['green', 'yellowgreen', 'orange', 'red']
-        
-        for thresh, label, col in zip(thresholds, labels, colors):
-            plt.axhline(y=thresh, color=col, linestyle='--', 
-                      label=f'{label} contamination')
-        
-        # Add labels
-        plt.xlabel('Target G Magnitude', fontsize=14)
-        plt.ylabel('Flux Contamination Ratio', fontsize=14)
-        plt.title('Flux Contamination Ratio vs. Target Magnitude', fontsize=16)
-        plt.yscale('log')
-        plt.grid(True, which='both', alpha=0.3)
-        plt.legend(loc='upper left')        
-        plt.savefig(os.path.join(output_folder, 'contamination_ratio_vs_magnitude.png'), dpi=300)
-    plt.close()
-    
-    # Plot 7: New plot - Multivariate analysis
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-    
-    plt.figure(figsize=(16, 10))
-    
-    # Get valid data for all needed fields
-    needed_columns = ['target_g_mag', 'target_g_rp', 'num_contaminants', 
-                     'total_noise_contribution_ppm', 'total_flux_contamination_ratio']
-    valid_data = results_df.dropna(subset=needed_columns)
-    valid_data = valid_data[(valid_data['total_noise_contribution_ppm'] > 0) & 
-                           (valid_data['total_flux_contamination_ratio'] > 0)]
-    
-    if len(valid_data) > 0:
-        # Create a grid for 4 subplot panels
-        gs = GridSpec(2, 2, wspace=0.4, hspace=0.4)
-        
-        # Panel 1: Magnitude vs # of contaminants colored by noise
-        ax1 = plt.subplot(gs[0, 0])
-        sc1 = ax1.scatter(valid_data['target_g_mag'], 
-                         valid_data['num_contaminants'],
-                         c=np.log10(valid_data['total_noise_contribution_ppm']), 
-                         cmap='viridis',
-                         alpha=0.7)
-        
-        divider = make_axes_locatable(ax1)
-        cax1 = divider.append_axes("right", size="5%", pad=0.1)
-        cb1 = plt.colorbar(sc1, cax=cax1)
-        cb1.set_label('log10(Noise ppm)')
-        
-        ax1.set_xlabel('Target G Magnitude')
-        ax1.set_ylabel('Number of Contaminants')
-        ax1.set_title('Magnitude vs. Contaminant Count')
-        ax1.grid(True, alpha=0.3)
-        
-        # Panel 2: Noise vs. contamination ratio colored by G-RP
-        ax2 = plt.subplot(gs[0, 1])
-        sc2 = ax2.scatter(np.log10(valid_data['total_noise_contribution_ppm']), 
-                         valid_data['total_flux_contamination_ratio'],
-                         c=valid_data['target_g_rp'], 
-                         cmap='plasma',
-                         alpha=0.7)
-        
-        divider = make_axes_locatable(ax2)
-        cax2 = divider.append_axes("right", size="5%", pad=0.1)
-        cb2 = plt.colorbar(sc2, cax=cax2)
-        cb2.set_label('G-RP Color')
-        
-        # Format x-axis with original values
-        def log10_format(x, pos):
-            return f'{10**x:.0f}'
-        
-        ax2.xaxis.set_major_formatter(FuncFormatter(log10_format))
-        ax2.set_xlabel('Noise Contribution (ppm)')
-        ax2.set_ylabel('Flux Contamination Ratio')
-        ax2.set_yscale('log')
-        ax2.set_title('Noise vs. Contamination Ratio')
-        ax2.grid(True, alpha=0.3)
-        
-        # Panel 3: G-RP vs. contaminant count colored by magnitude
-        ax3 = plt.subplot(gs[1, 0])
-        sc3 = ax3.scatter(valid_data['target_g_rp'], 
-                         valid_data['num_contaminants'],
-                         c=valid_data['target_g_mag'], 
-                         cmap='coolwarm',
-                         alpha=0.7)
-        
-        divider = make_axes_locatable(ax3)
-        cax3 = divider.append_axes("right", size="5%", pad=0.1)
-        cb3 = plt.colorbar(sc3, cax=cax3)
-        cb3.set_label('G Magnitude')
-        
-        ax3.set_xlabel('G-RP Color')
-        ax3.set_ylabel('Number of Contaminants')
-        ax3.set_title('Stellar Color vs. Contaminant Count')
-        ax3.grid(True, alpha=0.3)
-        
-        # Panel 4: Stellar density - add stellar type axis
-        ax4 = plt.subplot(gs[1, 1])
-        
-        # Create a KDE (Kernel Density Estimate) plot
-        try:
-            sns.kdeplot(data=valid_data, x='target_g_rp', y='target_g_mag',
-                      fill=True, cmap='Reds', alpha=0.7, 
-                      levels=5, ax=ax4)
-        except Exception as e:
-            print(f"KDE plot error: {e}")
-            ax4.scatter(valid_data['target_g_rp'], valid_data['target_g_mag'], 
-                      alpha=0.5, s=10, color='red')
-        
-        # Add contour lines - simplified to avoid potential errors
-        try:
-            x_range = np.linspace(valid_data['target_g_rp'].min(), valid_data['target_g_rp'].max(), 20)
-            y_range = np.linspace(valid_data['target_g_mag'].min(), valid_data['target_g_mag'].max(), 20)
-            
-            # Skip complex contour plot that might cause issues
-            # Just add some contour lines for reference
-            ax4.axhline(y=valid_data['target_g_mag'].median(), color='blue', linestyle='--', alpha=0.5)
-            ax4.axvline(x=valid_data['target_g_rp'].median(), color='blue', linestyle='--', alpha=0.5)
-        except Exception as e:
-            print(f"Contour plot error: {e}")
-        
-        # Invert y-axis (brighter stars at top)
-        ax4.invert_yaxis()
-        
-        # Add stellar type annotations on top x-axis
-        stellar_types = [
-            {'g_rp': -0.3, 'type': 'O/B'},
-            {'g_rp': 0.0, 'type': 'A'},
-            {'g_rp': 0.4, 'type': 'F'},
-            {'g_rp': 0.7, 'type': 'G'},
-            {'g_rp': 1.0, 'type': 'K'},
-            {'g_rp': 1.5, 'type': 'M'}
-        ]
-        
-        for star in stellar_types:
-            if (star['g_rp'] >= ax4.get_xlim()[0] and 
-                star['g_rp'] <= ax4.get_xlim()[1]):
-                ax4.annotate(star['type'], 
-                           xy=(star['g_rp'], ax4.get_ylim()[0]), 
-                           xytext=(star['g_rp'], ax4.get_ylim()[0] - 0.5),
-                           ha='center')
-        
-        ax4.set_xlabel('G-RP Color')
-        ax4.set_ylabel('G Magnitude')
-        ax4.set_title('Stellar Population Density')
-        
-        # Add overall title
-        plt.suptitle('Multivariate Analysis of TESS Target Contamination', fontsize=18, y=0.98)
-        
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-        plt.savefig(os.path.join(output_folder, 'multivariate_analysis.png'), dpi=300)
-    plt.close()
-    
-    print(f"Enhanced visualization plots saved to {output_folder}")
-
-
 if __name__ == "__main__":
     # Parameters
     output_fp = '../PRIMVS/cv_results/contamination/'
@@ -814,19 +469,26 @@ if __name__ == "__main__":
     # Create output directory if it doesn't exist
     os.makedirs(output_fp, exist_ok=True)
     
-    # Run analysis using Gaia data
+    # Start timing
+    start_time = time.time()
+    
+    # Run optimized analysis using Gaia data
     print(f"Analyzing TESS contamination for targets in {target_list_csv}...")
-    results = analyze_tess_contamination(target_list_csv, output_file)
+    results = analyze_tess_contamination_optimized(
+        target_list_csv, 
+        output_file,
+        batch_size=100,  # Adjust based on your data size
+        max_workers=8    # Adjust based on your CPU cores
+    )
     
     # Create visualizations
     print(f"Creating visualization plots in {plots_folder}...")
-    visualize_contamination(results, plots_folder)
-    
-    print(f"Creating enhanced visualization plots in {plots_folder}...")
-    visualize_contamination_enhanced(results, plots_folder)
+    visualize_contamination_optimized(results, plots_folder)
     
     # Save detailed report
     print(f"Saving detailed contamination report to {report_file}...")
     save_contamination_report(results, report_file)
     
-    print("Done!")
+    # Print total runtime
+    elapsed_time = time.time() - start_time
+    print(f"Done! Total runtime: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
