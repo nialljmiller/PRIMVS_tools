@@ -708,6 +708,7 @@ class PrimvsTessCrossMatch:
         proposal_targets_path = os.path.join(self.output_dir, 'tess_proposal_targets.csv')
         proposal_targets.to_csv(proposal_targets_path, index=False)
         print(f"Proposal-formatted target list saved to: {proposal_targets_path}")
+        print(f"Proposal-formatted target list len: {len(final_targets)}")
         
         return self.target_list
 
