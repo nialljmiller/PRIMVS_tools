@@ -658,7 +658,7 @@ class PrimvsTessCrossMatch:
         # Filter to objects with a TIC match and that are in a Cycle 8 sector (tess_sectors != "0")
         pool = self.crossmatch_results[
             (self.crossmatch_results['in_tic'] == True) &
-            (self.crossmatch_results['tess_sectors'] != "0")
+            (self.crossmatch_results['tess_sectors'] != "69420")
         ].copy()
         
         if pool.empty:
@@ -1016,7 +1016,7 @@ class PrimvsTessCrossMatch:
         self.generate_target_list()
         self.generate_summary_plots()
 
-        save_lightcurves_to_csv(target_path)
+        #save_lightcurves_to_csv(target_path)
 
         #self.populate_tess_sectors_equatorial()
         end_time = time.time()
