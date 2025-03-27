@@ -1,0 +1,592 @@
+2025-03-19 18:33:33,350 - INFO - Initialized cross-match with search radius: 30 arcsec
+2025-03-19 18:33:33,350 - INFO - Output directory: ./primvs_tess_crossmatch
+2025-03-19 18:33:33,374 - INFO - PRIMVS file contains 5688426 sources in HDU 1
+2025-03-19 18:33:33,395 - INFO - Available columns: uniqueid, sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error...
+2025-03-19 18:33:33,396 - INFO - Starting cross-match with 569 batches (batch size: 10000)
+2025-03-19 18:33:34,635 - INFO - Processing chunk with 10000 sources (0 to 9999)
+2025-03-19 18:33:34,669 - INFO - Processing chunk with 10000 sources (10000 to 19999)
+2025-03-19 18:33:34,698 - INFO - Processing chunk with 10000 sources (30000 to 39999)
+2025-03-19 18:33:34,732 - INFO - Processing chunk with 10000 sources (20000 to 29999)
+2025-03-19 18:33:34,736 - INFO - Processing chunk with 10000 sources (40000 to 49999)
+2025-03-19 18:33:34,763 - INFO - Processing chunk with 10000 sources (50000 to 59999)
+2025-03-19 18:33:34,812 - INFO - Processing chunk with 10000 sources (70000 to 79999)
+2025-03-19 18:33:34,843 - INFO - Processing chunk with 10000 sources (60000 to 69999)
+2025-03-19 18:36:38,832 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 18:46:59,039 - INFO - Initialized cross-match with search radius: 30 arcsec
+2025-03-19 18:46:59,039 - INFO - Output directory: ./primvs_tess_crossmatch
+2025-03-19 18:46:59,039 - INFO - Using 96 CPU cores for processing
+2025-03-19 18:46:59,071 - INFO - PRIMVS file contains 5688426 sources in HDU 1
+2025-03-19 18:46:59,091 - INFO - Available columns: uniqueid, sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error...
+2025-03-19 18:46:59,092 - INFO - Starting cross-match with 569 batches (batch size: 10000)
+2025-03-19 18:47:01,901 - INFO - Processing chunk with 10000 sources (40000 to 49999)
+2025-03-19 18:47:01,914 - INFO - Processing chunk with 10000 sources (0 to 9999)
+2025-03-19 18:47:02,077 - INFO - Processing chunk with 10000 sources (20000 to 29999)
+2025-03-19 18:47:02,095 - INFO - Processing chunk with 10000 sources (10000 to 19999)
+2025-03-19 18:47:02,454 - INFO - Processing chunk with 10000 sources (130000 to 139999)
+2025-03-19 18:47:03,183 - INFO - Processing chunk with 10000 sources (90000 to 99999)
+2025-03-19 18:47:03,190 - INFO - Processing chunk with 10000 sources (50000 to 59999)
+2025-03-19 18:47:03,769 - INFO - Processing chunk with 10000 sources (70000 to 79999)
+2025-03-19 18:47:03,813 - INFO - Processing chunk with 10000 sources (110000 to 119999)
+2025-03-19 18:47:04,049 - INFO - Processing chunk with 10000 sources (30000 to 39999)
+2025-03-19 18:47:04,581 - INFO - Processing chunk with 10000 sources (80000 to 89999)
+2025-03-19 18:47:04,629 - INFO - Processing chunk with 10000 sources (60000 to 69999)
+2025-03-19 18:47:04,720 - INFO - Processing chunk with 10000 sources (160000 to 169999)
+2025-03-19 18:47:05,032 - INFO - Processing chunk with 10000 sources (100000 to 109999)
+2025-03-19 18:47:05,075 - INFO - Processing chunk with 10000 sources (190000 to 199999)
+2025-03-19 18:47:05,081 - INFO - Processing chunk with 10000 sources (150000 to 159999)
+2025-03-19 18:47:05,138 - INFO - Processing chunk with 10000 sources (140000 to 149999)
+2025-03-19 18:47:05,253 - INFO - Processing chunk with 10000 sources (120000 to 129999)
+2025-03-19 18:47:05,527 - INFO - Processing chunk with 10000 sources (170000 to 179999)
+2025-03-19 18:47:05,764 - INFO - Processing chunk with 10000 sources (200000 to 209999)
+2025-03-19 18:47:06,213 - INFO - Processing chunk with 10000 sources (180000 to 189999)
+2025-03-19 18:47:06,244 - INFO - Processing chunk with 10000 sources (240000 to 249999)
+2025-03-19 18:47:11,334 - INFO - Processing chunk with 10000 sources (210000 to 219999)
+2025-03-19 18:47:11,540 - INFO - Processing chunk with 10000 sources (220000 to 229999)
+2025-03-19 18:47:11,780 - INFO - Processing chunk with 10000 sources (260000 to 269999)
+2025-03-19 18:47:11,852 - INFO - Processing chunk with 10000 sources (230000 to 239999)
+2025-03-19 18:47:12,002 - INFO - Processing chunk with 10000 sources (290000 to 299999)
+2025-03-19 18:47:12,252 - INFO - Processing chunk with 10000 sources (250000 to 259999)
+2025-03-19 18:47:12,376 - INFO - Processing chunk with 10000 sources (280000 to 289999)
+2025-03-19 18:47:12,850 - INFO - Processing chunk with 10000 sources (330000 to 339999)
+2025-03-19 18:47:12,920 - INFO - Processing chunk with 10000 sources (310000 to 319999)
+2025-03-19 18:47:12,952 - INFO - Processing chunk with 10000 sources (270000 to 279999)
+2025-03-19 18:47:13,887 - INFO - Processing chunk with 10000 sources (300000 to 309999)
+2025-03-19 18:47:15,051 - INFO - Processing chunk with 10000 sources (320000 to 329999)
+2025-03-19 18:47:17,614 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:17,852 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:19,947 - INFO - Processing chunk with 10000 sources (340000 to 349999)
+2025-03-19 18:47:20,344 - INFO - Processing chunk with 10000 sources (350000 to 359999)
+2025-03-19 18:47:20,653 - INFO - Processing chunk with 10000 sources (360000 to 369999)
+2025-03-19 18:47:20,763 - INFO - Processing chunk with 10000 sources (460000 to 469999)
+2025-03-19 18:47:21,506 - INFO - Processing chunk with 10000 sources (370000 to 379999)
+2025-03-19 18:47:21,553 - INFO - Processing chunk with 10000 sources (450000 to 459999)
+2025-03-19 18:47:21,580 - INFO - Processing chunk with 10000 sources (390000 to 399999)
+2025-03-19 18:47:21,972 - INFO - Processing chunk with 10000 sources (380000 to 389999)
+2025-03-19 18:47:22,210 - INFO - Processing chunk with 10000 sources (620000 to 629999)
+2025-03-19 18:47:22,216 - INFO - Processing chunk with 10000 sources (420000 to 429999)
+2025-03-19 18:47:22,223 - INFO - Processing chunk with 10000 sources (400000 to 409999)
+2025-03-19 18:47:22,246 - INFO - Processing chunk with 10000 sources (550000 to 559999)
+2025-03-19 18:47:22,350 - INFO - Processing chunk with 10000 sources (880000 to 889999)
+2025-03-19 18:47:22,470 - INFO - Processing chunk with 10000 sources (860000 to 869999)
+2025-03-19 18:47:22,538 - INFO - Processing chunk with 10000 sources (680000 to 689999)
+2025-03-19 18:47:25,564 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:25,621 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:25,681 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:25,745 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:25,751 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:25,763 - INFO - Processing chunk with 10000 sources (430000 to 439999)
+2025-03-19 18:47:25,822 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:26,174 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:26,175 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:27,858 - INFO - Processing chunk with 10000 sources (840000 to 849999)
+2025-03-19 18:47:28,325 - INFO - Processing chunk with 10000 sources (410000 to 419999)
+2025-03-19 18:47:29,603 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:30,277 - INFO - Processing chunk with 10000 sources (470000 to 479999)
+2025-03-19 18:47:31,699 - INFO - Processing chunk with 10000 sources (910000 to 919999)
+2025-03-19 18:47:33,349 - INFO - Processing chunk with 10000 sources (740000 to 749999)
+2025-03-19 18:47:33,797 - INFO - Processing chunk with 10000 sources (540000 to 549999)
+2025-03-19 18:47:34,114 - INFO - Processing chunk with 10000 sources (530000 to 539999)
+2025-03-19 18:47:34,217 - INFO - Processing chunk with 10000 sources (760000 to 769999)
+2025-03-19 18:47:34,423 - INFO - Processing chunk with 10000 sources (890000 to 899999)
+2025-03-19 18:47:34,886 - INFO - Processing chunk with 10000 sources (520000 to 529999)
+2025-03-19 18:47:34,928 - INFO - Processing chunk with 10000 sources (820000 to 829999)
+2025-03-19 18:47:35,222 - WARNING - Error in individual query for source 9352151003479: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:35,399 - WARNING - Error in individual query for source 8938542045831: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:35,768 - WARNING - Error in individual query for source 8741895030762: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:35,884 - INFO - Processing chunk with 10000 sources (900000 to 909999)
+2025-03-19 18:47:35,897 - WARNING - Error in individual query for source 8741895030762: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:35,994 - INFO - Processing chunk with 10000 sources (570000 to 579999)
+2025-03-19 18:47:36,035 - WARNING - Error in individual query for source 9601970003904: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,107 - WARNING - Error in individual query for source 8741895030762: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,121 - INFO - Processing chunk with 10000 sources (810000 to 819999)
+2025-03-19 18:47:36,207 - WARNING - Error in individual query for source 9601970003904: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,349 - WARNING - Error in individual query for source 9647057020144: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,350 - WARNING - Error in individual query for source 8872975005938: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,351 - WARNING - Error in individual query for source 9765839046519: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,485 - WARNING - Error in individual query for source 8872975005938: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:36,486 - WARNING - Error in individual query for source 9741245043746: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:37,008 - WARNING - Error in individual query for source 10195850000014: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:37,045 - WARNING - Error in individual query for source 10808957092656: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:37,453 - WARNING - Error in individual query for source 10195850000014: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:37,481 - WARNING - Error in individual query for source 10808957092656: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:37,805 - INFO - Processing chunk with 10000 sources (440000 to 449999)
+2025-03-19 18:47:39,040 - INFO - Processing chunk with 10000 sources (660000 to 669999)
+2025-03-19 18:47:39,162 - WARNING - Error in individual query for source 9458597038856: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,573 - WARNING - Error in individual query for source 10686348100250: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,573 - WARNING - Error in individual query for source 9155525015057: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,577 - WARNING - Error in individual query for source 9524152063088: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,588 - WARNING - Error in individual query for source 9442239032359: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,684 - WARNING - Error in individual query for source 11819309060729: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,872 - WARNING - Error in individual query for source 9155525015057: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,874 - WARNING - Error in individual query for source 10872346078206: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,911 - WARNING - Error in individual query for source 9520160003772: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:39,926 - INFO - Processing chunk with 10000 sources (720000 to 729999)
+2025-03-19 18:47:40,113 - WARNING - Error in individual query for source 9610152034778: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:40,231 - WARNING - Error in individual query for source 9286554029211: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:40,282 - WARNING - Error in individual query for source 10838949081156: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:40,443 - WARNING - Error in individual query for source 9610152034778: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:40,939 - WARNING - Error in individual query for source 9057281052207: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:40,940 - WARNING - Error in individual query for source 9335712046117: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:40,956 - WARNING - Error in individual query for source 9323547000178: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,071 - WARNING - Error in individual query for source 8799227024439: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,096 - WARNING - Error in individual query for source 9405412096721: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,103 - WARNING - Error in individual query for source 9696240048762: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,109 - WARNING - Error in individual query for source 9323547000178: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,141 - WARNING - Error in individual query for source 11055806086331: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,148 - WARNING - Error in individual query for source 9061329012465: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,253 - WARNING - Error in individual query for source 11422101086473: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,281 - WARNING - Error in individual query for source 8549411045015: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,336 - WARNING - Error in individual query for source 8799227024439: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,392 - WARNING - Error in individual query for source 9696240048762: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,435 - WARNING - Error in individual query for source 9892830029699: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:41,673 - WARNING - Error in individual query for source 9085927022380: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,121 - WARNING - Error in individual query for source 9704356052553: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,122 - WARNING - Error in individual query for source 8635356043530: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,129 - WARNING - Error in individual query for source 8901630042411: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,154 - WARNING - Error in individual query for source 8602578003079: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,181 - WARNING - Error in individual query for source 8799227024439: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,350 - WARNING - Error in individual query for source 9704356052553: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,373 - WARNING - Error in individual query for source 8901632003559: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,422 - WARNING - Error in individual query for source 10861229011992: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,492 - WARNING - Error in individual query for source 10678573130470: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,533 - WARNING - Error in individual query for source 9245627045354: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,597 - WARNING - Error in individual query for source 10721212105013: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,628 - WARNING - Error in individual query for source 11002898046225: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,641 - WARNING - Error in individual query for source 9499567042095: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,672 - WARNING - Error in individual query for source 10421063008798: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,698 - WARNING - Error in individual query for source 10486585076736: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,728 - WARNING - Error in individual query for source 9708474047277: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,788 - WARNING - Error in individual query for source 9499567042095: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,796 - WARNING - Error in individual query for source 11002898046225: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,803 - INFO - Processing chunk with 10000 sources (870000 to 879999)
+2025-03-19 18:47:42,855 - WARNING - Error in individual query for source 10519278036157: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,858 - WARNING - Error in individual query for source 8709191029143: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,868 - INFO - Processing chunk with 10000 sources (950000 to 959999)
+2025-03-19 18:47:42,882 - WARNING - Error in individual query for source 9708474047277: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:42,901 - WARNING - Error in individual query for source 9524110000219: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,007 - WARNING - Error in individual query for source 11202360098436: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,063 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:43,304 - WARNING - Error in individual query for source 9216964057295: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,310 - WARNING - Error in individual query for source 9270193044890: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,318 - WARNING - Error in individual query for source 9540570007881: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,320 - WARNING - Error in individual query for source 9552824024203: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,333 - WARNING - Error in individual query for source 8709191029143: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,337 - WARNING - Error in individual query for source 9397353004194: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,341 - WARNING - Error in individual query for source 10241014007496: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,356 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:43,404 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:43,406 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:43,473 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:43,517 - WARNING - Error in individual query for source 10126213149194: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,610 - WARNING - Error in individual query for source 9765895034636: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,649 - INFO - Processing chunk with 10000 sources (630000 to 639999)
+2025-03-19 18:47:43,689 - WARNING - Error in individual query for source 10244999108977: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,744 - WARNING - Error in individual query for source 11202360098436: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,751 - WARNING - Error in individual query for source 9552824024203: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,763 - WARNING - Error in individual query for source 9229284021637: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,764 - WARNING - Error in individual query for source 8844349055836: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,765 - WARNING - Error in individual query for source 9540570007881: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,766 - WARNING - Error in individual query for source 8942568005174: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,767 - WARNING - Error in individual query for source 9081872000855: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,774 - WARNING - Error in individual query for source 8917943102007: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,791 - WARNING - Error in individual query for source 9909146004826: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,803 - WARNING - Error in individual query for source 8832027008031: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,812 - INFO - Processing chunk with 10000 sources (600000 to 609999)
+2025-03-19 18:47:43,876 - WARNING - Error in individual query for source 9663452030916: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,924 - WARNING - Error in individual query for source 9823178025538: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,959 - WARNING - Error in individual query for source 10142592030600: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:43,963 - WARNING - Error in individual query for source 8627241027955: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,107 - WARNING - Error in individual query for source 11479281042724: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,195 - WARNING - Error in individual query for source 9077763009445: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,267 - WARNING - Error in individual query for source 8565798014383: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,274 - WARNING - Error in individual query for source 8864735003500: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,278 - WARNING - Error in individual query for source 9552899034113: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,289 - INFO - Processing chunk with 10000 sources (510000 to 519999)
+2025-03-19 18:47:44,296 - WARNING - Error in individual query for source 9458621001822: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,303 - WARNING - Error in individual query for source 9012308016613: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,312 - WARNING - Error in individual query for source 8967107031275: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,315 - WARNING - Error in individual query for source 9937786016164: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,375 - WARNING - Error in individual query for source 11543610061004: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,384 - WARNING - Error in individual query for source 9081872000855: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,402 - WARNING - Error in individual query for source 9663452030916: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,404 - WARNING - Error in individual query for source 10155015051939: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,407 - WARNING - Error in individual query for source 9823178025538: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,430 - WARNING - Error in individual query for source 8627241027955: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,443 - WARNING - Error in individual query for source 11905603057775: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,453 - WARNING - Error in individual query for source 11520482018571: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,470 - WARNING - Error in individual query for source 9028563009805: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,485 - WARNING - Error in individual query for source 9008118023834: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,536 - WARNING - Error in individual query for source 9409574088365: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,548 - WARNING - Error in individual query for source 11853472086464: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,562 - WARNING - Error in individual query for source 8967107031275: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,589 - WARNING - Error in individual query for source 9937786016164: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,602 - WARNING - Error in individual query for source 9081872000855: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,603 - INFO - Processing chunk with 10000 sources (780000 to 789999)
+2025-03-19 18:47:44,629 - WARNING - Error in individual query for source 9458706037565: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,641 - WARNING - Error in individual query for source 9663452030916: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,669 - WARNING - Error in individual query for source 10396499064753: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,700 - WARNING - Error in individual query for source 9130991027280: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,707 - WARNING - Error in individual query for source 8934399042581: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,729 - WARNING - Error in individual query for source 9868176024977: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,816 - WARNING - Error in individual query for source 11879811060756: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,816 - INFO - Processing chunk with 10000 sources (580000 to 589999)
+2025-03-19 18:47:44,828 - WARNING - Error in individual query for source 9933764032946: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,834 - WARNING - Error in individual query for source 11062760044238: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,845 - WARNING - Error in individual query for source 9028563009805: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,885 - WARNING - Error in individual query for source 8598499011981: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,886 - WARNING - Error in individual query for source 8967111001497: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,887 - WARNING - Error in individual query for source 9008118023834: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,932 - WARNING - Error in individual query for source 10721262109886: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:44,958 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:44,967 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:44,983 - WARNING - Error in individual query for source 9081872000855: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,006 - WARNING - Error in individual query for source 9106486094631: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,020 - WARNING - Error in individual query for source 10257257030951: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,086 - INFO - Processing chunk with 10000 sources (480000 to 489999)
+2025-03-19 18:47:45,100 - WARNING - Error in individual query for source 9933709005123: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,100 - WARNING - Error in individual query for source 9094135043524: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,104 - WARNING - Error in individual query for source 9548797002150: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,219 - WARNING - Error in individual query for source 9130991027280: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,301 - WARNING - Error in individual query for source 9585649000623: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,325 - WARNING - Error in individual query for source 9294830055899: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,331 - WARNING - Error in individual query for source 10212228042414: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,338 - WARNING - Error in individual query for source 9561013045279: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,400 - WARNING - Error in individual query for source 9229280033798: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,411 - WARNING - Error in individual query for source 11251716065479: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,480 - WARNING - Error in individual query for source 9941926017496: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,493 - WARNING - Error in individual query for source 11215645136728: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,549 - WARNING - Error in individual query for source 11663848075972: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,552 - WARNING - Error in individual query for source 8967111001497: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,561 - WARNING - Error in individual query for source 9057260041849: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,574 - WARNING - Error in individual query for source 9352183048598: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,576 - WARNING - Error in individual query for source 8512473020755: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,577 - WARNING - Error in individual query for source 8598499011981: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,597 - WARNING - Error in individual query for source 8635394046151: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,647 - WARNING - Error in individual query for source 9081872000855: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,664 - WARNING - Error in individual query for source 9339858019358: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,688 - WARNING - Error in individual query for source 10257257030951: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,689 - WARNING - Error in individual query for source 10985091056859: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,701 - WARNING - Error in individual query for source 9245699003807: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,715 - WARNING - Error in individual query for source 9933709005123: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,721 - WARNING - Error in individual query for source 9548797002150: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,742 - INFO - Processing chunk with 10000 sources (940000 to 949999)
+2025-03-19 18:47:45,805 - WARNING - Error in individual query for source 9266169005249: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,808 - WARNING - Error in individual query for source 9716785038997: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,822 - WARNING - Error in individual query for source 11297047076123: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,828 - WARNING - Error in individual query for source 9307134003918: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,843 - WARNING - Error in individual query for source 9229280033798: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,872 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:45,892 - WARNING - Error in individual query for source 9561081037297: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,957 - WARNING - Error in individual query for source 9950152031324: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,990 - WARNING - Error in individual query for source 8848445075155: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:45,996 - WARNING - Error in individual query for source 9692121022442: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,001 - WARNING - Error in individual query for source 9540520043558: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,004 - WARNING - Error in individual query for source 11290620078436: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,039 - WARNING - Error in individual query for source 9057260041849: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,040 - WARNING - Error in individual query for source 9360335051656: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,046 - WARNING - Error in individual query for source 8995891116004: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,056 - WARNING - Error in individual query for source 11118075025311: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,060 - WARNING - Error in individual query for source 8823841018819: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,072 - WARNING - Error in individual query for source 9085983003281: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,078 - WARNING - Error in individual query for source 8713211029908: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,087 - WARNING - Error in individual query for source 9339858019358: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,167 - WARNING - Error in individual query for source 11094012116067: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,178 - WARNING - Error in individual query for source 9245699003807: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,194 - WARNING - Error in individual query for source 9606122003578: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,208 - WARNING - Error in individual query for source 10331152022331: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,250 - WARNING - Error in individual query for source 8774672026821: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,263 - WARNING - Error in individual query for source 9036776018725: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,313 - WARNING - Error in individual query for source 11145311097674: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,358 - WARNING - Error in individual query for source 11297047076123: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,371 - WARNING - Error in individual query for source 8340468072984: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,380 - WARNING - Error in individual query for source 9229280033798: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,404 - WARNING - Error in individual query for source 9561081037297: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,437 - WARNING - Error in individual query for source 9520160003772: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,468 - WARNING - Error in individual query for source 9274343057323: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,473 - WARNING - Error in individual query for source 9282502012543: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,525 - WARNING - Error in individual query for source 9077759010466: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,527 - WARNING - Error in individual query for source 9732970044025: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,527 - WARNING - Error in individual query for source 9987030103835: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,528 - WARNING - Error in individual query for source 11319395108977: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,534 - WARNING - Error in individual query for source 8823841018819: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,535 - WARNING - Error in individual query for source 9950106027392: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,560 - WARNING - Error in individual query for source 9380839045903: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,561 - WARNING - Error in individual query for source 11162180073303: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,563 - WARNING - Error in individual query for source 9085983003281: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,580 - WARNING - Error in individual query for source 9294821022861: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,604 - WARNING - Error in individual query for source 9339858019358: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,642 - WARNING - Error in individual query for source 11241955085369: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,663 - WARNING - Error in individual query for source 9221045052677: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,689 - WARNING - Error in individual query for source 9606122003578: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,692 - WARNING - Error in individual query for source 10331152022331: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,729 - WARNING - Error in individual query for source 9245699003807: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,760 - WARNING - Error in individual query for source 9163816004643: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,786 - WARNING - Error in individual query for source 9507814033445: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,790 - WARNING - Error in individual query for source 11360402017358: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,799 - WARNING - Error in individual query for source 9388981009063: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,863 - WARNING - Error in individual query for source 8909765027850: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:46,869 - WARNING - Error in individual query for source 8627224048586: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,285 - WARNING - Error in individual query for source 9520160003772: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,286 - WARNING - Error in individual query for source 9028584048030: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,291 - WARNING - Error in individual query for source 9282502012543: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,292 - WARNING - Error in individual query for source 9741252015478: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,324 - WARNING - Error in individual query for source 11322588121876: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,324 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,331 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,331 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 18:47:47,341 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,380 - WARNING - Error in individual query for source 9987030103835: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,496 - WARNING - Error in individual query for source 9339858019358: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,497 - WARNING - Error in individual query for source 9294821022861: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,503 - WARNING - Error in individual query for source 9016346000403: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,506 - WARNING - Error in individual query for source 11228829073461: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,522 - WARNING - Error in individual query for source 9245699003807: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,549 - WARNING - Error in individual query for source 9229264031391: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,562 - WARNING - Error in individual query for source 11168936004262: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,614 - WARNING - Error in individual query for source 10470230067660: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,615 - WARNING - Error in individual query for source 9520160003772: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,625 - WARNING - Error in individual query for source 9094134020116: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,629 - WARNING - Error in individual query for source 9585551096360: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,666 - WARNING - Error in individual query for source 8979500098889: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,705 - WARNING - Error in individual query for source 8524803053239: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,737 - WARNING - Error in individual query for source 8799170005296: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,773 - WARNING - Error in individual query for source 9724866002260: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,811 - WARNING - Error in individual query for source 9728947042394: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,887 - WARNING - Error in individual query for source 8635444091631: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,887 - WARNING - Error in individual query for source 11631081013956: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,905 - WARNING - Error in individual query for source 9384885022099: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,919 - WARNING - Error in individual query for source 9765808023924: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,920 - WARNING - Error in individual query for source 11303414010457: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,921 - WARNING - Error in individual query for source 8909789003219: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,921 - WARNING - Error in individual query for source 9315369005029: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,922 - WARNING - Error in individual query for source 9765866014291: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,928 - WARNING - Error in individual query for source 9368503049650: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,929 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,930 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,931 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,934 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,935 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,942 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,943 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:47,945 - WARNING - Error in individual query for source 9720771024948: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:47,963 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,048 - WARNING - Error in individual query for source 8983468009695: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,075 - WARNING - Error in individual query for source 8524803053239: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,158 - WARNING - Error in individual query for source 9728947042394: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,159 - WARNING - Error in individual query for source 9892830029699: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,160 - WARNING - Error in individual query for source 9724866002260: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,169 - WARNING - Error in individual query for source 11611680122126: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,196 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,301 - WARNING - Error in individual query for source 9823247022603: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,302 - WARNING - Error in individual query for source 9384885022099: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,302 - WARNING - Error in individual query for source 9585551096360: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,322 - WARNING - Error in individual query for source 11821821083912: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,323 - WARNING - Error in individual query for source 9094134020116: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,338 - WARNING - Error in individual query for source 11428164060761: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,349 - WARNING - Error in individual query for source 9995224008630: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,354 - WARNING - Error in individual query for source 10228638014691: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,356 - WARNING - Error in individual query for source 9016286011084: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,366 - WARNING - Error in individual query for source 11168936004262: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,374 - WARNING - Error in individual query for source 9016346000403: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,400 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,418 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,421 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,422 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,422 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,424 - WARNING - Error in individual query for source 9229264031391: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,425 - WARNING - Error in individual query for source 9765866014291: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,435 - WARNING - Connection pool is full, discarding connection: mast.stsci.edu. Connection pool size: 10
+2025-03-19 18:47:48,491 - WARNING - Error in individual query for source 10470230067660: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,551 - WARNING - Error in individual query for source 9520160003772: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,602 - WARNING - Error in individual query for source 8881228077498: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,611 - WARNING - Error in individual query for source 9286596056412: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,664 - WARNING - Error in individual query for source 8995754068784: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,683 - WARNING - Error in individual query for source 9892830029699: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,689 - WARNING - Error in individual query for source 9200649009709: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 18:47:48,690 - WARNING - Error in individual query for source 9053218035099: 503 Server Error: Service Temporarily Unavailable for url: https://mast.stsci.edu/api/v0/invoke
+2025-03-19 19:09:15,720 - INFO - Initialized cross-match with search radius: 30 arcsec
+2025-03-19 19:09:15,720 - INFO - Output directory: ./primvs_tess_crossmatch
+2025-03-19 19:09:15,720 - INFO - Using 96 CPU cores for processing
+2025-03-19 19:09:15,741 - INFO - PRIMVS file contains 5688426 sources in HDU 1
+2025-03-19 19:09:15,761 - INFO - Available columns: uniqueid, sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error...
+2025-03-19 19:09:15,762 - INFO - Starting cross-match with 569 batches (batch size: 10000)
+2025-03-19 19:09:16,856 - INFO - Processing chunk with 10000 sources (10000 to 19999)
+2025-03-19 19:09:17,559 - INFO - Processing chunk with 10000 sources (30000 to 39999)
+2025-03-19 19:09:17,566 - INFO - Processing chunk with 10000 sources (100000 to 109999)
+2025-03-19 19:09:17,567 - INFO - Processing chunk with 10000 sources (20000 to 29999)
+2025-03-19 19:09:17,643 - INFO - Processing chunk with 10000 sources (0 to 9999)
+2025-03-19 19:09:17,675 - INFO - Processing chunk with 10000 sources (70000 to 79999)
+2025-03-19 19:09:17,685 - INFO - Processing chunk with 10000 sources (90000 to 99999)
+2025-03-19 19:09:19,529 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:10:19,010 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:10:19,012 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:10:19,012 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:10:19,012 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:10:19,060 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:10:19,273 - ERROR - Error reading PRIMVS file: ufunc 'isfinite' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''
+2025-03-19 19:10:19,273 - ERROR - Error getting PRIMVS file info: ufunc 'isfinite' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''
+2025-03-19 19:10:19,273 - ERROR - Cross-match process failed!
+2025-03-19 19:14:31,593 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:14:31,597 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:14:31,597 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:14:31,597 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:14:31,625 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:14:31,735 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:14:31,738 - INFO - Downloading TIC catalog in 5x3 chunks
+2025-03-19 19:14:36,762 - WARNING - Error downloading chunk 1: Unable to find coordinates for name '260.0,-65.0,266.0,-50.0' using https://cds.unistra.fr/cgi-bin/nph-sesame/A?260.0%2C-65.0%2C266.0%2C-50.0. Retrying in 5s...
+2025-03-19 19:14:41,769 - WARNING - Error downloading chunk 1: Unable to find coordinates for name '260.0,-65.0,266.0,-50.0' using https://cds.unistra.fr/cgi-bin/nph-sesame/A?260.0%2C-65.0%2C266.0%2C-50.0. Retrying in 10s...
+2025-03-19 19:14:51,780 - ERROR - Failed to download chunk after 3 retries: Unable to find coordinates for name '260.0,-65.0,266.0,-50.0' using https://cds.unistra.fr/cgi-bin/nph-sesame/A?260.0%2C-65.0%2C266.0%2C-50.0
+2025-03-19 19:14:57,034 - WARNING - Error downloading chunk 2: Unable to find coordinates for name '260.0,-50.0,266.0,-35.0' using https://cds.unistra.fr/cgi-bin/nph-sesame/A?260.0%2C-50.0%2C266.0%2C-35.0. Retrying in 5s...
+2025-03-19 19:15:02,041 - WARNING - Error downloading chunk 2: Unable to find coordinates for name '260.0,-50.0,266.0,-35.0' using https://cds.unistra.fr/cgi-bin/nph-sesame/A?260.0%2C-50.0%2C266.0%2C-35.0. Retrying in 10s...
+2025-03-19 19:15:03,601 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:16:47,319 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:16:47,322 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:16:47,322 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:16:47,322 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:16:47,350 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:16:47,497 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:16:47,500 - INFO - Downloading TIC catalog in 5x3 chunks
+2025-03-19 19:16:47,501 - INFO - Querying TIC around RA=263.000, Dec=-57.500 with radius=581.6 arcmin
+2025-03-19 19:26:48,054 - WARNING - Error downloading chunk 1: Timeout limit of 600 exceeded.. Retrying in 5s...
+2025-03-19 19:26:53,059 - INFO - Querying TIC around RA=263.000, Dec=-57.500 with radius=581.6 arcmin
+2025-03-19 19:36:53,169 - WARNING - Error downloading chunk 1: Timeout limit of 600 exceeded.. Retrying in 10s...
+2025-03-19 19:37:03,179 - INFO - Querying TIC around RA=263.000, Dec=-57.500 with radius=581.6 arcmin
+2025-03-19 19:37:32,843 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:39:16,547 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:39:16,551 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:39:16,551 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:39:16,551 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:39:16,578 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:39:16,684 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:39:16,687 - INFO - Downloading TIC catalog in 5x3 chunks
+2025-03-19 19:39:16,688 - INFO - Querying TIC around RA=263.000, Dec=-57.500 with radius=581.6 arcmin
+2025-03-19 19:40:29,875 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:40:45,928 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:40:45,931 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:40:45,931 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:40:45,931 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:40:45,959 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:40:46,069 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:40:46,072 - INFO - Downloading TIC catalog in 10x5 chunks
+2025-03-19 19:40:46,073 - INFO - Querying TIC around RA=261.500, Dec=-60.500 with radius=341.5 arcmin
+2025-03-19 19:41:02,835 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:41:12,337 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:41:12,340 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:41:12,340 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:41:12,340 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:41:12,368 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:41:12,480 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:41:12,483 - INFO - Downloading TIC catalog in 10x5 chunks
+2025-03-19 19:41:12,484 - INFO - Querying TIC around RA=261.500, Dec=-60.500 with radius=341.5 arcmin
+2025-03-19 19:41:12,551 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:41:26,256 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:41:26,260 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:41:26,260 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:41:26,260 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:41:26,287 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:41:26,396 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:41:26,399 - INFO - Downloading TIC catalog in 100x50 chunks
+2025-03-19 19:41:26,401 - INFO - Querying TIC around RA=260.150, Dec=-64.550 with radius=34.2 arcmin
+2025-03-19 19:42:22,705 - INFO - Downloaded chunk 1/5000: 79456 sources
+2025-03-19 19:42:24,711 - INFO - Querying TIC around RA=260.150, Dec=-63.650 with radius=34.2 arcmin
+2025-03-19 19:43:53,433 - INFO - Downloaded chunk 2/5000: 85635 sources
+2025-03-19 19:43:55,437 - INFO - Querying TIC around RA=260.150, Dec=-62.750 with radius=34.2 arcmin
+2025-03-19 19:46:07,617 - INFO - Downloaded chunk 3/5000: 90662 sources
+2025-03-19 19:46:09,622 - INFO - Querying TIC around RA=260.150, Dec=-61.850 with radius=34.2 arcmin
+2025-03-19 19:46:16,152 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:46:22,372 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:46:22,376 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:46:22,376 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:46:22,376 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:46:22,404 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:46:22,512 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:46:22,515 - INFO - Downloading TIC catalog in 15x10 chunks using parallel processing
+2025-03-19 19:46:22,516 - INFO - Using 12 parallel workers for TIC catalog download
+2025-03-19 19:46:22,516 - ERROR - Unexpected error: name 'concurrent' is not defined
+2025-03-19 19:49:41,478 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:49:41,481 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:49:41,481 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:49:41,481 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:49:41,508 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:49:41,615 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:49:41,618 - INFO - Downloading TIC catalog in 15x10 chunks using parallel processing
+2025-03-19 19:49:41,618 - INFO - Using 12 parallel workers for TIC catalog download
+2025-03-19 19:49:41,618 - ERROR - Unexpected error: name 'concurrent' is not defined
+2025-03-19 19:49:46,655 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:49:46,659 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:49:46,659 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:49:46,659 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:49:46,686 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:49:46,797 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:49:46,812 - INFO - Downloading TIC catalog in 100x50 chunks using parallel processing
+2025-03-19 19:49:46,812 - INFO - Using 24 parallel workers for TIC catalog download
+2025-03-19 19:50:07,589 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:50:07,592 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:50:07,592 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:50:07,592 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:50:07,620 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:50:07,730 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:50:07,744 - INFO - Downloading TIC catalog in 100x50 chunks using parallel processing
+2025-03-19 19:50:07,744 - INFO - Using 24 parallel workers for TIC catalog download
+2025-03-19 19:50:10,953 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 19:50:23,057 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 19:50:23,060 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 19:50:23,060 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 19:50:23,061 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 19:50:23,089 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 19:50:23,197 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 19:50:23,200 - INFO - Downloading TIC catalog in 100x50 chunks
+2025-03-19 19:50:23,202 - INFO - Querying TIC around RA=260.150, Dec=-64.550 with radius=34.2 arcmin
+2025-03-19 19:53:13,938 - INFO - Downloaded chunk 1/5000: 79456 sources
+2025-03-19 19:53:15,944 - INFO - Querying TIC around RA=260.150, Dec=-63.650 with radius=34.2 arcmin
+2025-03-19 19:53:51,224 - INFO - Downloaded chunk 2/5000: 85635 sources
+2025-03-19 19:53:53,228 - INFO - Querying TIC around RA=260.150, Dec=-62.750 with radius=34.2 arcmin
+2025-03-19 19:54:46,639 - INFO - Downloaded chunk 3/5000: 90662 sources
+2025-03-19 19:54:48,644 - INFO - Querying TIC around RA=260.150, Dec=-61.850 with radius=34.2 arcmin
+2025-03-19 19:56:04,464 - INFO - Downloaded chunk 4/5000: 98468 sources
+2025-03-19 19:56:06,469 - INFO - Querying TIC around RA=260.150, Dec=-60.950 with radius=34.2 arcmin
+2025-03-19 19:58:20,281 - INFO - Downloaded chunk 5/5000: 107726 sources
+2025-03-19 19:58:22,286 - INFO - Querying TIC around RA=260.150, Dec=-60.050 with radius=34.2 arcmin
+2025-03-19 20:01:13,279 - INFO - Downloaded chunk 6/5000: 118150 sources
+2025-03-19 20:01:15,283 - INFO - Querying TIC around RA=260.150, Dec=-59.150 with radius=34.2 arcmin
+2025-03-19 20:02:56,299 - INFO - Downloaded chunk 7/5000: 129737 sources
+2025-03-19 20:02:58,304 - INFO - Querying TIC around RA=260.150, Dec=-58.250 with radius=34.2 arcmin
+2025-03-19 20:04:30,750 - INFO - Downloaded chunk 8/5000: 142036 sources
+2025-03-19 20:04:32,754 - INFO - Querying TIC around RA=260.150, Dec=-57.350 with radius=34.2 arcmin
+2025-03-19 20:06:00,005 - INFO - Downloaded chunk 9/5000: 153098 sources
+2025-03-19 20:06:02,008 - INFO - Querying TIC around RA=260.150, Dec=-56.450 with radius=34.2 arcmin
+2025-03-19 20:08:19,532 - INFO - Downloaded chunk 10/5000: 163864 sources
+2025-03-19 20:08:21,536 - INFO - Querying TIC around RA=260.150, Dec=-55.550 with radius=34.2 arcmin
+2025-03-19 20:11:07,543 - INFO - Downloaded chunk 11/5000: 176080 sources
+2025-03-19 20:11:09,547 - INFO - Querying TIC around RA=260.150, Dec=-54.650 with radius=34.2 arcmin
+2025-03-19 20:13:29,476 - INFO - Downloaded chunk 12/5000: 191416 sources
+2025-03-19 20:13:31,480 - INFO - Querying TIC around RA=260.150, Dec=-53.750 with radius=34.2 arcmin
+2025-03-19 20:15:44,190 - INFO - Downloaded chunk 13/5000: 208191 sources
+2025-03-19 20:15:46,194 - INFO - Querying TIC around RA=260.150, Dec=-52.850 with radius=34.2 arcmin
+2025-03-19 20:17:56,951 - INFO - Downloaded chunk 14/5000: 229596 sources
+2025-03-19 20:17:58,955 - INFO - Querying TIC around RA=260.150, Dec=-51.950 with radius=34.2 arcmin
+2025-03-19 20:19:54,409 - INFO - Downloaded chunk 15/5000: 266044 sources
+2025-03-19 20:19:56,414 - INFO - Querying TIC around RA=260.150, Dec=-51.050 with radius=34.2 arcmin
+2025-03-19 20:23:39,405 - INFO - Downloaded chunk 16/5000: 313893 sources
+2025-03-19 20:23:41,409 - INFO - Querying TIC around RA=260.150, Dec=-50.150 with radius=34.2 arcmin
+2025-03-19 20:26:14,735 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 20:26:18,760 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 20:26:18,763 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 20:26:18,763 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 20:26:18,763 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 20:26:18,791 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 20:26:18,903 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 20:26:18,906 - INFO - Downloading TIC catalog in 100x50 chunks
+2025-03-19 20:26:18,907 - INFO - Querying TIC around RA=260.150, Dec=-64.550 with radius=34.2 arcmin
+2025-03-19 20:26:26,201 - WARNING - Process interrupted by user. Saving partial results...
+2025-03-19 20:27:35,938 - INFO - Using 96 CPU cores for parallel processing
+2025-03-19 20:27:35,942 - INFO - Initialized cross-match with search radius: 30.0 arcsec
+2025-03-19 20:27:35,942 - INFO - Output directory: /beegfs/car/njm/PRIMVS/tess_crossmatch
+2025-03-19 20:27:35,942 - INFO - VVV bounds: {'ra_min': 260.0, 'ra_max': 290.0, 'dec_min': -65.0, 'dec_max': -20.0}
+2025-03-19 20:27:35,969 - INFO - Available columns in PRIMVS file: sourceid, ra, ra_error, dec, dec_error, l, b, parallax, parallax_error, pmra...
+2025-03-19 20:27:36,077 - WARNING - Couldn't extract valid RA/Dec from sample. Using VVV bounds.
+2025-03-19 20:27:36,079 - INFO - Downloading TIC catalog in 100x50 chunks
+2025-03-19 20:27:36,081 - INFO - Querying TIC around RA=260.150, Dec=-64.550 with radius=34.2 arcmin
+2025-03-19 20:28:18,924 - INFO - Downloaded chunk 1/5000: 79456 sources
+2025-03-19 20:28:20,930 - INFO - Querying TIC around RA=260.150, Dec=-63.650 with radius=34.2 arcmin
+2025-03-19 20:29:03,070 - WARNING - Process interrupted by user. Saving partial results...
