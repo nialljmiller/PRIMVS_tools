@@ -880,7 +880,7 @@ def main():
         "cadence": "short",
         "max_cycles": 1,  # Only use the most recent cycle
         "specific_tic_ids": [],  # Leave empty to use default targets, or add specific TIC IDs
-        "num_workers": 4  # Number of worker processes for parallel computation
+        "num_workers": 90  # Number of worker processes for parallel computation
     }
     
     # Create output directory
