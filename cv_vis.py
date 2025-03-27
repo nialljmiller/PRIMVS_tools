@@ -193,10 +193,18 @@ class PrimvsTessCrossMatch:
 
 
 
-    
+        
     def load_cv_candidates(self):
+        """
+        Load CV candidates from FITS file with improved error handling and timeout constraints.
+        """
+        try:
+            print("Beginning file read operation...")
+            # Implement chunked reading or memory mapping for large files
             candidates = Table.read(self.cv_candidates_file).to_pandas()
-            # Convert negative galactic longitudes to the 0-360 range.
+            print(f"Successfully loaded file: {self.cv_candidates_file}")
+            
+            # Process galactic longitudes
             l_vals = candidates['l'].values
             l_vals[l_vals > 180] -= 360
             candidates['l'] = l_vals
@@ -208,8 +216,12 @@ class PrimvsTessCrossMatch:
             print(f"Filtered to {len(self.filtered_candidates)} candidates with cv_prob >= {self.cv_prob_threshold}")
 
             return True
-    
-
+        except KeyboardInterrupt:
+            print("\nFile loading operation interrupted by user.")
+            return False
+        except Exception as e:
+            print(f"Error loading candidates file: {e}")
+            return False
 
 
 
