@@ -690,7 +690,7 @@ class PrimvsTessCrossMatch:
         if len(final_targets) < 100:
             print(f"Warning: Final target list has only {len(final_targets)} targets.")
         else:
-            final_targets = final_targets.head(100)
+            final_targets = final_targets#.head(100)
         
         self.target_list = final_targets.copy()
         
