@@ -190,6 +190,10 @@ class PrimvsTessCrossMatch:
         self.crossmatch_results = None
         self.target_list = None  # final 100 targets
     
+
+
+
+    
     def load_cv_candidates(self):
             candidates = Table.read(self.cv_candidates_file).to_pandas()
             # Convert negative galactic longitudes to the 0-360 range.
@@ -993,8 +997,8 @@ class PrimvsTessCrossMatch:
         self.crossmatch_results = pd.read_csv(crossmatch_path)
         print(f"Reloaded crossmatch results from: {crossmatch_path}")        
         # Populate tess_sectors using the TESSCycle8Overlay geometry
-        self.populate_tess_sectors()
-        self.download_tess_lightcurves()  # Optional: uncomment if needed
+        #self.populate_tess_sectors()
+        #self.download_tess_lightcurves()  # Optional: uncomment if needed
         self.generate_target_list()
         self.generate_summary_plots()
 
